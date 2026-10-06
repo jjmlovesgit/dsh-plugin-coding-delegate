@@ -15,6 +15,8 @@ import {
   inject,
   using,
   apply,
+  hasCommandWriteSignal,
+  evaluateCodeWriteGuard,
 } from '../src/index'
 import { classifyLocally } from '../src/local-classifier'
 import * as path from 'path'
@@ -361,5 +363,36 @@ not ok 3 - PriorityQueue isEmpty
     expect(updated.metadata?.router?.route).toBe('cloud-failover')
     expect(updated.metadata?.router?.failover).toBe(true)
     expect(updated.metadata?.router?.previousProvider).toBe('lm-studio')
+  })
+})
+
+describe('Local-code guard: command-line write detection', () => {
+  const shell = (command: string) => ({ name: 'pwsh', arguments: { command } })
+
+  it('word-anchors its verbs so a delete is not misread as a write', () => {
+    // Regression found by live testing in the desktop app: `Move-Item` is a substring of
+    // `Remove-Item`, so an unanchored alternative classified a plain delete as a write
+    // signal and asked for approval on any command that also named a source file.
+    expect(hasCommandWriteSignal('Remove-Item src/gone.ts')).toBe(false)
+    expect(hasCommandWriteSignal("Remove-Item 'C:\\tmp\\x' -Recurse -Force")).toBe(false)
+  })
+
+  it('still detects the verbs it is meant to detect', () => {
+    expect(hasCommandWriteSignal('Move-Item src/a.ts src/b.ts')).toBe(true)
+    expect(hasCommandWriteSignal('Copy-Item src/a.ts src/b.ts')).toBe(true)
+    expect(hasCommandWriteSignal('New-Item src/a.ts')).toBe(true)
+    expect(hasCommandWriteSignal('cp a.ts b.ts')).toBe(true)
+    expect(hasCommandWriteSignal('git checkout src/index.ts')).toBe(true)
+    expect(hasCommandWriteSignal('sed -i s/a/b/ src/x.ts')).toBe(true)
+  })
+
+  it('asks for approval when a source file is named alongside a write signal', () => {
+    expect(evaluateCodeWriteGuard(shell('cp a.ts b.ts'))?.kind).toBe('ask')
+    expect(evaluateCodeWriteGuard(shell('git checkout src/index.ts'))?.kind).toBe('ask')
+  })
+
+  it('stays silent for read-only commands that name a source file', () => {
+    expect(evaluateCodeWriteGuard(shell('git diff src/index.ts'))).toBeNull()
+    expect(evaluateCodeWriteGuard(shell("Test-Path 'src/index.ts'"))).toBeNull()
   })
 })

@@ -1707,7 +1707,11 @@ const CODE_REFERENCE = /[A-Za-z0-9_\-\\/.]*\.(?:ts|tsx|js|jsx|mjs|cjs|py|rb|go|r
  * fell through to an allow.
  */
 const COMMAND_WRITE_PRIMITIVES =
-  /(?:Set-Content|Add-Content|Clear-Content|Out-File|New-Item|Copy-Item|Move-Item|Rename-Item|WriteAllText|WriteAllBytes|WriteAllLines|writeFileSync|writeFile|createWriteStream|appendFile|copyFileSync|renameSync|shutil\.copy|\.write\s*\(|\bcp\b|\bmv\b|\bcopy\b|\bmove\b|\bren\b|\bdd\b|sed\s+-i|perl\s+-i|git\s+(?:apply|checkout|restore|stash|clean)|robocopy|xcopy|truncate|\btee\b)/i
+  /(?:\bSet-Content\b|\bAdd-Content\b|\bClear-Content\b|\bOut-File\b|\bNew-Item\b|\bCopy-Item\b|\bMove-Item\b|\bRename-Item\b|\bWriteAllText\b|\bWriteAllBytes\b|\bWriteAllLines\b|\bwriteFileSync\b|\bwriteFile\b|\bcreateWriteStream\b|\bappendFile\b|\bcopyFileSync\b|\brenameSync\b|\bshutil\.copy\b|\.write\s*\(|\bcp\b|\bmv\b|\bcopy\b|\bmove\b|\bren\b|\bdd\b|\bsed\s+-i\b|\bperl\s+-i\b|\bgit\s+(?:apply|checkout|restore|stash|clean)\b|\brobocopy\b|\bxcopy\b|\btruncate\b|\btee\b)/i
+// Every alternative is word-anchored deliberately. Unanchored verbs match as SUBSTRINGS of
+// unrelated words: `Move-Item` is a substring of `Remove-Item`, so a plain delete was being
+// classified as a write signal. Anchoring also keeps `writeFile` from being read out of
+// `writeFileSync` and vice versa.
 
 /** Inline program text can write a file the command line never names. */
 const INLINE_EVAL_FLAG = /(?:^|\s)(?:-e|-c|--eval|-Command|-EncodedCommand)(?=\s|$)/i
