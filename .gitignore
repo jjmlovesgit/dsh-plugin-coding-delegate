@@ -20,3 +20,6 @@ tmp_test_*
 
 # rollback copies - git history replaces these
 *.bak*
+
+# external review inputs - kept out of the repository
+report.md

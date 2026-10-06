@@ -1,7 +1,7 @@
 # Security review response
 
-Response to the external static review of revision `7c5d635` (`report.md`, 5 findings:
-2 high, 3 medium).
+Response to the external static review of revision `7c5d635` (5 findings: 2 high, 3 medium).
+The review document itself is an external artifact and is not committed here.
 
 Every finding was re-verified at source level before any change was made, and then against the
 composed DSH host contracts where the review had to leave a question open. The review's line
