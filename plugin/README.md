@@ -249,21 +249,24 @@ every signal.
 
 ### Run verification in a container — advisable
 
-`runVerification` is executed as a command string, and on a sandboxed host the plugin falls
-back to `require()`-ing the test module **into the DSH server process**. Either way, code
-written by the local model runs with the server's privileges and its filesystem.
+`runVerification` is executed as a command string with the full authority of the DSH process,
+and the code under test is written by the local model. It needs a boundary.
 
-That is the largest boundary gap in the plugin. The failures seen in practice were ordinary,
-not crafted: a fixture calling `process.exit()` terminated the host running the tests, and
-`process.exitCode` corrupted the server's own exit code — ten tests passed while the runner
-exited 1. Both are now isolated, but an infinite loop still hangs the server and in-process
-code can still mutate globals. **In-process execution cannot be made safe; it can only be
-made less bad.**
+The plugin does **not** provide one by default: `allowInProcessFallback` is `false`, so when the
+host sandbox denies a piped spawn the verification fails closed and reports a refusal instead of
+`require()`-ing the test module into the DSH server process. Enabling that fallback is worse,
+not better — the failures seen in practice were ordinary, not crafted: a fixture calling
+`process.exit()` terminated the host running the tests, and `process.exitCode` corrupted the
+server's own exit code, so ten tests passed while the runner exited 1. Both are now isolated,
+but an infinite loop still hangs the server and in-process code can still mutate globals.
+**In-process execution cannot be made safe; it can only be made less bad.**
 
-Containerising the verification removes the class rather than the instance — and because
-subprocess spawning works normally inside a container, the in-process fallback never triggers
-at all. Pass the container command as `runVerification` (it is a `delegate_worker` argument,
-not a plugin config key, so the caller supplies it per delegation):
+That is the largest boundary gap in the plugin, and it is why verification belongs in a
+container: that removes the class rather than the instance, and because subprocess spawning works
+normally inside a container the fallback never triggers at all. Pass the container command as
+`runVerification` (it is a `delegate_worker` argument, not a plugin config key, so the caller
+supplies it per delegation — and every such command requires your approval unless you set
+`verificationApproval: 'allow'`):
 
 ```js
 delegate_worker({
@@ -285,6 +288,12 @@ not authorship.
 
 Stated plainly, so this is not over-read:
 
+- The plugin neither installs nor manages a container runtime, and it cannot conjure a boundary
+  the host does not have. With no runtime present, `runVerification` fails closed: verification
+  is **off**, which is safe, but it is not the same as containerised. Check with
+  `docker version` (or `podman info`) before relying on this section.
+- Nothing forces the caller to use a container. The command is model-supplied, so the approval
+  prompt is what catches a plain host command — read it before approving.
 - Docker shares the host kernel. It is a strong boundary, not a guarantee — kernel escapes,
   `--privileged`, and careless mounts all defeat it. For code from genuinely untrusted
   sources, a VM or gVisor-class sandbox is stronger.
