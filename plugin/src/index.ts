@@ -847,6 +847,79 @@ export function evaluateVerificationPolicy(
   }
 }
 
+/**
+ * Run a verification command and capture its output.
+ *
+ * Output is captured through FILE DESCRIPTORS rather than pipes, deliberately. DSH's confined
+ * sandbox modes refuse a piped spawn outright (`spawn EPERM`), which made the ordinary
+ * subprocess path unusable in the default configuration and left the in-process fallback as the
+ * only path that worked -- the wrong trade in every direction, since that fallback executes
+ * model-influenced code inside the server. A descriptor avoids the pipe, so verification runs
+ * as an ordinary child process for everyone, and the fallback is not needed at all.
+ */
+function captureCommandOutput(
+  cmd: string,
+  workspaceDir: string,
+  timeoutMs: number
+): { output: string; exitCode: number; spawnError: any } {
+  const dir = resolveDataDir()
+  const unique = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  const outPath = path.join(dir, `verify-${unique}.stdout`)
+  const errPath = path.join(dir, `verify-${unique}.stderr`)
+
+  let outFd: number | undefined
+  let errFd: number | undefined
+  let result: any = null
+  try {
+    fs.mkdirSync(dir, { recursive: true })
+    outFd = fs.openSync(outPath, 'w')
+    errFd = fs.openSync(errPath, 'w')
+    result = child_process.spawnSync(cmd, {
+      shell: true,
+      cwd: workspaceDir,
+      timeout: timeoutMs,
+      stdio: ['ignore', outFd, errFd] as any,
+    })
+  } catch (err) {
+    result = { error: err, status: null }
+  } finally {
+    for (const fd of [outFd, errFd]) {
+      if (typeof fd === 'number') {
+        try {
+          fs.closeSync(fd)
+        } catch {
+          // already closed
+        }
+      }
+    }
+  }
+
+  const readFile = (file: string): string => {
+    try {
+      return fs.readFileSync(file, 'utf8')
+    } catch {
+      return ''
+    }
+  }
+  const output = (readFile(outPath) + '\n' + readFile(errPath)).trim()
+  for (const file of [outPath, errPath]) {
+    try {
+      fs.rmSync(file, { force: true })
+    } catch {
+      // Best effort: a leftover temp file is not worth failing a verification over.
+    }
+  }
+
+  const spawnError = result?.error ?? null
+  const exitCode = typeof result?.status === 'number' ? result.status : spawnError ? 1 : 0
+
+  return {
+    output: output || (spawnError ? String(spawnError.message || spawnError) : ''),
+    exitCode,
+    spawnError,
+  }
+}
+
 export function runSandboxVerification(
   verificationCommand: string,
   workspaceDir: string = process.cwd(),
@@ -861,20 +934,10 @@ export function runSandboxVerification(
   let spawnError: any = null
   let exitCode = 0
 
-  try {
-    output = child_process.execSync(cmd, {
-      cwd: workspaceDir,
-      timeout: 30000,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    })
-  } catch (err: any) {
-    spawnError = err
-    exitCode = typeof err.status === 'number' ? err.status : 1
-    const stdout = err.stdout ? String(err.stdout) : ''
-    const stderr = err.stderr ? String(err.stderr) : ''
-    output = (stdout + '\n' + stderr).trim() || err.message || String(err)
-  }
+  const captured = captureCommandOutput(cmd, workspaceDir, 30000)
+  output = captured.output
+  spawnError = captured.spawnError
+  exitCode = captured.exitCode
 
   if (
     spawnError &&
@@ -882,9 +945,10 @@ export function runSandboxVerification(
       String(spawnError).includes('EPERM') ||
       String(spawnError).includes('spawn EPERM'))
   ) {
-    // The sandbox refused a piped spawn. The in-process fallback still exists, but it
-    // re-runs model-influenced code inside the SERVER process, so it is opt-in only:
-    // answering a sandbox denial by removing the sandbox inverts the control. Fail closed.
+    // Even a descriptor spawn was refused, so this host blocks verification entirely. The
+    // in-process fallback still exists, but it re-runs model-influenced code inside the
+    // SERVER process, so it is opt-in only: answering a denial by removing the sandbox
+    // inverts the control. Fail closed.
     if (options.allowInProcessFallback === true) {
       output = runInProcessFallback(cmd, workspaceDir)
       return parseTestOutput(output, undefined, {

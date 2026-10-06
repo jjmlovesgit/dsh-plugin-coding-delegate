@@ -251,26 +251,30 @@ Note this is a *mitigation*, not immunity: an assertion message written in prose
 describe intent, and `file:line` still reveals structure. It removes the bulk carrier, not
 every signal.
 
-### Run verification in a container — advisable
+### Verification runs as a subprocess — a container is optional hardening
 
-`runVerification` is executed as a command string with the full authority of the DSH process,
-and the code under test is written by the local model. It needs a boundary.
+`runVerification` is executed as a command string with the authority of the DSH process, and the
+code under test is written by the local model.
 
-The plugin does **not** provide one by default: `allowInProcessFallback` is `false`, so when the
-host sandbox denies a piped spawn the verification fails closed and reports a refusal instead of
-`require()`-ing the test module into the DSH server process. Enabling that fallback is worse,
-not better — the failures seen in practice were ordinary, not crafted: a fixture calling
-`process.exit()` terminated the host running the tests, and `process.exitCode` corrupted the
-server's own exit code, so ten tests passed while the runner exited 1. Both are now isolated,
-but an infinite loop still hangs the server and in-process code can still mutate globals.
-**In-process execution cannot be made safe; it can only be made less bad.**
+**By default it runs as an ordinary child process, and no container is required.** Output is
+captured through file descriptors rather than pipes, because DSH's confined sandbox modes refuse
+a piped spawn outright (`spawn EPERM`). That refusal used to make the subprocess path unusable in
+the default configuration, leaving the in-process fallback as the only one that worked — the
+wrong trade in every direction, since that fallback runs model-written code inside the server.
+Descriptor capture means verification needs no opt-in and no runtime.
 
-That is the largest boundary gap in the plugin, and it is why verification belongs in a
-container: that removes the class rather than the instance, and because subprocess spawning works
-normally inside a container the fallback never triggers at all. Pass the container command as
-`runVerification` (it is a `delegate_worker` argument, not a plugin config key, so the caller
-supplies it per delegation — and every such command requires your approval unless you set
-`verificationApproval: 'allow'`):
+`allowInProcessFallback` stays `false`, and enabling it is worse, not better: the failures seen in
+practice were ordinary, not crafted — a fixture calling `process.exit()` terminated the host
+running the tests, and `process.exitCode` corrupted the server's own exit code, so ten tests
+passed while the runner exited 1. Both are now isolated, but an infinite loop still hangs the
+server and in-process code can still mutate globals. **In-process execution cannot be made safe;
+it can only be made less bad.**
+
+A child process is bounded by your user account rather than by the plugin — the files it can
+write, the network it can reach. The approval prompt is the practical control. To bound it more
+tightly, run the verification inside a **container**: optional hardening for those who have a
+runtime, not a prerequisite. Pass the container command as `runVerification` (it is a
+`delegate_worker` argument, not a plugin config key, so the caller supplies it per delegation):
 
 ```js
 delegate_worker({
@@ -292,10 +296,12 @@ not authorship.
 
 Stated plainly, so this is not over-read:
 
-- The plugin neither installs nor manages a container runtime, and it cannot conjure a boundary
-  the host does not have. With no runtime present, `runVerification` fails closed: verification
-  is **off**, which is safe, but it is not the same as containerised. Check with
-  `docker version` (or `podman info`) before relying on this section.
+- Most operators have no container runtime, and that is fine: the default path is a plain child
+  process and works without one. Containers are for bounding execution more tightly than your own
+  account does. Check with `docker version` (or `podman info`) before relying on the example
+  above.
+- The plugin cannot conjure a boundary the host does not have. If even a descriptor spawn is
+  refused, verification fails closed and reports a refusal rather than executing anything.
 - Nothing forces the caller to use a container. The command is model-supplied, so the approval
   prompt is what catches a plain host command — read it before approving.
 - Docker shares the host kernel. It is a strong boundary, not a guarantee — kernel escapes,
@@ -359,8 +365,9 @@ runs with the full authority of the DSH process. It is therefore gated:
 
 A command that does not run is reported as `status: 'VERIFICATION_NOT_APPROVED'` with a
 `verificationSkipped` reason and `success: false` — an unverified task is never reported as a
-success. `runVerification` is not confined to the workspace, so prefer
-[containerised verification](#run-verification-in-a-container--advisable).
+success. `runVerification` is not confined to the workspace, so read the approval prompt, and see
+[verification runs as a subprocess](#verification-runs-as-a-subprocess--a-container-is-optional-hardening)
+for the container option.
 
 **File writes are contained.** A fenced path or `targetFiles` hint that resolves outside the
 resolved workspace — an absolute path, a `..` segment, or a symlink pointing out of it — is
@@ -403,9 +410,9 @@ npm test          # vitest
 
 - Reading a file into the architect's context is also egress; local-first routing does not
   prevent a cloud model from *seeing* source it is asked to review.
-- `delegate_worker` executes a caller-supplied verification command in the server process, so
-  treat that string as trusted input — and see "Run verification in a container" above for the
-  recommended boundary.
+- `delegate_worker` executes a caller-supplied verification command, by default as a child
+  process with your account's authority. Treat that string as trusted input, and see
+  "Verification runs as a subprocess" above for the container option.
 - Credential detection is pattern-based plus an entropy backstop. It cannot recognise
   confidential material that looks ordinary — proprietary code, customer data or PII are
   caught by neither layer.
