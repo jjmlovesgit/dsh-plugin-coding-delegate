@@ -1,0 +1,8 @@
+- id: dsh-plugin-local-router
+  plugin: 'dsh-plugin-local-router'
+  config:
+    localProvider: 'lm-studio'
+    cloudProvider: 'llm-deepseek'
+    localModel: 'qwen/qwen3.8-27b'
+    cloudModel: 'deepseek-flash'
+    contextThreshold: 8192

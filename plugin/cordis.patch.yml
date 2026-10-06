@@ -1,0 +1,16 @@
+# Applied by DSH when this plugin is bundled into a profile.
+#
+# THIS PATCH REGISTERS THE PLUGIN ONLY. It adds, removes and modifies no LLM provider,
+# no model and no API key -- provider configuration is yours to own.
+#
+# cordis.patch.example.yml ships an UNAPPLIED example (LM Studio + DeepSeek) you can copy
+# from. See README.md, "Configuring providers", for any other OpenAI-compatible endpoint
+# and for a cloud-only setup.
+- insert:
+    - id: local-router
+      name: 'dsh-plugin-local-router'
+      config:
+        localProvider: 'lm-studio'
+        localModel: 'qwen/qwen3.8-27b'
+        cloudProvider: 'deepseek-official'
+        cloudModel: 'deepseek-chat'

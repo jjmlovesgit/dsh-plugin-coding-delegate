@@ -1,0 +1,10 @@
+# Belt-and-braces with package.json "files": never publish sources or local state.
+src/
+tests/
+node_modules/
+*.log
+*.bak*
+dry_run.js
+cordis.patch.yml.bak
+tsconfig.json
+tmp_test_*

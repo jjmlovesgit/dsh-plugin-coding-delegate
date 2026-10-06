@@ -1,0 +1,22 @@
+# dependencies and virtualenvs
+node_modules/
+.venv/
+__pycache__/
+.pytest_cache/
+
+# local secrets and machine state
+.env
+*.log
+savings-ledger.json
+savings-ledger.bak.json
+
+# editor / OS noise
+.DS_Store
+Thumbs.db
+*.swp
+
+# test scratch
+tmp_test_*
+
+# rollback copies - git history replaces these
+*.bak*

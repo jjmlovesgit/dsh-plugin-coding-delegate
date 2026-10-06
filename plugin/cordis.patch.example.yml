@@ -1,0 +1,28 @@
+# EXAMPLE ONLY - NOT APPLIED AUTOMATICALLY.
+#
+# These entries DO modify provider configuration, which is exactly why they are not shipped
+# as an automatic patch. Copy what you need into your DSH profile
+# (profiles/<name>/cordis.patch.yml) or into ~/.dsh/settings.yaml.
+#
+# This is Option 1 from README.md, "Configuring providers": a local LM Studio worker plus
+# DeepSeek Cloud. For any other OpenAI-compatible endpoint (vLLM, Ollama, llama.cpp, a
+# remote gateway, ...) change baseURL and the model id, then point the plugin's
+# localProvider / localModel at it.
+
+- id: llm-pi-ai
+  name: '@deepseek-ai/dsh-llm-pi-ai'
+  config:
+    providers:
+      lm-studio:
+        api: openai-completions
+        baseURL: http://127.0.0.1:1234/v1
+        apiKeyEnv: LM_STUDIO_API_KEY
+        models:
+          - id: qwen/qwen3.8-27b
+            name: 'Qwen 3.8 27B Local'
+            maxTokens: 16384
+
+- id: llm-deepseek
+  name: '@deepseek-ai/dsh-llm-deepseek'
+  config:
+    apiKeyEnv: DEEPSEEK_API_KEY
