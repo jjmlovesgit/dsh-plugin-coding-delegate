@@ -195,6 +195,10 @@ Decision output: `{ provider, model, route, gate, rationale, scores, latencyMs }
 | `emitAllowlist` | `[]` | Extra directories a delegated worker may write into besides the workspace |
 | `allowInProcessFallback` | `false` | Run a denied spawn's verification module inside the server process |
 
+`guardAskPaths` **replaces** the built-in default rather than adding to it. Setting it to
+`["plugin/src/"]` therefore makes `tests/` and `tools/` hard denies: list every path you want to
+stay approval-eligible, e.g. `["plugin/src/", "tests/", "tools/"]`.
+
 ## The `delegate_worker` tool
 
 Dispatches a discrete implementation task to the local worker and returns a structured
