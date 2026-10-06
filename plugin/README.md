@@ -238,6 +238,51 @@ Note this is a *mitigation*, not immunity: an assertion message written in prose
 describe intent, and `file:line` still reveals structure. It removes the bulk carrier, not
 every signal.
 
+### Run verification in a container — advisable
+
+`runVerification` is executed as a command string, and on a sandboxed host the plugin falls
+back to `require()`-ing the test module **into the DSH server process**. Either way, code
+written by the local model runs with the server's privileges and its filesystem.
+
+That is the largest boundary gap in the plugin. The failures seen in practice were ordinary,
+not crafted: a fixture calling `process.exit()` terminated the host running the tests, and
+`process.exitCode` corrupted the server's own exit code — ten tests passed while the runner
+exited 1. Both are now isolated, but an infinite loop still hangs the server and in-process
+code can still mutate globals. **In-process execution cannot be made safe; it can only be
+made less bad.**
+
+Containerising the verification removes the class rather than the instance — and because
+subprocess spawning works normally inside a container, the in-process fallback never triggers
+at all. Pass the container command as `runVerification` (it is a `delegate_worker` argument,
+not a plugin config key, so the caller supplies it per delegation):
+
+```js
+delegate_worker({
+  instruction: '...',
+  targetFiles: ['src/thing.ts'],
+  workspaceDir: '/path/to/workspace',
+  runVerification:
+    'docker run --rm --network none --read-only --tmpfs /tmp ' +
+    '--cap-drop ALL --pids-limit 256 --memory 1g ' +
+    '-v /path/to/workspace:/w -w /w node:22-alpine node /w/tests/thing.test.cjs',
+})
+```
+
+What each flag buys: `--network none` stops executed code from exfiltrating; `--read-only`,
+`--tmpfs /tmp` and `--cap-drop ALL` bound what it can touch; `--pids-limit` and `--memory`
+bound resource abuse; `--rm` makes every run ephemeral. Mount only the workspace — and note a
+read-write mount still lets the worker write code there, because isolation bounds *execution*,
+not authorship.
+
+Stated plainly, so this is not over-read:
+
+- Docker shares the host kernel. It is a strong boundary, not a guarantee — kernel escapes,
+  `--privileged`, and careless mounts all defeat it. For code from genuinely untrusted
+  sources, a VM or gVisor-class sandbox is stronger.
+- It does **not** address egress. What the architect reads is a separate channel, handled by
+  the redaction above.
+- It does **not** change the guard's detection limits, nor stop code appearing in prose.
+
 ## Local-code guard
 
 Once enabled, `write`/`edit`-style tool calls targeting source extensions are refused with a
@@ -305,8 +350,9 @@ npm test          # vitest
 
 - Reading a file into the architect's context is also egress; local-first routing does not
   prevent a cloud model from *seeing* source it is asked to review.
-- `delegate_worker` executes a caller-supplied verification command in the server process;
-  treat that string as trusted input.
+- `delegate_worker` executes a caller-supplied verification command in the server process, so
+  treat that string as trusted input — and see "Run verification in a container" above for the
+  recommended boundary.
 - Credential detection is pattern-based plus an entropy backstop. It cannot recognise
   confidential material that looks ordinary — proprietary code, customer data or PII are
   caught by neither layer.
