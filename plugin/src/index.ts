@@ -39,6 +39,30 @@ export interface PluginConfig {
   guardMode?: 'deny' | 'ask'
   /** Path fragments that downgrade a deny to an approval prompt. */
   guardAskPaths?: string[]
+  /**
+   * What happens to `delegate_worker`'s model-supplied `runVerification` command.
+   * `'ask'` (default) routes it through the approval seam before anything executes;
+   * `'allow'` restores the pre-hardening unattended behaviour; `'deny'` never runs it.
+   */
+  verificationApproval?: 'ask' | 'allow' | 'deny'
+  /**
+   * Verification programs (the command's first token) that skip the prompt under
+   * `verificationApproval: 'ask'`. Weak by construction: it constrains the program,
+   * not its arguments, so listing `node` also permits `node -e "<anything>"`.
+   */
+  verificationAllowlist?: string[]
+  /**
+   * Extra directories a delegated worker may write into besides the resolved session
+   * workspace. Absolute worker paths and `..` escapes outside every allowed root are
+   * refused and reported rather than written.
+   */
+  emitAllowlist?: string[]
+  /**
+   * Run the verification module inside the DSH server process when the sandbox denies
+   * a piped spawn (default false). That fallback executes model-influenced code with
+   * full host authority and can kill the server, so it is opt-in only.
+   */
+  allowInProcessFallback?: boolean
 }
 
 export interface RouterMetadata {
@@ -173,7 +197,13 @@ export const DELEGATE_WORKER_OPENAI_SCHEMA = {
         },
         runVerification: {
           type: 'string',
-          description: 'Optional shell command to verify the output',
+          description:
+            'Optional shell command to verify the output. It executes with the authority of the DSH process and requires operator approval unless verificationApproval is set to allow.',
+        },
+        workspaceDir: {
+          type: 'string',
+          description:
+            'Absolute path of the directory the worker may write into. Defaults to the session workspace; destinations outside it are refused.',
         },
       },
       required: ['taskName', 'instruction'],
@@ -226,10 +256,71 @@ export interface FileEmissionResult {
   bytes: number
 }
 
+/**
+ * Resolve `p` to a canonical path, following symlinks for the part of it that exists.
+ * A destination that does not exist yet has no realpath of its own, so the deepest
+ * existing ancestor is resolved and the remaining segments are re-appended.
+ */
+function canonicalisePath(p: string): string {
+  let current = path.resolve(p)
+  const tail: string[] = []
+  for (;;) {
+    if (fs.existsSync(current)) break
+    const parent = path.dirname(current)
+    if (parent === current) break
+    tail.unshift(path.basename(current))
+    current = parent
+  }
+  try {
+    current = fs.realpathSync(current)
+  } catch {
+    // An unresolvable ancestor is not a reason to trust the path; keep it as written.
+  }
+  return tail.length > 0 ? path.join(current, ...tail) : current
+}
+
+/** True when `candidate` is `root` itself or lives beneath it. Case-insensitive on Windows. */
+export function isPathWithin(root: string, candidate: string): boolean {
+  const flatten = (value: string) => (process.platform === 'win32' ? value.toLowerCase() : value)
+  const from = flatten(path.resolve(root))
+  const to = flatten(path.resolve(candidate))
+  if (from === to) return true
+  const rel = path.relative(from, to)
+  return rel !== '' && rel !== '..' && !rel.startsWith('..' + path.sep) && !path.isAbsolute(rel)
+}
+
+/**
+ * The containment decision for one delegated write. `baseDir` is the session workspace
+ * and `allowedRoots` is the operator's explicit extension list. Both sides are
+ * canonicalised, so a symlink inside the workspace cannot be used to escape it.
+ */
+export function evaluateEmissionPath(
+  resolvedPath: string,
+  baseDir: string,
+  allowedRoots: string[] = []
+): { allowed: boolean; reason?: string } {
+  const canonical = canonicalisePath(resolvedPath)
+  const roots = [baseDir, ...allowedRoots].filter(
+    (root) => typeof root === 'string' && root.trim().length > 0
+  )
+  for (const root of roots) {
+    if (isPathWithin(canonicalisePath(root), canonical)) return { allowed: true }
+  }
+  return {
+    allowed: false,
+    reason:
+      `Refused to write '${resolvedPath}': it resolves to '${canonical}', which is outside the session ` +
+      `workspace '${path.resolve(baseDir)}'` +
+      (allowedRoots.length > 0 ? ` and every configured emitAllowlist root` : '') +
+      `. A delegated worker may only write inside its workspace; add the directory to emitAllowlist to permit it.`,
+  }
+}
+
 export function extractAndEmitFiles(
   content: string,
   targetFilesHint?: string[] | string,
-  baseDir: string = process.cwd()
+  baseDir: string = process.cwd(),
+  allowedRoots: string[] = []
 ): { filesWritten: FileEmissionResult[]; errors: string[]; cleanContent: string } {
   if (!content) return { filesWritten: [], errors: [], cleanContent: '' }
 
@@ -241,6 +332,16 @@ export function extractAndEmitFiles(
     if (!filePath || !fileCode) return
     const cleanPath = filePath.trim().replace(/^["']|["']$/g, '')
     const resolvedPath = path.isAbsolute(cleanPath) ? cleanPath : path.resolve(baseDir, cleanPath)
+
+    // Containment first: the worker's fence header and the caller's targetFiles hints
+    // both choose this path, so it is untrusted input. Absolute paths and `..` segments
+    // used to escape the workspace silently; they are now refused and reported.
+    const containment = evaluateEmissionPath(resolvedPath, baseDir, allowedRoots)
+    if (!containment.allowed) {
+      emissionErrors.push(String(containment.reason))
+      console.warn(`[EMIT_FILE_BLOCKED] ${containment.reason}`)
+      return
+    }
 
     if (seenPaths.has(resolvedPath)) return
     seenPaths.add(resolvedPath)
@@ -464,7 +565,39 @@ export function redactVerificationOutput(raw: string): RedactedFailure[] {
   }
 
   flush()
+
+  // Names, locations and codes are test- and model-controlled text and they travel to the
+  // cloud. A TAP label can carry a credential as easily as a diff can, so every retained
+  // field is put through the same secret rules the DLP gate uses. Counts and structure
+  // still travel; only the offending value is replaced by a marker.
   return failures
+    .map((failure) => {
+      const bounded: RedactedFailure = { kind: failure.kind }
+      const name = sanitizeRetainedField(failure.name)
+      const location = sanitizeRetainedField(failure.location)
+      const code = sanitizeRetainedField(failure.code, 40)
+      const message = sanitizeRetainedField(failure.message, 300)
+      if (name) bounded.name = name
+      if (location) bounded.location = location
+      if (code) bounded.code = code
+      if (message) bounded.message = message
+      return bounded
+    })
+    .filter((failure) => Boolean(failure.name || failure.location || failure.code || failure.message))
+}
+
+/**
+ * Bound a retained field and strip anything the secret rules recognise. Entropy is on:
+ * these strings are exactly what leaves the machine, so a high-entropy blob in a test
+ * name must not ride along merely because it lacks a recognisable keyword.
+ */
+function sanitizeRetainedField(value: string | undefined, maxLength = 200): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const collapsed = value.replace(/\s+/g, ' ').trim()
+  if (!collapsed) return undefined
+  const scanned = scanDLP(collapsed)
+  if (scanned.hasSensitiveData) return `[redacted: ${scanned.violations.join(', ')}]`
+  return collapsed.length > maxLength ? collapsed.slice(0, maxLength) + ' [truncated]' : collapsed
 }
 
 /** One line per failure: kind, name, location, code, prose message. Never source. */
@@ -649,10 +782,75 @@ export function runInProcessFallback(cmd: string, workspaceDir: string): string 
   return capturedOutput
 }
 
+export interface VerificationPolicy {
+  mode: 'ask' | 'allow' | 'deny'
+  allowlist: string[]
+  allowInProcessFallback: boolean
+}
+
+export const DEFAULT_VERIFICATION_POLICY: VerificationPolicy = {
+  mode: 'ask',
+  allowlist: [],
+  allowInProcessFallback: false,
+}
+
+/** The program a shell command would run, normalised for allowlist comparison. */
+export function commandProgram(command: string): string {
+  const text = String(command || '').trim()
+  if (!text) return ''
+  // A quoted first token may contain spaces ("C:\Program Files\nodejs\node.exe"), so it
+  // must be taken whole; splitting on whitespace first would read it as "C:\Program".
+  const quoted = /^"([^"]+)"|^'([^']+)'/.exec(text)
+  const first = quoted ? quoted[1] ?? quoted[2] ?? '' : text.split(/\s+/)[0] || ''
+  const bare = first.replace(/^["']|["']$/g, '')
+  return path.basename(bare).toLowerCase().replace(/\.(?:exe|cmd|bat|ps1)$/, '')
+}
+
+/**
+ * Decide whether a model-supplied verification command may run. Pure, so the policy is
+ * testable without a server or an approval seam. `runVerification` is model-selected and
+ * executes with the DSH process's full authority, so silence is never consent: anything
+ * not explicitly permitted resolves to `ask`, and `ask` with no approver available is a
+ * refusal at the call site.
+ */
+export function evaluateVerificationPolicy(
+  command: string,
+  policy: VerificationPolicy = DEFAULT_VERIFICATION_POLICY
+): { kind: 'allow' | 'ask' | 'deny'; program: string; reason: string } {
+  const program = commandProgram(command)
+  if (!program) {
+    return { kind: 'deny', program, reason: 'the verification command was empty' }
+  }
+  if (policy.mode === 'deny') {
+    return {
+      kind: 'deny',
+      program,
+      reason: `verificationApproval is 'deny', so no verification command is executed`,
+    }
+  }
+  const allowlisted = policy.allowlist.some((entry) => commandProgram(String(entry)) === program)
+  if (policy.mode === 'allow' || allowlisted) {
+    return {
+      kind: 'allow',
+      program,
+      reason: allowlisted
+        ? `program '${program}' is on verificationAllowlist`
+        : `verificationApproval is 'allow'`,
+    }
+  }
+  return {
+    kind: 'ask',
+    program,
+    reason:
+      `the verification command '${command}' would run with the full authority of the DSH process ` +
+      `and is not confined to the workspace`,
+  }
+}
+
 export function runSandboxVerification(
   verificationCommand: string,
   workspaceDir: string = process.cwd(),
-  options: { redact?: boolean; rawLogPath?: string } = {}
+  options: { redact?: boolean; rawLogPath?: string; allowInProcessFallback?: boolean } = {}
 ): TestResults {
   if (!verificationCommand || !verificationCommand.trim()) {
     return { passed: 0, failed: 0, output: 'No verification command specified.' }
@@ -684,10 +882,23 @@ export function runSandboxVerification(
       String(spawnError).includes('EPERM') ||
       String(spawnError).includes('spawn EPERM'))
   ) {
-    // The sandbox refused a piped spawn; the in-process fallback produced its own
-    // TAP-style text, so parse that on its own merits.
-    output = runInProcessFallback(cmd, workspaceDir)
-    return parseTestOutput(output, undefined, { redact: options.redact, rawOutputPath: persistRaw(output, options.rawLogPath) })
+    // The sandbox refused a piped spawn. The in-process fallback still exists, but it
+    // re-runs model-influenced code inside the SERVER process, so it is opt-in only:
+    // answering a sandbox denial by removing the sandbox inverts the control. Fail closed.
+    if (options.allowInProcessFallback === true) {
+      output = runInProcessFallback(cmd, workspaceDir)
+      return parseTestOutput(output, undefined, {
+        redact: options.redact,
+        rawOutputPath: persistRaw(output, options.rawLogPath),
+      })
+    }
+    const refusal =
+      `not ok 1 - the sandbox refused to spawn the verification command (EPERM) and the ` +
+      `in-process fallback is disabled by default. Refusing to report success.\n${output}`
+    return parseTestOutput(refusal, exitCode, {
+      redact: options.redact,
+      rawOutputPath: persistRaw(refusal, options.rawLogPath),
+    })
   }
 
   return parseTestOutput(output, exitCode, { redact: options.redact, rawOutputPath: persistRaw(output, options.rawLogPath) })
@@ -725,6 +936,15 @@ export interface DelegateWorkerParams {
   workspaceSource?: string
   /** Set false to return raw verification output. Raw output can carry source. */
   redactVerification?: boolean
+  /** Policy for the model-supplied `runVerification` command. */
+  verificationPolicy?: VerificationPolicy
+  /**
+   * Approval callback used when the policy resolves to `ask`. Absent means no approver is
+   * reachable, which refuses the command rather than running it unattended.
+   */
+  verificationApproval?: (command: string) => Promise<boolean>
+  /** Extra roots the worker may write into beyond `workspaceDir`. */
+  emitAllowlist?: string[]
 }
 
 export async function delegateWorker(
@@ -836,18 +1056,43 @@ export async function delegateWorker(
         }
       }
     }
-    const emission = extractAndEmitFiles(content, params.targetFiles, workspaceBase)
+    const emission = extractAndEmitFiles(
+      content,
+      params.targetFiles,
+      workspaceBase,
+      params.emitAllowlist ?? []
+    )
     const filesWritten = emission.filesWritten
 
     let testResults: TestResults | undefined = undefined
+    let verificationGate: string | undefined = undefined
     if (params.runVerification) {
-      testResults = runSandboxVerification(params.runVerification, workspaceBase, {
-        redact: params.redactVerification ?? process.env.DSH_LOCAL_ROUTER_RAW_VERIFICATION !== '1',
-        rawLogPath: path.join(resolveDataDir(), 'last-verification.log'),
-      })
+      const policy = params.verificationPolicy ?? DEFAULT_VERIFICATION_POLICY
+      const decision = evaluateVerificationPolicy(params.runVerification, policy)
+      let permitted = decision.kind === 'allow'
+      if (decision.kind === 'ask') {
+        // No approver means no consent. A missing approval seam must never degrade to a
+        // silent yes for a command that runs with the host process's authority.
+        permitted = params.verificationApproval
+          ? await params.verificationApproval(params.runVerification)
+          : false
+      }
+      if (permitted) {
+        testResults = runSandboxVerification(params.runVerification, workspaceBase, {
+          redact: params.redactVerification ?? process.env.DSH_LOCAL_ROUTER_RAW_VERIFICATION !== '1',
+          rawLogPath: path.join(resolveDataDir(), 'last-verification.log'),
+          allowInProcessFallback: policy.allowInProcessFallback,
+        })
+      } else {
+        verificationGate =
+          decision.kind === 'deny'
+            ? decision.reason
+            : `approval was not granted (${decision.reason})`
+      }
     }
 
-    const isSuccess = (!testResults || testResults.failed === 0) && emission.errors.length === 0
+    const isSuccess =
+      !verificationGate && (!testResults || testResults.failed === 0) && emission.errors.length === 0
 
     let summaryText = ''
     if (filesWritten.length > 0) {
@@ -866,6 +1111,9 @@ export async function delegateWorker(
       summaryText += `\nFILE WRITE ERRORS:\n${emission.errors.map((e: string) => `  - ${e}`).join('\n')}`
     }
 
+    if (verificationGate) {
+      summaryText += `\nVerification was NOT run: ${verificationGate}`
+    }
     if (testResults) {
       summaryText += `\nVerification Results: Passed ${testResults.passed}, Failed ${testResults.failed}.`
       if (testResults.errorSummary) {
@@ -879,13 +1127,26 @@ export async function delegateWorker(
       filesWrittenRelative: filesWritten.map((f) => f.relativeName || f.path),
       resolvedWorkspace: workspaceBase,
       workspaceSource: params.workspaceSource,
-      testResults: testResults || { passed: 0, failed: 0, output: 'No verification requested.' },
+      testResults:
+        testResults ||
+        {
+          passed: 0,
+          failed: 0,
+          output: verificationGate
+            ? `Verification not run: ${verificationGate}`
+            : 'No verification requested.',
+        },
+      ...(verificationGate ? { verificationSkipped: verificationGate } : {}),
       tokens: {
         prompt: promptTokens,
         completion: completionTokens,
       },
       summary: summaryText,
-      status: isSuccess ? 'SUCCESS' : 'VERIFICATION_FAILED',
+      status: verificationGate
+        ? 'VERIFICATION_NOT_APPROVED'
+        : isSuccess
+        ? 'SUCCESS'
+        : 'VERIFICATION_FAILED',
       taskName: params.taskName || 'Subtask',
       tokensUsed: totalTokens,
     }
@@ -1240,6 +1501,39 @@ export class LocalRouter {
 
 const pendingTurnPrompts = new Map<number, string>()
 
+/**
+ * Every user-message text this plugin has seen, per session.
+ *
+ * The DLP gate can only scan what the host hands it: `agent/pre-step` receives the
+ * messages claimed for the current turn, and `agent/request` receives no message content
+ * at all because the outbound conversation is assembled from the session surface after
+ * that waterfall. Scanning only the newest message therefore let a credential introduced
+ * in an earlier turn be re-sent on every later request without tripping the gate.
+ * Accumulating makes the gate sticky instead.
+ */
+const sessionPromptCorpus = new Map<string, string>()
+const SESSION_CORPUS_MAX_CHARS = 200_000
+const GLOBAL_CORPUS_KEY = '__global__'
+
+function corpusKeyFor(payload: any): string {
+  const id = payload?.agent?.id ?? payload?.agent?.session?.id ?? payload?.session?.id
+  return typeof id === 'string' && id.length > 0 ? id : GLOBAL_CORPUS_KEY
+}
+
+function accumulateCorpus(key: string, text: string): void {
+  if (!text) return
+  const target = key || GLOBAL_CORPUS_KEY
+  const existing = sessionPromptCorpus.get(target) ?? ''
+  if (existing.includes(text)) return
+  const combined = existing ? `${existing}\n${text}` : text
+  sessionPromptCorpus.set(
+    target,
+    combined.length > SESSION_CORPUS_MAX_CHARS
+      ? combined.slice(combined.length - SESSION_CORPUS_MAX_CHARS)
+      : combined
+  )
+}
+
 function extractTextFromClaimedMessages(messages: any[]): string {
   if (!Array.isArray(messages)) return ''
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -1341,6 +1635,30 @@ const WRITE_PRIMITIVES =
 
 /** A source-extension reference inside a script body. */
 const CODE_REFERENCE = /[A-Za-z0-9_\-\\/.]*\.(?:ts|tsx|js|jsx|mjs|cjs|py|rb|go|rs|java|kt|cs|c|cc|cpp|h|hpp|swift|php|scala|lua|dart|sh|bash|ps1|psm1|sql|html|htm|css|scss|vue|svelte)\b/i
+
+/**
+ * Write-capable constructs visible on a COMMAND LINE, not merely inside a script file
+ * the guard can name. Previously only a script body was inspected, so inline program
+ * text (`python -c`, `node -e`) and ordinary file verbs were invisible to the guard and
+ * fell through to an allow.
+ */
+const COMMAND_WRITE_PRIMITIVES =
+  /(?:Set-Content|Add-Content|Clear-Content|Out-File|New-Item|Copy-Item|Move-Item|Rename-Item|WriteAllText|WriteAllBytes|WriteAllLines|writeFileSync|writeFile|createWriteStream|appendFile|copyFileSync|renameSync|shutil\.copy|\.write\s*\(|\bcp\b|\bmv\b|\bcopy\b|\bmove\b|\bren\b|\bdd\b|sed\s+-i|perl\s+-i|git\s+(?:apply|checkout|restore|stash|clean)|robocopy|xcopy|truncate|\btee\b)/i
+
+/** Inline program text can write a file the command line never names. */
+const INLINE_EVAL_FLAG = /(?:^|\s)(?:-e|-c|--eval|-Command|-EncodedCommand)(?=\s|$)/i
+
+/**
+ * Does this command line carry a write signal? A redirection counts only when it is a
+ * real one: an `=>` in inline program text and a `2>&1` must not turn a read-only
+ * command into an approval prompt.
+ */
+export function hasCommandWriteSignal(command: string): boolean {
+  if (typeof command !== 'string' || !command) return false
+  if (COMMAND_WRITE_PRIMITIVES.test(command)) return true
+  if (INLINE_EVAL_FLAG.test(command)) return true
+  return /(?:^|[^=\-])>>?(?![=&])/.test(command)
+}
 
 /** Tokens in a command line that name a script file. */
 function extractScriptPaths(command: string): string[] {
@@ -1473,6 +1791,21 @@ export function evaluateCodeWriteGuard(
       }
     }
 
+    // A command line that names a source file AND carries a write signal cannot be
+    // cleared by matching the write target itself: `cp`, `git checkout`, a real
+    // redirection, or inline program text all write a file the pattern never sees.
+    const referenced = CODE_REFERENCE.exec(command)
+    if (referenced && hasCommandWriteSignal(command)) {
+      return {
+        kind: 'ask',
+        target: referenced[0],
+        reason:
+          `Shell command names source file '${referenced[0]}' and carries a write signal, so it may ` +
+          `author source from the cloud context. Command-line inspection cannot prove otherwise, so ` +
+          `this requires explicit approval; prefer delegate_worker for code work.`,
+      }
+    }
+
     return null
   }
 
@@ -1524,6 +1857,51 @@ export async function requestApprovalForWrite(
   }
 }
 
+export function resolveVerificationPolicy(options: PluginConfig = {}): VerificationPolicy {
+  return {
+    mode: options.verificationApproval ?? 'ask',
+    allowlist: Array.isArray(options.verificationAllowlist) ? options.verificationAllowlist : [],
+    allowInProcessFallback: options.allowInProcessFallback === true,
+  }
+}
+
+/**
+ * Ask the operator to approve one model-selected verification command. Unlike the write
+ * guard this is not a `tools/pre-execute` decision, because the command runs after the
+ * worker responds; it is asked before dispatch so the operator sees it up front.
+ * Fails closed on every error path.
+ */
+export async function requestApprovalForVerification(
+  ctx: any,
+  exec: any,
+  command: string
+): Promise<boolean> {
+  try {
+    const service = typeof ctx?.get === 'function' ? ctx.get('approval') : undefined
+    if (!service || typeof service.request !== 'function') return false
+    if (!exec?.agent) return false
+
+    const outcome = await service.request({
+      agent: exec.agent,
+      toolName: 'delegate_worker',
+      ...(exec?.callId ? { callId: exec.callId } : {}),
+      reason:
+        `delegate_worker wants to run this verification command with the full authority of the DSH ` +
+        `process:\n  ${command}\n` +
+        `It is model-selected and is not confined to the workspace. Approve it only if you recognise it.`,
+      ...(exec?.signal ? { signal: exec.signal } : {}),
+    })
+
+    return outcome === 'allowed-once'
+  } catch (err) {
+    console.warn(
+      '[LOCAL_GUARD] verification approval request failed; failing closed:',
+      (err as any)?.message || err
+    )
+    return false
+  }
+}
+
 export function apply(ctx: Context, options: PluginConfig = {}) {
   const REGISTERED_KEY = Symbol.for('dsh-plugin-local-router.registered')
   const isTest = process.env.NODE_ENV === 'test'
@@ -1572,7 +1950,13 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
             },
             runVerification: {
               type: 'string',
-              description: 'Optional shell command to verify the output',
+              description:
+                'Optional shell command to verify the output. It executes with the authority of the DSH process and requires operator approval unless verificationApproval is set to allow.',
+            },
+            workspaceDir: {
+              type: 'string',
+              description:
+                'Absolute path of the directory the worker may write into. Defaults to the session workspace; destinations outside it are refused.',
             },
           },
           required: ['taskName', 'instruction'],
@@ -1589,14 +1973,22 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
             },
           ],
         },
-        async execute(args: any) {
+        async execute(args: any, exec: any) {
           const resolved = resolveWorkspaceDir(ctx)
           const explicitDir = args?.workspaceDir
+          // `endpoint` is not a declared tool argument and is deliberately dropped:
+          // delegateWorker would otherwise POST the task to whatever URL a caller named.
+          const { endpoint: _ignoredEndpoint, ...callerArgs } = args || {}
+          const policy = resolveVerificationPolicy(options)
           return await delegateWorker(
             {
-              ...args,
+              ...callerArgs,
               workspaceDir: explicitDir || resolved.dir,
               workspaceSource: explicitDir ? 'caller-supplied workspaceDir' : resolved.source,
+              verificationPolicy: policy,
+              emitAllowlist: options?.emitAllowlist,
+              verificationApproval: (command: string) =>
+                requestApprovalForVerification(ctx, exec, command),
             },
             tracker
           )
@@ -1623,12 +2015,18 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
       const args = payload.args || payload.arguments || {}
       const resolved = resolveWorkspaceDir(ctx)
       const explicitDir = args?.workspaceDir
+      // `endpoint: options.localProvider` used to sit here, which set the POST URL to the
+      // provider *id* ('lm-studio') rather than a URL. delegateWorker's default is correct.
+      const { endpoint: _ignoredEndpoint, ...callerArgs } = args || {}
       return await delegateWorker(
         {
-          ...args,
+          ...callerArgs,
           workspaceDir: explicitDir || resolved.dir,
           workspaceSource: explicitDir ? 'caller-supplied workspaceDir' : resolved.source,
-          endpoint: options.localProvider,
+          // This path has no agent or call id, so no approval can be requested: with the
+          // default 'ask' policy the verification command is refused rather than run.
+          verificationPolicy: resolveVerificationPolicy(options),
+          emitAllowlist: options?.emitAllowlist,
         },
         tracker
       )
@@ -1687,6 +2085,7 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
       const prompt = extractTextFromClaimedMessages(payload?.messages)
       if (turn !== undefined && prompt) {
         pendingTurnPrompts.set(turn, prompt)
+        accumulateCorpus(corpusKeyFor(payload), prompt)
         trace('HOOK_CAPTURE: PROMPT_CAPTURED (agent/pre-step)', {
           turn,
           prompt: prompt.slice(0, 100),
@@ -1727,7 +2126,12 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
       // credentials is either refused outright or pinned to the local worker, but it
       // is never transmitted to the cloud. (Earlier versions logged "Blocking WAN
       // transmission" and then sent the payload anyway.)
-      const dlpResult = scanDLP(prompt, {
+      // Scan everything this session has said, not just the newest message: the host
+      // re-sends the conversation on every request, so a clean latest message is not
+      // evidence that the outbound payload is clean.
+      const corpus = sessionPromptCorpus.get(corpusKeyFor(payload)) || ''
+      const dlpSubject = corpus.length > prompt.length ? corpus : prompt
+      const dlpResult = scanDLP(dlpSubject, {
         entropyCheck: options?.entropyCheck,
         entropyMinBitsPerChar: options?.entropyMinBitsPerChar,
         entropyMinLength: options?.entropyMinLength,
@@ -1755,9 +2159,11 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
           )
           throw new Error(
             `DLP firewall blocked this request: ${violations} detected in the outbound payload. ` +
-              `Nothing was transmitted. Remove the credential from the conversation and retry — a credential already ` +
-              `present in the session history will keep blocking every request until it is removed. ` +
-              `Set dlpAction: 'local' to route such requests to the local worker instead of refusing them.`
+              `Nothing was transmitted. Remove the credential from the conversation and retry. This gate scans every ` +
+              `user message it has seen in this session, so a credential that appeared in an earlier turn keeps ` +
+              `blocking until the session is restarted. Set dlpAction: 'local' to route such requests to the local ` +
+              `worker instead of refusing them. Assistant output and tool results are assembled by the host after ` +
+              `this hook runs and are not scanned.`
           )
         }
 

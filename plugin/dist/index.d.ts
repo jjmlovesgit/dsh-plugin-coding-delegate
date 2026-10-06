@@ -31,6 +31,30 @@ export interface PluginConfig {
     guardMode?: 'deny' | 'ask';
     /** Path fragments that downgrade a deny to an approval prompt. */
     guardAskPaths?: string[];
+    /**
+     * What happens to `delegate_worker`'s model-supplied `runVerification` command.
+     * `'ask'` (default) routes it through the approval seam before anything executes;
+     * `'allow'` restores the pre-hardening unattended behaviour; `'deny'` never runs it.
+     */
+    verificationApproval?: 'ask' | 'allow' | 'deny';
+    /**
+     * Verification programs (the command's first token) that skip the prompt under
+     * `verificationApproval: 'ask'`. Weak by construction: it constrains the program,
+     * not its arguments, so listing `node` also permits `node -e "<anything>"`.
+     */
+    verificationAllowlist?: string[];
+    /**
+     * Extra directories a delegated worker may write into besides the resolved session
+     * workspace. Absolute worker paths and `..` escapes outside every allowed root are
+     * refused and reported rather than written.
+     */
+    emitAllowlist?: string[];
+    /**
+     * Run the verification module inside the DSH server process when the sandbox denies
+     * a piped spawn (default false). That fallback executes model-influenced code with
+     * full host authority and can kill the server, so it is opt-in only.
+     */
+    allowInProcessFallback?: boolean;
 }
 export interface RouterMetadata {
     provider: string;
@@ -112,6 +136,10 @@ export declare const DELEGATE_WORKER_OPENAI_SCHEMA: {
                     type: string;
                     description: string;
                 };
+                workspaceDir: {
+                    type: string;
+                    description: string;
+                };
             };
             required: string[];
         };
@@ -144,6 +172,10 @@ export declare const DELEGATE_WORKER_SCHEMA: {
                     type: string;
                     description: string;
                 };
+                workspaceDir: {
+                    type: string;
+                    description: string;
+                };
             };
             required: string[];
         };
@@ -164,7 +196,18 @@ export interface FileEmissionResult {
     lines: number;
     bytes: number;
 }
-export declare function extractAndEmitFiles(content: string, targetFilesHint?: string[] | string, baseDir?: string): {
+/** True when `candidate` is `root` itself or lives beneath it. Case-insensitive on Windows. */
+export declare function isPathWithin(root: string, candidate: string): boolean;
+/**
+ * The containment decision for one delegated write. `baseDir` is the session workspace
+ * and `allowedRoots` is the operator's explicit extension list. Both sides are
+ * canonicalised, so a symlink inside the workspace cannot be used to escape it.
+ */
+export declare function evaluateEmissionPath(resolvedPath: string, baseDir: string, allowedRoots?: string[]): {
+    allowed: boolean;
+    reason?: string;
+};
+export declare function extractAndEmitFiles(content: string, targetFilesHint?: string[] | string, baseDir?: string, allowedRoots?: string[]): {
     filesWritten: FileEmissionResult[];
     errors: string[];
     cleanContent: string;
@@ -209,9 +252,30 @@ export declare function parseTestOutput(output: string, exitCode?: number, optio
     rawOutputPath?: string;
 }): TestResults;
 export declare function runInProcessFallback(cmd: string, workspaceDir: string): string;
+export interface VerificationPolicy {
+    mode: 'ask' | 'allow' | 'deny';
+    allowlist: string[];
+    allowInProcessFallback: boolean;
+}
+export declare const DEFAULT_VERIFICATION_POLICY: VerificationPolicy;
+/** The program a shell command would run, normalised for allowlist comparison. */
+export declare function commandProgram(command: string): string;
+/**
+ * Decide whether a model-supplied verification command may run. Pure, so the policy is
+ * testable without a server or an approval seam. `runVerification` is model-selected and
+ * executes with the DSH process's full authority, so silence is never consent: anything
+ * not explicitly permitted resolves to `ask`, and `ask` with no approver available is a
+ * refusal at the call site.
+ */
+export declare function evaluateVerificationPolicy(command: string, policy?: VerificationPolicy): {
+    kind: 'allow' | 'ask' | 'deny';
+    program: string;
+    reason: string;
+};
 export declare function runSandboxVerification(verificationCommand: string, workspaceDir?: string, options?: {
     redact?: boolean;
     rawLogPath?: string;
+    allowInProcessFallback?: boolean;
 }): TestResults;
 export interface DelegateWorkerParams {
     instruction?: string;
@@ -230,6 +294,15 @@ export interface DelegateWorkerParams {
     workspaceSource?: string;
     /** Set false to return raw verification output. Raw output can carry source. */
     redactVerification?: boolean;
+    /** Policy for the model-supplied `runVerification` command. */
+    verificationPolicy?: VerificationPolicy;
+    /**
+     * Approval callback used when the policy resolves to `ask`. Absent means no approver is
+     * reachable, which refuses the command rather than running it unattended.
+     */
+    verificationApproval?: (command: string) => Promise<boolean>;
+    /** Extra roots the worker may write into beyond `workspaceDir`. */
+    emitAllowlist?: string[];
 }
 export declare function delegateWorker(params?: DelegateWorkerParams, tracker?: SavingsTracker): Promise<any>;
 export declare function extractPromptText(session: LLMSession | any): string;
@@ -266,6 +339,12 @@ export interface GuardVerdict {
     reason: string;
 }
 /**
+ * Does this command line carry a write signal? A redirection counts only when it is a
+ * real one: an `=>` in inline program text and a `2>&1` must not turn a read-only
+ * command into an approval prompt.
+ */
+export declare function hasCommandWriteSignal(command: string): boolean;
+/**
  * Decide whether a tool call would author source code from the cloud context.
  * Pure and exported so it can be unit-tested without a running server.
  * Returns null when the call has nothing to do with code authoring.
@@ -289,6 +368,14 @@ export type ApprovalOutcome = 'allowed-once' | 'rejected' | 'cancelled' | 'unava
  * to 'unavailable', which this treats as a refusal.
  */
 export declare function requestApprovalForWrite(ctx: any, exec: any, verdict: GuardVerdict): Promise<ApprovalOutcome>;
+export declare function resolveVerificationPolicy(options?: PluginConfig): VerificationPolicy;
+/**
+ * Ask the operator to approve one model-selected verification command. Unlike the write
+ * guard this is not a `tools/pre-execute` decision, because the command runs after the
+ * worker responds; it is asked before dispatch so the operator sees it up front.
+ * Fails closed on every error path.
+ */
+export declare function requestApprovalForVerification(ctx: any, exec: any, command: string): Promise<boolean>;
 export declare function apply(ctx: Context, options?: PluginConfig): void;
 declare const pluginExport: {
     name: string;
@@ -329,6 +416,10 @@ declare const pluginExport: {
                         type: string;
                         description: string;
                     };
+                    workspaceDir: {
+                        type: string;
+                        description: string;
+                    };
                 };
                 required: string[];
             };
@@ -358,6 +449,10 @@ declare const pluginExport: {
                         description: string;
                     };
                     runVerification: {
+                        type: string;
+                        description: string;
+                    };
+                    workspaceDir: {
                         type: string;
                         description: string;
                     };

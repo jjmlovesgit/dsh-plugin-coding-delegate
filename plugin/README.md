@@ -190,6 +190,10 @@ Decision output: `{ provider, model, route, gate, rationale, scores, latencyMs }
 | `localCodeGuard` | `true` | Refuse cloud-authored source writes |
 | `guardMode` | `deny` | `deny` or `ask` for guard hits |
 | `guardAskPaths` | `["tests/", "tools/"]` | Paths downgraded from deny to an approval prompt |
+| `verificationApproval` | `'ask'` | `ask`, `allow` or `deny` for a delegated `runVerification` command |
+| `verificationAllowlist` | `[]` | Programs whose verification commands skip the prompt (matches the program, not its arguments) |
+| `emitAllowlist` | `[]` | Extra directories a delegated worker may write into besides the workspace |
+| `allowInProcessFallback` | `false` | Run a denied spawn's verification module inside the server process |
 
 ## The `delegate_worker` tool
 
@@ -211,6 +215,11 @@ workspaceSource, testResults, tokens, summary }`.
   because `tsc`-style failures would otherwise report success.
 
 ### Failure reports are redacted
+
+Every retained field — subtest name, location, code and prose message — is secret-scanned with
+the same rules the DLP gate uses and length-bounded before it can travel, because a TAP label
+can carry a credential as easily as a diff can. An offending value is replaced by
+`[redacted: …]`; counts and structure still travel.
 
 Raw verification output is a **source-egress channel**: compiler errors quote the offending
 line, assertion blocks carry `expected`/`actual` values, and stack frames name code. Routed to
@@ -301,23 +310,54 @@ reaches for the approval service explicitly instead of returning `ask`.
 Known limits:
 
 - The guard sees tool calls, not prose — it cannot stop code being typed into a reply.
-- Shell writes are detected heuristically, and **script invocations are inspected**: the guard
-  reads a script named on the command line, follows nested invocations up to depth 2 (with
-  cycle protection), and gates it when the script contains *both* a write primitive and a
-  source-extension reference. Because this is a text scan, a script that merely *mentions* a
-  write is gated as well — over-asking is deliberate, since that is the safe direction.
+- Shell writes are detected heuristically. Two scans run: a script named on the command line is
+  read and followed up to depth 2 (with cycle protection), and the **command line itself** is
+  checked for a source-extension reference combined with a write signal — a write verb
+  (`Set-Content`, `cp`, `mv`, `Move-Item`, `sed -i`, `git checkout`/`git apply`, …), a real
+  redirection, or inline program text (`python -c`, `node -e`). Because this is a text scan, a
+  command that merely *mentions* a write is gated as well — over-asking is deliberate, since
+  that is the safe direction.
 - **Relative script paths can evade inspection.** A relative path is resolved against the
   server's working directory, not the session workspace, which the plugin cannot see (the
   Cordis `Agent` exposes only an id, and the path lives in session metadata behind a store the
   plugin cannot reach). Invoke scripts by **absolute path** — that is the form the guard can
   read, and the form its message steers you toward. Absolute invocations are inspected;
   relative ones may not be.
-- Writes made *indirectly* are not detected: if a script delegates the work to a library, the
-  write primitive never appears in the script itself.
+- Writes made *indirectly* are not detected: if a script or a command delegates the work to a
+  library, the write primitive never appears in the inspected text.
+- A write target computed at runtime (`f = 'src/' + name`) cannot be matched by a text scan.
 - Config files (`.yaml`, `.json`, `.env`) are out of scope — only source extensions are gated.
-- `delegate_worker` writes through `fs` and deliberately bypasses the guard.
+- `delegate_worker` does not go through this guard, but it carries its own limits: a path that
+  resolves outside its workspace is refused, and its model-supplied `runVerification` command
+  is gated (see below).
 
 Treat it as a strong deterrent at the tool layer, not an airtight boundary.
+
+## Delegated verification and file writes
+
+`delegate_worker` accepts `runVerification`, a shell command the **cloud model** chooses, and it
+runs with the full authority of the DSH process. It is therefore gated:
+
+| `verificationApproval` | Behaviour |
+| --- | --- |
+| `'ask'` (default) | The operator approves the exact command through the approval seam before anything runs. No reachable approval service means refusal. |
+| `'allow'` | Runs unattended. Under `'ask'`, `verificationAllowlist` lets named programs skip the prompt; it matches the program only, so allowing `node` also allows `node -e "<anything>"`. |
+| `'deny'` | Verification never runs. |
+
+A command that does not run is reported as `status: 'VERIFICATION_NOT_APPROVED'` with a
+`verificationSkipped` reason and `success: false` — an unverified task is never reported as a
+success. `runVerification` is not confined to the workspace, so prefer
+[containerised verification](#run-verification-in-a-container--advisable).
+
+**File writes are contained.** A fenced path or `targetFiles` hint that resolves outside the
+resolved workspace — an absolute path, a `..` segment, or a symlink pointing out of it — is
+refused and reported in `errors` instead of being written. `emitAllowlist` extends the permitted
+roots explicitly.
+
+**`allowInProcessFallback`** (default `false`) decides what happens when the sandbox refuses a
+piped spawn. Off, verification fails closed. On, the target module is `require`d inside the DSH
+**server** process, running model-influenced code with full host authority — it can terminate
+the server. Enable it only where the spawn restriction cannot be lifted, and prefer a container.
 
 ## State
 
