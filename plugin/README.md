@@ -330,15 +330,18 @@ Known limits:
 
 - The guard sees tool calls, not prose — it cannot stop code being typed into a reply.
 - Shell writes **and deletions** are detected heuristically. Two scans run: a script named on
-  the command line is read and followed up to depth 2 (with cycle protection), and the **command
-  line itself** is checked for a source-extension reference combined with a mutation signal — a
-  write verb (`Set-Content`, `cp`, `mv`, `Move-Item`, `sed -i`, `git checkout`/`git apply`, …), a
-  delete verb (`Remove-Item`, `rm`, `del`, `rmdir`, `git rm`, `os.remove`, …), a real
-  redirection, or inline program text (`python -c`, `node -e`). Destroying source is gated the
-  same way as authoring it, and both lists are word-anchored — unanchored, `Move-Item` matches
+  the command line **for execution** is read and followed up to depth 2 (with cycle protection),
+  and the **command line itself** is checked for a source-extension reference combined with a
+  mutation signal — a write verb (`Set-Content`, `cp`, `mv`, `Move-Item`, `sed -i`,
+  `git checkout`/`git apply`, …), a delete verb (`Remove-Item`, `rm`, `del`, `rmdir`, `git rm`,
+  `os.remove`, …), a real redirection, or inline program text (`python -c`, `node -e`). A file
+  named in order to be *read* is not treated as invoked, so inspecting a `.js` file with
+  `Select-String`, `grep` or `Get-Content` does not ask. Destroying source is gated the same way
+  as authoring it, and both verb lists are word-anchored — unanchored, `Move-Item` matches
   inside `Remove-Item` and a plain delete is misread as a write. Because this is a text scan, a
   command that merely *mentions* a mutation is gated as well — over-asking is deliberate, since
-  that is the safe direction.
+  that is the safe direction. Where several source paths appear, the longest is reported as the
+  target, so extension-shaped prose cannot displace the real path.
 - **Relative script paths can evade inspection.** A relative path is resolved against the
   server's working directory, not the session workspace, which the plugin cannot see (the
   Cordis `Agent` exposes only an id, and the path lives in session metadata behind a store the

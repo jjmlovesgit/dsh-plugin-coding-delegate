@@ -1752,6 +1752,66 @@ function extractScriptPaths(command: string): string[] {
     .filter((token) => token && SCRIPT_EXTENSIONS.has(path.extname(token).toLowerCase()))
 }
 
+/**
+ * Commands that READ a file named on the command line rather than executing it.
+ *
+ * Without this list, `Select-String -Path some.js` was treated as an invocation of
+ * `some.js`: the guard read the whole file and, since any sizeable program contains a write
+ * primitive, asked for approval to *read* it. Reading a file is not running it.
+ */
+const READ_ONLY_INSPECTORS = new Set([
+  'select-string', 'get-content', 'cat', 'type', 'head', 'tail', 'less', 'more',
+  'grep', 'rg', 'findstr', 'test-path', 'get-item', 'get-childitem', 'ls', 'dir',
+  'stat', 'wc', 'diff', 'cmp', 'sort', 'uniq', 'strings', 'file', 'od', 'xxd',
+  'out-string', 'measure-object',
+])
+
+/**
+ * Is this token read as data by a read-only inspector, rather than invoked?
+ *
+ * Scans positionally instead of by token: the tokenizer splits on `;`, `|` and `&`, which
+ * are exactly the statement boundaries this needs to respect. Everything from the previous
+ * separator up to the token is the statement that names it; if a read-only inspector appears
+ * there, the token is an argument to it. A token at a statement start — including `&` or
+ * `.` invocation, where the separator is immediately behind it — is an invocation, which is
+ * the case the body scan exists for.
+ */
+function isReadArgument(command: string, script: string): boolean {
+  const at = command.indexOf(script)
+  if (at < 0) return false
+  const before = command.slice(0, at)
+  const boundary = Math.max(
+    before.lastIndexOf(';'),
+    before.lastIndexOf('|'),
+    before.lastIndexOf('&'),
+    before.lastIndexOf('\n')
+  )
+  const statement = before.slice(boundary + 1)
+  return statement
+    .split(/[\s'"`()]+/)
+    .filter(Boolean)
+    .some((word) => {
+      const bare = path.basename(word).toLowerCase().replace(/\.(?:exe|cmd|bat|ps1)$/, '')
+      return READ_ONLY_INSPECTORS.has(bare)
+    })
+}
+
+/**
+ * The longest source-extension reference in a string.
+ *
+ * The guard previously took the FIRST match, so a command whose prose happened to contain
+ * something extension-shaped — an explanation mentioning `(.ts)` — reported that fragment as
+ * the target instead of the real path.
+ */
+function longestCodeReference(text: string): string | undefined {
+  const scanner = new RegExp(CODE_REFERENCE.source, 'gi')
+  let longest: string | undefined
+  for (const match of text.matchAll(scanner)) {
+    if (longest === undefined || match[0].length > longest.length) longest = match[0]
+  }
+  return longest
+}
+
 function resolveScriptPath(script: string): string {
   return path.isAbsolute(script) ? script : path.resolve(process.cwd(), script)
 }
@@ -1781,6 +1841,9 @@ function findWriteViaScript(
   if (depth <= 0) return null
 
   for (const script of extractScriptPaths(command)) {
+    // A file named in order to be READ is not a script being invoked.
+    if (isReadArgument(command, script)) continue
+
     const resolved = resolveScriptPath(script)
     if (visited.has(resolved)) continue
     visited.add(resolved)
@@ -1790,8 +1853,8 @@ function findWriteViaScript(
 
     // Both signals are required: a mutation primitive (write or delete) AND a source reference.
     if (WRITE_PRIMITIVES.test(body) || DELETE_PRIMITIVES.test(body)) {
-      const reference = CODE_REFERENCE.exec(body)
-      if (reference) return { script, target: reference[0] }
+      const target = longestCodeReference(body)
+      if (target) return { script, target }
     }
 
     const nested = findWriteViaScript(body, readScript, depth - 1, visited)
@@ -1878,20 +1941,20 @@ export function evaluateCodeWriteGuard(
     // A command line that names a source file AND carries a write signal cannot be
     // cleared by matching the write target itself: `cp`, `git checkout`, a real
     // redirection, or inline program text all write a file the pattern never sees.
-    const referenced = CODE_REFERENCE.exec(command)
+    const referenced = longestCodeReference(command)
     if (referenced) {
       const writes = hasCommandWriteSignal(command)
       const deletes = hasCommandDeleteSignal(command)
       if (writes || deletes) {
         return {
           kind: 'ask',
-          target: referenced[0],
+          target: referenced,
           reason:
             deletes && !writes
-              ? `Shell command would delete source file '${referenced[0]}'. Destroying source from the ` +
+              ? `Shell command would delete source file '${referenced}'. Destroying source from the ` +
                 `cloud context is gated the same way as writing it, so this requires explicit approval; ` +
                 `prefer delegate_worker for code work.`
-              : `Shell command names source file '${referenced[0]}' and carries a write signal, so it may ` +
+              : `Shell command names source file '${referenced}' and carries a write signal, so it may ` +
                 `author source from the cloud context. Command-line inspection cannot prove otherwise, so ` +
                 `this requires explicit approval; prefer delegate_worker for code work.`,
         }

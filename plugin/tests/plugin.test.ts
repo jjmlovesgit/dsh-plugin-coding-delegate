@@ -418,4 +418,25 @@ describe('Local-code guard: command-line write detection', () => {
     // Only source extensions are in scope; a build artefact is not the guard's business.
     expect(evaluateCodeWriteGuard(shell('Remove-Item build/output.log'))).toBeNull()
   })
+
+  it('treats a file named in order to be read as data, not as an invoked script', () => {
+    // Reading a file is not running it. The reader would report a write primitive, so a
+    // body scan that ignored the distinction would ask for approval to read.
+    const body = "$c = 'x'\n[System.IO.File]::WriteAllText('src/thing.ts', $c)\n"
+    const reader = () => body
+
+    expect(evaluateCodeWriteGuard(shell("Select-String -Path 'app/main.js'"), { readScript: reader })).toBeNull()
+    expect(evaluateCodeWriteGuard(shell("grep -n foo 'app/main.js'"), { readScript: reader })).toBeNull()
+    expect(evaluateCodeWriteGuard(shell("Get-Content 'app/main.js'"), { readScript: reader })).toBeNull()
+
+    // Invocation still is invocation, however it is spelled.
+    expect(evaluateCodeWriteGuard(shell("& 'app/main.js'"), { readScript: reader })?.kind).toBe('ask')
+    expect(evaluateCodeWriteGuard(shell("node 'app/main.js'"), { readScript: reader })?.kind).toBe('ask')
+  })
+
+  it('reports the real path when the command also contains extension-shaped prose', () => {
+    // Regression: the first match won, so prose mentioning `(.ts)` became the target.
+    const verdict = evaluateCodeWriteGuard(shell('Remove-Item src/gone.ts   # (.ts) note'))
+    expect(verdict?.target).toBe('src/gone.ts')
+  })
 })
