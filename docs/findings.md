@@ -227,3 +227,35 @@ An honest amendment to the ROADMAP entry, then: retry-context's oracle proves th
 seven. The three harness assertions above are worth keeping — the two policy cases are real controls on the
 end-to-end path — but they are not evidence that the feature was absent before it existed.
 
+## The oracle suite still writes into the operator's live data directory
+
+This is the sequel to the entry above about the delegated registry, and it was found by accident while
+auditing something else entirely.
+
+`vitest.config.ts` redirects `DSH_HOME` to a temp directory, for a good stated reason: `npm test` used to
+append to the operator's real `delegated-registry.json`. That fix is correct and it works. **But it only
+covers vitest.** The 275 `.cjs` oracles run under `node --test`, which never loads `vitest.config.ts`, and
+only **7 of 28** of them redirect the data directory themselves.
+
+The consequence is measurable: `~/.dsh/local-router/router-debug.log` is 3.3 MB and roughly 120,000 lines,
+carrying test fixtures — a fake Slack token, an RSA private key block, `password: "hunter2hunter2"` —
+interleaved with live traffic from real sessions. The `DLP_FIREWALL_TRIPPED` and
+`PLUGIN_INIT_ASYMMETRIC_ORCHESTRATOR` entries from `router-debug.log` at `23:06:18Z` are a `node --test`
+run, not the running host.
+
+**Why this is worse than untidy.** `router-debug.log` is not debug output in the colloquial sense — it is
+this project's live-observation instrument. `docs/live-verification.md` is built by reading it; several
+findings in this file were found by reading it; and the newest document in `docs/` uses it to establish
+what the running host does. A test suite writing into that file attacks the evidence base directly. It also
+made a check in that audit inconclusive: the absence of a "Plugin already registered" line looked like
+evidence that the duplicate-mount guard was never hit, but the log cannot support that reading while it is
+being written to by two different processes.
+
+**Why the per-file fix did not hold.** Seven oracles set `DSH_LOCAL_ROUTER_DATA_DIR` or `DSH_HOME`
+individually, which is a per-file convention that nothing enforces. A new oracle is isolated only if its
+author remembers, and 21 authors did not — or did not need to until their oracle happened to exercise a
+path that calls `trace()`. A per-file fix for a cross-cutting concern is not a fix; it is a habit.
+
+The honest repair is one central redirect for the `.cjs` runner, not 21 more copies of the same two lines.
+Not done yet.
+

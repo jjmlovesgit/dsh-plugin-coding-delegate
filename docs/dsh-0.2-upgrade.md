@@ -1,155 +1,127 @@
-# DSH 0.1.5-rc.3 → 0.2.0-rc.2: what this plugin needs
+# Which DSH core is running, and the Desktop 0.22.4 update
 
-Pre-flight note, written before the update. Every claim below was measured against the plugin source,
-the host packages installed at `0.1.5-rc.3`, or the published `0.2.0-rc.2` type declarations — not
-recalled from the changelog. What could not be measured is listed under "What this does not establish".
+This supersedes an earlier version of this document whose central premise was wrong. The mistake was a
+reasonable one and the correction is the useful part, so both are recorded.
 
-## What is pending
+## The correction
+
+The earlier version said: dsh `0.1.5-rc.3` is installed, `0.2.0-rc.2` is pending, here is whether the plugin
+survives the jump. I then "verified" that by reading the event vocabulary out of the npm-global package tree.
+
+None of it was right, because **`dsh --version` reports what PATH points at, not what is running.**
 
 | | |
 | --- | --- |
-| Installed | `0.1.5-rc.3` (`dsh --version`, and the same in `@deepseek-ai/dsh/package.json`) |
-| Published `latest` | `0.2.0-rc.2`, 2026-09-29 |
-| Also out | `0.2.1-alpha.1`, 2026-10-03 — an alpha, so not the pending update |
+| What `dsh --version` says | `0.1.5-rc.3` — `%APPDATA%\npm\node_modules\@deepseek-ai\dsh` |
+| What actually loads this plugin | **`0.2.0-rc.2`** — `%APPDATA%\dsh-tauri\dependencies\dsh` |
+| Who installed that copy | the Desktop app, as a managed dependency |
+| The npm-global copy | a stray install that **nothing references** |
 
-The delta from what is installed is the [`dsh-v0.1.7-rc.1` release notes][v017], whose own compare link
-is `v0.1.5-rc.3...v0.1.7-rc.1`. That list is the diff, not a summary of it, which is why it is the right
-thing to audit against. `v0.2.0-rc.1` and `v0.2.0-rc.2` add the rest.
+Two independent facts make it decisive rather than probable:
 
-[v017]: https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.1.7-rc.1
+- `%APPDATA%\dsh-tauri\dependencies.json` resolves the dependencies explicitly — `node`, `pnpm` and `git` to
+  `null` (system environment), but `dsh` to the managed root. The Desktop's `manifest.jsonc` declares that
+  root's entry point as `node_modules/@deepseek-ai/dsh/lib/bin.js`, and it exists there.
+- `%APPDATA%\dsh-tauri` contains no reference to `AppData\Roaming\npm` at all.
 
-## The finding that shapes the risk
+The managed core was installed **2026-10-06 17:58**; the A2 live run happened the following evening. So
+everything in [`live-verification.md`](live-verification.md) was exercised against `0.2.0-rc.2`.
 
-**This plugin has no compile-time contract with the host at all.** No `@deepseek-ai/*` package appears in
-`dependencies`, `devDependencies` or `node_modules`; there are no `peerDependencies`; there is no
-`declare module` augmentation. Every host interaction is `as any` over hand-written assumptions about
-event names and payload shapes.
+## Does the plugin work on 0.2.0-rc.2?
 
-The consequence, stated plainly: **nothing in `npm run build` can catch a host change.** The 39 unit tests
-and the 275 oracle assertions encode *this plugin's* assumptions, so they will go on passing against a host
-that has moved underneath them. The only real detectors are live observation and the event-vocabulary check
-below. Everything else in this document is static analysis, and static analysis is exactly what this project
-does not accept as proof.
+**Yes, and that is measured rather than inferred.** The plugin has been running on it the whole time:
 
-## Checked, item by item
+- The A2 loop was live-verified through the registered tool path — three `delegate_worker` calls, a real
+  failure at `src/thing.ts:30:5`, and the next attempt receiving lines 20–40 as metadata only. That single
+  run exercises `tools.register`, the registered tool path, the approval seam, the verification spawn,
+  emission under unit scope, and `session/event`.
+- The seven event types the context-quality counters depend on are all present in the running host, out of
+  59 unique types, with **nothing removed** relative to `0.1.5-rc.3` — only `developer/message`,
+  `image/offload` and `workspace/changes` added. (`image/offload` is listed twice in the generated
+  `Set` literal; harmless, and worth knowing before someone counts 60 and expects 60.)
 
-Every breaking change in the `0.1.5-rc.3 → 0.2.0` diff, and whether it reaches this plugin.
+So the question the earlier version of this document tried to answer statically had already been answered
+empirically. That is the general lesson: **the running host is an oracle this project already has and keeps
+forgetting to consult.**
 
-| Change | Reaches the plugin? | Evidence |
-| --- | --- | --- |
-| `agent/session-start` → async `agent/created` | **No** | The plugin registers `agent/request`, `agent/post-step`, `agent/step-finish`, `agent/assistant-stream`. `session-start` appears nowhere in `plugin/src` |
-| `snapshotEvents`, `eventAt`, `ownEvents` deprecated | **No** | Not referenced |
-| Session logs upgraded to V4 + migration tool | **No** | The plugin never reads a session log. It folds the `session/event` firehose (`context-quality.ts`) |
-| `SandboxProvider.confine` / `ShellExecutor.start` → cancellable async | **No** | `verification.ts:493` uses Node's own `child_process.spawnSync` with **file-descriptor** capture, deliberately, because a piped spawn is refused in confined mode. It never calls the host sandbox |
-| Workspace file reads move to `readBytes` | **No** | The plugin reads through `fs` directly |
-| `spill-policy` `maxInlineBytes` → `maxInlineTokens` | **No config to migrate** | No spill configuration anywhere in `~/.dsh` |
-| PTC / `workflow-ptc` / Ralph-off / E2B removal / `spawn_teammate` | **No** | None referenced |
-| Continuable subagent chains capped at 8, depth 1 | **No** | The plugin starts no subagents |
-| Cordis `4.0.2` → `~4.0.4` | **No runtime impact** | `dist/*.js` contains no `cordis` string at all: `import { Context } from 'cordis'` is type-only and erased. Note the plugin's `cordis: ^3.18.1` devDependency is the **unscoped community `cordis`** package — a different package from `@deepseek-ai/cordis`, not a v3-vs-v4 fork of one |
-| Plugin locale/icon in `package.json`; multi-file bundle patches | **Additive** | The single-file `dsh.bundle.patch` form is retained |
-| Plugin ↔ DSH compatibility check at install and startup | **Compatible by construction** | See below |
-| Settings move to profile plugin configuration; `settings.yaml` imported **once** | **Profile-level** | See below |
-| Hot reload loses transactional rollback | **Profile-level** | See below |
-| pi-ai `0.87.1`; older model IDs removed | **Profile-level** | See below |
+## The pending update is the Desktop shell, not the core
 
-## Compatible by mechanism, not by inspection
+`deepseek-harness-desktop.exe` on disk is **0.22.3**; **0.22.4** is downloaded and waiting. That is a
+different product from `@deepseek-ai/dsh` — different repository (`dsh-tauri/deepseek-harness-desktop`),
+different version scheme, different maintainers — and it *bundles or manages* a dsh core rather than being
+one.
 
-The compatibility gate that would refuse a plugin is keyed on **declared peers**. From the shipped
-`@deepseek-ai/dsh-plugin-manager@0.2.0-rc.2` declarations:
+Its own manifest recommends core **`0.2.0-rc.2`**, which is what is installed. So this update is the app
+shell. From the v0.22.4 notes, it is: a nightly-build CI pipeline, multi-mirror fallbacks for GitHub release
+downloads, a Skills/MCP toast change that decides restart-need from host HMR capability, and UI/CI fixes.
 
-> `IncompatiblePlugin` — a package whose **declared DSH peers** reject the running DSH version, without an
-> exemption for the exact pair. `peers: Record<string, string>` — *only the DSH peer ranges the running
-> version does not satisfy.*
+**Nothing in it touches the plugin's host surface.** The one thing an app update *can* do is change the
+recommended core version in `manifest.jsonc` and trigger a core change underneath you — so the single check
+worth doing afterwards is re-reading that file next to `dependencies.json`.
 
-This plugin declares no `peerDependencies` at all, so the check has nothing to reject. The refusal also
-carries `incompatible-version` on `ManagementError` and an exact-version exemption, so even a false
-positive is recoverable rather than silent.
+## Two things found while checking, neither of them about the update
 
-## What needs attention in the profile
+**1. The oracle suite writes into the live plugin data directory.** `router-debug.log` is 3.3 MB and ~120,000
+lines, with test fixtures — a fake Slack token, an RSA key, `hunter2hunter2` — interleaved into live
+traffic. `vitest.config.ts` redirects `DSH_HOME` for the unit tests, but the 275 `.cjs` oracles run under
+`node --test`, which never loads that config. Only 7 of 28 oracles redirect the data dir themselves. This
+matters more than tidiness suggests: `router-debug.log` **is** this project's live-observation instrument,
+and the test suite is writing into it. Recorded in [`findings.md`](findings.md).
 
-None of these are plugin defects. All three are in `~/.dsh`, and all three are worth handling before the
-update rather than after.
+**2. A stray `dsh` on PATH.** `dsh` resolves to the unreferenced `0.1.5-rc.3` copy. Any diagnostic run from
+a terminal — `dsh --dump-config`, `dsh --version`, `--dump-config-schema` — inspects a **different
+installation** from the one serving the session. That is exactly the trap this document fell into, and it
+will catch the next person too.
 
-**1. `settings.yaml` is imported once, ever.** `~/.dsh/settings.yaml` (367 bytes) declares `ui-onboarding`,
-`llm-deepseek.apiKeyEnv` and the `llm-pi-ai` `lm-studio` provider. The same provider block is *also* in
-`~/.dsh/profiles/web/cordis.patch.yml`, which is the mechanism `0.2.0` keeps and improves. The migration is
-attempted once and never retried, so a partial import has no second chance. The profile patch is the copy
-that matters; the settings copy is the one to back up.
+## Verification, corrected
 
-**2. `patchReload: live` now has no rollback.** The profile sets `"patchReload": "live"`. `0.1.7` removed
-transactional rollback from hot reload: a parse failure preserves the original configuration, but an
-**activation failure can leave partial changes** that must be corrected by hand. Capture the patch files
-before the update.
-
-**3. Model IDs.** `qwen/qwen3.8-27b` is a *custom* `llm-pi-ai` provider entry, so it is not in the built-in
-catalog and should survive the catalog refresh. `cloudModel: deepseek-chat` and the architect's own
-selection come from the catalog, so a saved selection may need reselecting. The plugin's local worker path
-talks to LM Studio directly and is unaffected either way.
-
-## Before updating
+**Is the running core what the Desktop says it is?**
 
 ```powershell
-$h = "$env:USERPROFILE\.dsh"
-Copy-Item "$h\settings.yaml"                                    "$h\settings.yaml.pre-0.2.0"
-Copy-Item "$h\profiles\web\cordis.patch.yml"                    "$h\profiles\web\cordis.patch.yml.pre-0.2.0"
-Copy-Item "$h\profiles\web\package.json"                        "$h\profiles\web\package.json.pre-0.2.0"
+Get-Content "$env:APPDATA\dsh-tauri\dependencies.json" -Raw
+(Get-Content "$env:APPDATA\dsh-tauri\dependencies\dsh\node_modules\@deepseek-ai\dsh\package.json" -Raw |
+  ConvertFrom-Json).version
 ```
 
-The plugin is installed as `"dsh-plugin-coding-delegate": "link:C:/Projects/DSHLaya/plugin"` and declared
-in `dsh.profile.bundles`, so it loads from this checkout's `dist/`. Rebuild before restarting, or the host
-will start the previous build.
-
-## After updating
-
-1. `dsh --version` — expect `0.2.0-rc.2`.
-2. `dsh --dump-config` — the `local-router` row must still be present with its config. `0.2.0` also adds
-   `--dump-config-schema` for a static check of the same thing.
-3. **Event vocabulary.** The host ships a generated, complete list of the event types it understands, and
-   the plugin's context-quality counters depend on seven of them. This check is mechanical and is the one
-   thing here that can catch a rename that no changelog line mentions:
-
-   ```powershell
-   $n = Join-Path (npm root -g) '@deepseek-ai\dsh\node_modules\@deepseek-ai'
-   $known = (Select-String -Path "$n\dsh-session\lib\types\known-event-types.js" `
-             -Pattern "^\s+'([a-z0-9/-]+)',$").Matches.Groups[1].Value
-   $used  = 'turn/start','assistant/message','request/context',
-            'compaction/summary','compaction/prune','compaction/end','step/start'
-   $used | Where-Object { $_ -notin $known }
-   ```
-
-   **Expect no output.** Anything printed is an event the plugin watches that the new host no longer
-   knows — which does not crash anything, it silently zeroes the counters. All seven are present in
-   `0.1.5-rc.3`; that is the baseline this diff is against.
-4. **Restart, then re-run the A2 live loop** (three `delegate_worker` calls, recorded in
-   [`live-verification.md`](live-verification.md)). This is the only end-to-end host-integration test that
-   exists: it exercises `tools.register`, the registered tool path, the approval seam, the verification
-   spawn, emission under unit scope, and `session/event`, all at once. If it still passes, the host surface
-   this plugin actually uses is intact.
-5. `cd plugin; npm run build && npx vitest run && node --test tests/oracles/*.test.cjs` — 39 and 275. Green
-   here means the plugin is self-consistent, not that the host is compatible; see the finding above.
-
-## Rollback
+**Does the running host still know every event the plugin watches?** This is the check that catches a
+rename no changelog mentions, and it silently zeroes the counters rather than crashing:
 
 ```powershell
-npm install -g @deepseek-ai/dsh@0.1.5-rc.3
+function Get-DshEventVocabulary([string]$Path) {
+  Select-String -Path $Path -Pattern "^\s+'([a-z0-9/-]+)',$" |
+    ForEach-Object { $_.Matches[0].Groups[1].Value }
+}
+$core  = "$env:APPDATA\dsh-tauri\dependencies\dsh\node_modules\@deepseek-ai"
+$known = Get-DshEventVocabulary "$core\dsh-session\lib\types\known-event-types.js"
+$used  = 'turn/start','assistant/message','request/context',
+         'compaction/summary','compaction/prune','compaction/end','step/start'
+$used | Where-Object { $_ -notin $known }
 ```
 
-Restore the three backed-up files if the settings migration wrote anything unexpected.
+Expect no output. **The earlier version of this document had a broken version of this command** —
+`(Select-String ...).Matches.Groups[1].Value` — which indexes the *second match's* group collection instead
+of group 1 of every match. It returns a single value, which is why running it the first time reported "1
+event type" and all seven missing. A broken detector that reports catastrophic failure is worse than no
+detector; it was caught only by disbelieving the result and reading the file.
+
+**Does the plugin still work end to end?** Re-run the three-call A2 loop. It remains the closest thing to a
+host integration test this project has.
 
 ## What this does not establish
 
-- **`0.2.0-rc.2` has not been run.** Everything above is static: this plugin's source, the `0.1.5-rc.3`
-  host packages on disk, and the published `0.2.0-rc.2` type declarations. A behaviour change that no
-  changelog line names would not appear in this document.
-- **The compatibility conclusion rests on one doc comment.** The shipped `IncompatiblePlugin` says the
-  check is on *declared peers*. `0.2.1-alpha.1`'s notes say compatibility is also checked "during startup",
-  and if that path inspects something other than peers, the conclusion needs revisiting. It is the most
-  load-bearing inference here.
-- **A green oracle run is not evidence of compatibility**, for the reason in the first section.
+- **Which core 0.22.4 would install.** Its `manifest.jsonc` is inside the installer; the currently installed
+  one recommends `0.2.0-rc.2`. If a future manifest raises `recommend` above what is installed, the core
+  changes and the event-vocabulary check above becomes a real check again rather than a formality.
+- **That the Desktop's plugin list and the core's profile bundles agree.** `~/.dsh/config.json` registers
+  this plugin under its **old name** `dsh-plugin-local-router`, pointing at the same `dist/index.js`, while
+  `~/.dsh/profiles/web/package.json` registers it as the bundle `dsh-plugin-coding-delegate`. Two
+  registrations of one plugin is a smell; the plugin has a duplicate-mount guard that logs "Plugin already
+  registered", and no such line appears in the log — but the log is polluted (above), so that is weaker
+  evidence than it looks. Not investigated further here.
+- **Anything about a *future* core upgrade.** The static audit that the earlier version of this document
+  contained is still a reasonable method; it was simply pointed at the wrong install.
 
-## What would close this properly
+## The shortcut for next time
 
-Give the plugin the host contract it lacks: add `@deepseek-ai/dsh-session` (and whichever packages carry
-the hooks it uses) as a pinned `devDependency`, and let the event names and payload shapes be *typed*
-rather than asserted. That turns step 3 above from a manual pre-flight into a compile error, and it is the
-honest follow-on to this document. It is not part of the update.
+Read `dependencies.json` first. It is one small file, it names the resolved root of every runtime
+dependency, and it is the difference between auditing the host and auditing a stranger.
