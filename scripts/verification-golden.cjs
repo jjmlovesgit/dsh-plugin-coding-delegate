@@ -1,0 +1,77 @@
+// Characterisation harness for the verification.ts cut.
+//
+// The cut rewrites interpolated strings as concatenation, because the running plugin still uses a fence
+// scanner that truncates emissions containing backticks. That is a mechanical change with an observable
+// output, so it is compared rather than asserted. Run it before and after the cut: the two outputs must
+// be identical.
+const path = require('node:path')
+const fs = require('node:fs')
+const os = require('node:os')
+
+const PLUGIN = path.resolve(__dirname, '..', 'plugin')
+const dist = path.join(PLUGIN, 'dist', 'index.js')
+
+const {
+  redactVerificationOutput,
+  describeFailures,
+  parseTestOutput,
+  commandProgram,
+  evaluateVerificationPolicy,
+  runSandboxVerification,
+} = require(dist)
+
+const tapOutput = [
+  'TAP version 13',
+  'ok 1 - the first thing works',
+  'not ok 2 - the second thing fails',
+  '  ---',
+  '  location: test/thing.test.js:12:5',
+  '  code: ERR_ASSERTION',
+  '  error: expected 1 to equal 2',
+  '  ...',
+  'not ok 3 - a failure whose label carries a secret',
+  '  error: token ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+  '1..3',
+].join('\n')
+
+const tscOutput = [
+  "src/thing.ts(12,5): error TS2322: Type 'string' is not assignable to type 'number'.",
+  'src/other.ts(3,1): error TS1005: something',
+].join('\n')
+
+const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-verify-golden-'))
+
+const out = {
+  'redact:tap': redactVerificationOutput(tapOutput),
+  'redact:tsc': redactVerificationOutput(tscOutput),
+  'redact:empty': redactVerificationOutput(''),
+  'describe:tap': describeFailures(redactVerificationOutput(tapOutput)),
+  'parse:tap': parseTestOutput(tapOutput, 1),
+  'parse:tsc-redacted': parseTestOutput(tscOutput, 2),
+  'parse:silent-fail': parseTestOutput('', 1),
+  'parse:silent-pass': parseTestOutput('', 0),
+  'parse:unrecognised-with-error': parseTestOutput('something exploded\nerror: bad', 0),
+  'parse:unrecognised-pass': parseTestOutput('all fine here', 0),
+  'parse:raw': parseTestOutput(tapOutput, 1, { redact: false }),
+  'parse:rawpath': parseTestOutput(tapOutput, 1, { rawOutputPath: 'X:/log.txt' }),
+  'program:plain': commandProgram('node --test tests/x.test.cjs'),
+  'program:quoted': commandProgram('"C:\\Program Files\\nodejs\\node.exe" --test'),
+  'program:empty': commandProgram(''),
+  'program:ps1': commandProgram('pwsh -File thing.ps1'),
+  'policy:empty': evaluateVerificationPolicy(''),
+  'policy:deny': evaluateVerificationPolicy('npm test', { mode: 'deny', allowlist: [], allowInProcessFallback: false }),
+  'policy:allow': evaluateVerificationPolicy('npm test', { mode: 'allow', allowlist: [], allowInProcessFallback: false }),
+  'policy:allowlisted': evaluateVerificationPolicy('node x.js', { mode: 'ask', allowlist: ['node'], allowInProcessFallback: false }),
+  'policy:ask': evaluateVerificationPolicy('npm test', { mode: 'ask', allowlist: [], allowInProcessFallback: false }),
+  'sandbox:pass': (() => {
+    const r = runSandboxVerification('node -e "process.exit(0)"', tmpDir, { redact: false })
+    return { passed: r.passed, failed: r.failed, redacted: r.redacted }
+  })(),
+  'sandbox:fail': (() => {
+    const r = runSandboxVerification('node -e "process.exit(3)"', tmpDir, { redact: false })
+    return { passed: r.passed, failed: r.failed, redacted: r.redacted }
+  })(),
+  'sandbox:empty': runSandboxVerification('', tmpDir),
+}
+
+console.log(JSON.stringify(out, null, 2))
