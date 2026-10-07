@@ -24,6 +24,7 @@ import { classifyLocally } from '../src/local-classifier'
 import * as path from 'path'
 import * as os from 'os'
 import * as fs from 'fs'
+import { fileURLToPath } from 'node:url'
 
 /** Temp workspace outside the plugin directory: writing into cwd pollutes the
  *  package and gets collected as a test file on the next run. */
@@ -101,7 +102,10 @@ describe('DSH Local Router Cordis Plugin Test Suite', () => {
   })
 
   it('No Daemon Surface: the built plugin exposes no endpoint configuration', () => {
-    const built = fs.readFileSync(path.join(process.cwd(), 'dist', 'index.js'), 'utf8')
+    // Resolved from this file rather than the process cwd: the previous form only held when the
+    // suite happened to be run from the plugin directory, so it broke for anyone running vitest
+    // from the repository root.
+    const built = fs.readFileSync(fileURLToPath(new URL('../dist/index.js', import.meta.url)), 'utf8')
     expect(built).not.toContain('11435')
     expect(built).not.toMatch(/layaEndpoint|layaDaemonUrl/)
   })
@@ -553,7 +557,11 @@ describe('Delegated code cannot be read back without approval', () => {
   })
 
   it('asks when the same read goes through the shell', () => {
-    const verdict = evaluateCodeWriteGuard(shell('Get-Content C:/repo/src/thing.ts'), {
+    // Derived from path.resolve rather than written as a literal: canonicalisation is relative to
+    // the current drive, so a hardcoded `C:/` passes locally and fails on a CI runner whose
+    // workspace lives on D:. The code was right; this test was machine-dependent.
+    const absolute = path.resolve('/repo/src/thing.ts').replace(/\\/g, '/')
+    const verdict = evaluateCodeWriteGuard(shell(`Get-Content ${absolute}`), {
       delegatedPaths: delegated,
     })
     expect(verdict?.kind).toBe('ask')
