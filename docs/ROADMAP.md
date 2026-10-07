@@ -73,6 +73,7 @@ Gated. Nothing here starts until the host gap and two decisions clear.
 | 1 | Read-guard scoping: distinguish architect from lead | **Blocked on the host** — see `SECURITY-REVIEW.md`, "Blocked on the host: agent lineage". The interim escape hatch is now **built**: `delegateReadPolicy`, documented as weakening rule 3 |
 | 2 | Choose the lead model | **Decided:** the local model already configured for the worker, thinking enabled, as `PROFILES.LEAD`. No new download, no metered spend, source never leaves the machine |
 | 4 | Delivery: documented subagent preset, or plugin support | **Decided:** documented preset. The plugin enforces boundaries; owning DSH's agent lifecycle would duplicate the host and break when it changes. Guide at `presets/lead.md` |
+| 4a | **`presets/lead/`** — a real DSH agent preset composition, with package ids read from the shipped `standard` preset rather than guessed | **Written, not run.** Install is a directory copy into `<dshHome>/.agent-presets/lead`. Mounting and selecting it is the next live test, and it is the only thing standing between this and a runnable three-tier system |
 | 3 | `LEAD` profile — thinking on, repository access, authors each unit's contract | **Built.** `PROFILES.LEAD` plus `leadTier`. The host half that grants repository access is guided in `presets/lead.md` and is not yet verified |
 | 5 | Fresh lead per workstream | Not started; gated on 2 and 4 |
 | 9 | Rule 8: source may not reach the cloud, approval-gated | **Built** as 2c above, and it is rule 8 in the policy table |

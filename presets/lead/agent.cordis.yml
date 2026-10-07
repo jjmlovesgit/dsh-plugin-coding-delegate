@@ -1,0 +1,101 @@
+# The `lead` agent preset: a repository-reading thinking agent that authors contracts.
+#
+# This file is an AGENT-PLANE composition, like the shipped presets. The host keeps everything a preset
+# must not own — the registries, the sandbox and approval stack, persistence, and the model route.
+#
+# The model route is the one that matters here. This preset does NOT choose the local provider; the
+# session's model selection does. So the plugin's `leadTier` / `leadProviders` setting is what makes
+# this agent a lead rather than the architect, and pointing the session at the cloud makes it a cloud
+# lead regardless of everything below.
+#
+# A service row must sit inside a group carrying an `isolate` realm; rows that only register into a host
+# registry need no realm. The rows below follow the shipped `standard` preset's shapes for exactly that
+# reason — they are copied rather than invented.
+
+# ── identity ────────────────────────────────────────────────────────────────
+
+# The lead's persona, shadowing the deployment default for this agent. `{{cwd}}` resolves from the
+# agent's own workspace. `prefix`/`suffix` are used rather than `complete: true`, so tool guidance and
+# runtime context still reach the model — a lead that cannot see its working directory cannot read a
+# repository.
+- id: persona
+  name: '@deepseek-ai/dsh-persona'
+  config:
+    prefix: >-
+      You are the Lead. You read the repository and author the contract for each unit of work. You do
+      not write implementation code, and you do not dispatch the worker — the architect does that with
+      your contract. For each unit, state: the files it touches, the exact change expected, the code
+      the worker must see, and the command that decides whether the unit passed. Quote any code you are
+      changing exactly as it appears, because a patch that does not match byte-for-byte is refused
+      rather than approximated.
+    suffix: Your working directory is {{cwd}}.
+
+# Repository conventions, when the repository documents them.
+- id: agent-instructions
+  name: '@deepseek-ai/dsh-agent-instructions'
+  config:
+    maxBytes: 65536
+
+# ── reading ─────────────────────────────────────────────────────────────────
+
+# Read, read_image, write and edit arrive together: the package does not split them. That is acceptable
+# here rather than ideal, and the reason is the plugin's own rule — the code guard refuses source writes
+# from any agent, so a lead that tries to author implementation is stopped by the same rule that stops
+# the architect. The separation does not depend on this preset being well behaved.
+- id: tool-fs
+  name: '@deepseek-ai/dsh-tool-fs'
+
+- id: tool-fs-search
+  name: '@deepseek-ai/dsh-tool-fs-search'
+  config:
+    sampleOverCapGlobResults: false
+
+# ── inspection ──────────────────────────────────────────────────────────────
+
+# A shell is what makes repository reading practical: history, listings, and running a test to see what
+# it actually says. It is defensible here for one reason only — this agent is meant to run locally, so
+# its output stays on the machine. A cloud lead with a shell is a different proposition entirely, which
+# is why the model route above is the load-bearing part of this file.
+- id: tool-bash
+  name: '@deepseek-ai/dsh-tool-bash'
+  disabled: !!js process.platform === 'win32'
+
+- id: tool-pwsh
+  name: '@deepseek-ai/dsh-tool-pwsh'
+  disabled: !!js process.platform !== 'win32'
+
+# ── compaction ──────────────────────────────────────────────────────────────
+
+# Surveying a repository fills a context window faster than anything else an agent does, so the lead
+# compacts. This is a real trade-off and not a free win: compaction is lossy, and what it summarises
+# away is often design intent. Keeping units small is the better answer; this is the backstop for when
+# they are not.
+- id: compaction
+  name: cordis:group
+  group: true
+  isolate:
+    compaction: true
+    toolResultPruner: true
+  config:
+    - id: compaction-basic
+      name: '@deepseek-ai/dsh-compaction-basic'
+
+    - id: command-compact
+      name: '@deepseek-ai/dsh-command-compact'
+
+    - id: tool-result-pruner
+      name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+      config:
+        thresholdChars: 8192
+        headChars: 4096
+        tailChars: 1024
+
+# ── deliberately absent ─────────────────────────────────────────────────────
+#
+# No subagent, workflow or ralph rows. The lead authors contracts and the architect dispatches them; an
+# agent that can dispatch as well is the orchestrator, which would leave the architect with nothing to
+# do. No plan mode either — a plan is the architect's artefact and a contract is the lead's, and giving
+# the lead both is how the two roles collapse back into one.
+#
+# No skill catalog, todo list, goal tools or `present` either. Each of those is a way of holding state
+# across a long piece of work, and holding state across units is precisely the architect's job.

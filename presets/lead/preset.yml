@@ -1,0 +1,3 @@
+name: Lead
+description: A repository-reading thinking agent that authors each unit's contract. It inspects the codebase and writes no implementation.
+order: 10

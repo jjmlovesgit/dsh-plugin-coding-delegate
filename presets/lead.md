@@ -51,35 +51,61 @@ it out of the credential gate.
 
 ## What the host needs
 
-DSH composes agents from **presets**: a directory holding `preset.yml` and `agent.cordis.yml`. The
-composition decides the tool schemas and prompt sections the agent sees. Two presets ship with DSH as
-working references — `minimal` (persona plus a persistent shell) and `standard` — and the fastest route
-is to copy one and adapt it:
+DSH composes agents from **presets**: a directory holding `preset.yml` and `agent.cordis.yml`, whose
+composition decides the tool schemas and prompt sections the agent sees. DSH scans configured `roots`
+for them and appends `<dshHome>/.agent-presets` as a user root by default, so installing one is a
+directory copy:
 
 ```
-presets/lead/
-  preset.yml          # name, description, order
-  agent.cordis.yml    # the composition: persona + repository-read tools
+copy  presets/lead   →   <dshHome>/.agent-presets/lead
 ```
 
-For the lead, the composition should give it:
+That is `C:\Users\<you>\.dsh\.agent-presets\lead\` on Windows. The preset id is the directory name and
+must match `[a-z0-9][a-z0-9-]*`. Discovery is health-checked rather than forgiving: a directory whose
+composition is missing or unloadable appears as a broken roster row with a reason, not as a silent skip,
+so a mistake is visible rather than mysterious.
 
-- a `@deepseek-ai/dsh-persona` entry whose `prefix` is the lead's instruction. The text below mirrors
-  `PROFILES.LEAD.systemInstruction` in the plugin, so the two agree on what the lead is for.
-- **read-only repository tools** — searching and reading files. Not write tools: the lead produces a
-  contract, not an implementation, and it should not be editing the tree it is surveying.
-- no `delegate_worker`.
+Then select the **local** provider and model for that session. The preset deliberately does not choose a
+model route — that stays on the host plane — so the session's selection is what the plugin keys on.
+Point it at the cloud and the lead is a cloud lead, whatever the composition says.
 
-Then select the **local** provider and model for that session. That selection is what the plugin keys
-on, so if it points at the cloud the lead is a cloud lead regardless of what the preset says.
+### What the preset provides
+
+`presets/lead/agent.cordis.yml` is a real composition — real package ids, taken from the shipped
+`standard` preset rather than guessed. It has **not been run**. It mounts:
+
+- `@deepseek-ai/dsh-persona` with the lead's instruction. `prefix`/`suffix` rather than `complete: true`,
+  so tool guidance and runtime context still reach the model; a lead that cannot see its working
+  directory cannot read a repository.
+- `@deepseek-ai/dsh-agent-instructions`, for repositories that document their own conventions.
+- `@deepseek-ai/dsh-tool-fs` and `@deepseek-ai/dsh-tool-fs-search`, for reading and searching.
+- the platform's shell tool, because history, listings and running a test are what repository reading
+  actually consists of.
+- compaction, because surveying a repository fills a window faster than anything else an agent does.
+
+Two properties are worth knowing rather than discovering.
+
+**The read tools cannot be mounted without the write tools.** `dsh-tool-fs` registers read, read_image,
+write and edit together; there is no read-only split. That is tolerable because the separation does not
+rest on this preset being well behaved: the plugin's code guard refuses source writes from *any* agent,
+so a lead that tries to author implementation is stopped by the same rule that stops the architect.
+
+**A shell makes this preset only as safe as its model route.** Running locally, the output stays on the
+machine. A cloud lead with a shell is a different proposition, which is why the provider selection above
+is the load-bearing part of the arrangement.
+
+Deliberately absent: subagents, workflows, plan mode, skills, todos and goals. The lead authors
+contracts; the architect dispatches them and holds state across units. An agent with both is the
+orchestrator, and the architect would have nothing left to do.
 
 The lead's instruction, for reference:
 
-> You are the Lead. You read the repository and author the contract for each unit of work: what must be
-> built, the interfaces and behaviour it needs, the files involved, and the tests that decide whether
-> the unit passed. You do not write implementation code, and you do not dispatch the worker — the
-> architect does that with your contract. Quote any code you are changing exactly as it appears,
-> because a patch that does not match byte-for-byte is refused rather than approximated.
+> You are the Lead. You read the repository and author the contract for each unit of work. You do not
+> write implementation code, and you do not dispatch the worker — the architect does that with your
+> contract. For each unit, state: the files it touches, the exact change expected, the code the worker
+> must see, and the command that decides whether the unit passed. Quote any code you are changing
+> exactly as it appears, because a patch that does not match byte-for-byte is refused rather than
+> approximated.
 
 ## What is verified, and what is not
 
@@ -90,16 +116,19 @@ pass-through are covered by `plugin/tests/oracles/agent-role.test.cjs` and
 `plugin/tests/oracles/lead-tier.test.cjs`, and both were written to fail before the implementation
 existed.
 
-**The host half is documented, not verified.** The preset directory shape, the two file names and the
-`agentPresets` service are read from the DSH installed here — but I have not created a lead preset and
-run it. Take the tool package ids from a working preset such as `standard` rather than from this
-document; the ids here would be guesses.
+**The host half is written, and still not verified.** The composition now exists, with package ids read
+from the shipped `standard` preset rather than guessed. What has not happened is a mount: nobody has
+copied it into a preset root, selected it, and watched it come up. Discovery is health-checked, so a
+mistake should surface as a broken roster row with a reason rather than as silence — but "should" is
+carrying real weight in that sentence, and testing it is the next step.
 
 **The read guard will over-ask.** Until the host exposes which agent is which, the guard cannot tell the
 lead from the architect, so the lead is prompted when it reads a file a worker wrote. That is item 1 on
 the roadmap and it is blocked on agent lineage. `delegateReadPolicy` is the interim escape hatch, and it
 trades away part of rule 3 — see the plugin README.
 
-Until the host half is wired, the lead tier is usable **manually**: run a second session against the
-local provider, with the instruction above, and paste its contract into the architect's conversation as
-a unit instruction. That is not automated, but it is the whole loop with a human in the middle of it.
+Two ways to try it. **Install the preset** — copy the directory into a preset root, open a session with
+it, and select the local provider — which is the real thing and is what the next test should cover. Or,
+with no setup at all, run a second session against the local provider with the instruction above and
+paste its contract into the architect's conversation as a unit instruction. The second is the whole loop
+with a human carrying the contract across, and it asks nothing of anyone.

@@ -33,12 +33,12 @@ exports.PROFILES = {
         max_tokens: 8192,
         enable_thinking: true,
         reasoning_effort: 'high',
-        systemInstruction: 'You are the Lead. You read the repository and author the contract for each unit of work: what ' +
-            'must be built, the interfaces and behaviour it needs, the files involved, and the tests that ' +
-            'decide whether the unit passed. You do not write implementation code, and you do not dispatch ' +
-            'the worker -- the architect does that with your contract. Quote any code you are changing ' +
-            'exactly as it appears, because a patch that does not match byte-for-byte is refused rather ' +
-            'than approximated.',
+        systemInstruction: 'You are the Lead. You read the repository and author the contract for each unit of work. You do ' +
+            'not write implementation code, and you do not dispatch the worker -- the architect does that ' +
+            'with your contract. For each unit, state: the files it touches, the exact change expected, the ' +
+            'code the worker must see, and the command that decides whether the unit passed. Quote any code ' +
+            'you are changing exactly as it appears, because a patch that does not match byte-for-byte is ' +
+            'refused rather than approximated.',
     },
     WORKER: {
         name: 'WORKER_LOCAL',
