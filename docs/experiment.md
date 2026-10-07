@@ -48,28 +48,35 @@ not against the workspace the failing command ran in, so nothing matched. The pr
 declared-context exclusion had the same latent flaw, and a raw-string comparison of paths only ever worked
 by luck of spelling. Oracles now 276/276.
 
-## Finding 2 — the architect cannot see, and could not repair, the contract
+## Finding 2 — the architect cannot tell a contract fault from a module fault
 
-**Three of the fourteen contractual areas never produced a verdict.** Tests 6, 8 and 12 aborted with
-`object is not iterable (cannot read property Symbol(Symbol.iterator))` — the contract's own shared harness
-iterating a non-iterable, not a fault in the module.
+**This finding was first written wrong, and the correction is more useful than the original.**
 
-The architect could not diagnose it, because reading the contract back would put implementation-shaped code
-into the metered context — the exact thing rule 3 forbids. So the repair had to be delegated from a symptom
-description. The worker returned the file **byte-identical**: 7,946 bytes, sha256 `561cf664…`, unchanged
-from step 1. Requested twice, the file never moved.
+The first version said three of the fourteen contractual areas never produced a verdict — tests 6, 8 and 12
+aborting with `object is not iterable (cannot read property Symbol(Symbol.iterator))` — and attributed that
+to a defect in the contract's own harness. On that basis it argued the architect could neither verify nor
+repair its own contract, and pointed at a repair delegation that returned the file **byte-identical**
+(7,946 bytes, sha256 `561cf664…`) as evidence of helplessness.
 
-This is the honest limit of "architect-authored contract" under this design, and it is structural rather
-than incidental:
+**The contract was fine.** Running it against a *null* implementation — a module that answers every property
+with itself, never throws, and so cannot be blamed — **all fourteen tests reach their assertions**. The
+`object is not iterable` aborts came from the *module* returning a non-iterable where the contract expected
+one. The byte-identical repair was not helplessness; there was nothing wrong to repair.
 
-- The guard stops the architect writing source, so the architect **cannot author the contract directly** —
-  only specify it and have it transcribed by the same class of model whose work it will judge.
-- The guard stops the architect reading source back, so the architect **cannot verify the transcription**,
-  and cannot repair a defective one except by describing a symptom and hoping.
+So the real Finding 2 is narrower and sharper than the original claim:
 
-So "architect-authored" is really *architect-specified, worker-transcribed, architect-unverified*. That is a
-weaker claim than the README's phrasing implies, and `contractFiles` hashing does not address it — it
-guarantees the contract did not change *during a unit*, not that it ever said what the spec said.
+- The architect **cannot author the contract directly** — the guard forbids cloud-authored source — so it is
+  specified by the architect and transcribed by the same class of model whose work it will judge.
+- The architect **cannot read it back** — rule 3 — so it cannot tell a contract that caught a real bug from a
+  contract that is itself broken. Both produce "tests failed", and the verdict carries no signal separating
+  them.
+- And the natural diagnosis is the wrong one. Faced with a failing test inside a file it had specified, the
+  architect blamed the contract. The module was at fault. Nothing in the available output could have
+  distinguished them, and an architect that guesses here will "repair" sound contracts and leave broken
+  modules alone — the exact double error this experiment committed before the guard existed.
+
+`contractFiles` hashing does not help with any of that: it guarantees the contract did not change *during a
+unit*, not that it says what the specification said, and not that a failure belongs to the module.
 
 ## Finding 3 — the contract does discriminate
 
@@ -78,10 +85,12 @@ Worth stating, because it is the thing that could have been vacuous and was not.
 - Against the first implementation it failed **two genuine behavioural defects** (eviction not choosing
   strictly by recency; replacing a key not refreshing expiry and recency while leaving the eviction count
   alone) — real bugs, correctly caught.
-- Against a subsequently rewritten implementation it failed **11 of 14 areas**.
+- Against a subsequently rewritten implementation it failed **11 of 14 areas** — and, per Finding 2, those
+  malfunctions are the module's, not the contract's.
+- Against a null implementation it fails **14 of 14 by assertion**.
 
-A contract that passed everything would have proved nothing. This one failed loudly and specifically, and
-its failures named the right behaviours.
+A contract that passed everything would have proved nothing. This one fails loudly, specifically, and in the
+right place.
 
 ## Finding 4 — "make exactly one change" is not a reliable instruction
 
@@ -101,14 +110,54 @@ what it says. That is worth knowing independently of this module.
 
 - **No green run was reached.** The endpoint is a contract that discriminates and an implementation that
   does not satisfy it. The loop carried the unit a long way; it did not close it.
-- **Three areas are unmeasured** and remain so until the harness defect is fixed by something that can read
-  the file.
 - **The B1 coherence check was not exercised.** It is operator configuration, is not set in the live
   profile, and enabling it needs a profile edit plus a restart. "Checks from outside the contract" was
   therefore satisfied by `contractFiles` integrity only — a real outside check, since the worker cannot
   alter what judges it, but the project-level variant this item was originally framed around did not run.
 - **Nothing here proves the module could ever be made to pass.** The contract was shown to discriminate;
   reaching green was not attempted further once the mutation step failed to isolate a change.
+
+## The guard, and what it found when pointed back at this experiment
+
+[`scripts/check-contract.cjs`](../scripts/check-contract.cjs) exists to close Finding 2. It is run after a
+contract has been transcribed, and it judges the contract **against a null implementation** — a module that
+answers every property with itself, every call with itself, and never throws.
+
+That choice of condition is the design. A test that fails by *malfunctioning* looks exactly like a test that
+caught a bug, and against a real module the ambiguity cannot be resolved: the module may simply be throwing.
+Against a null implementation the module cannot be blamed, so a malfunction is unambiguously the contract's.
+The run against the real module is printed and deliberately **not** judged, for the same reason.
+
+Two checks, and only the first decides:
+
+| | against a null implementation | verdict |
+| --- | --- | --- |
+| **discriminates** | at least one assertion failure | a contract that passes a module returning itself for everything constrains nothing |
+| **well-formed** | no malfunction failures | every test reached an assertion, so the failures are disagreements rather than errors |
+
+Pointed back at this experiment's contract, it **exonerated it**:
+
+```
+A. against a null implementation: 14 tests, 0 passed, 14 failed by assertion, 0 by malfunction
+   ok: it asserts, and every failure is a behavioural disagreement
+B. against the real module: 14 tests, 3 passed, 0 failed by assertion, 11 by malfunction
+   reported only. ...
+OK: the contract is well-formed and discriminating.
+```
+
+That is Finding 2 collapsing, and it is the strongest argument for the guard existing. The architect had
+already published the opposite conclusion — "the contract's own harness is broken" — in this document. The
+guard separated the two possibilities in one run, without reading a line of the contract, and put the fault
+where it belonged.
+
+And it is not an always-yes. Against a deliberately vacuous contract written as a fixture
+(`experiments/contract-first/tests/vacuous.test.js`, three tautologies that require the module and assert
+nothing about it) it refuses:
+
+```
+A. against a null implementation: 3 tests, 3 passed, 0 failed by assertion, 0 by malfunction
+   FAIL: it passed a module whose every call returns itself, so it constrains nothing
+```
 
 ## Live verification of the fix, after a restart
 
@@ -132,19 +181,23 @@ The scratch workspace was removed afterwards and the working tree was clean.
 
 ## Verdict on the premise
 
-**Partly supported, with a specific gap.**
+**Partly supported, with a specific gap — and the gap now has a detector.**
 
 What held up: the architect wrote a specification and no code; the module was implemented twice by a local
-worker from that specification alone; no implementation code entered the architect's context; a contract
-the worker could not alter judged the result and caught real defects; and the mechanism surfaced a genuine
-bug in this project's own code that no oracle had found.
+worker from that specification alone; no implementation code entered the architect's context; a contract the
+worker could not alter judged the result and caught real defects; and the mechanism surfaced a genuine bug in
+this project's own code that no oracle had found.
 
-What did not: the contract is the linchpin of the whole arrangement, and the architect is structurally
-unable to confirm that the contract says what the specification said. The plugin enforces that the worker
-cannot *change* the contract. It does nothing to establish that the contract was *right*, and the one party
-who could check it is the one party forbidden from reading it.
+What did not: the architect is structurally unable to tell a *contract* fault from a *module* fault, because
+it can neither read the contract nor see past "tests failed". This document demonstrates that failure
+directly rather than describing it — the first version of Finding 2 blamed the contract for the module's
+errors, and it was published that way.
 
-The cheapest repair worth trying is not architectural: the transcription step should end with the contract
-being **executed against a deliberately broken implementation**, and be rejected unless it fails. A contract
-that cannot fail on a wrong module is not a contract, and that test is available to the architect without
-reading a single line of it.
+The guard resolves exactly that ambiguity without reading the contract, which is the only kind of answer
+available under rule 3. It does not make the contract *right*: a contract can be well-formed, discriminating
+and still test the wrong behaviours, and nothing here would notice. What it removes is the failure this
+experiment actually committed — a sound contract condemned and a broken module excused, on the same
+evidence.
+
+One correction the guard also forces on the record. The repair that was originally read as helplessness —
+the worker returning the contract byte-identical — was the correct outcome. There was nothing to repair.

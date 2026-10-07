@@ -270,6 +270,32 @@ Still untyped, and honestly so: the hooks registered with `ctx.on` — `agent/re
 host's Cordis `Events` interface is not part of the pinned packages yet. Event *payloads* on the session
 log are checked; hook payloads are not.
 
+### Judging a transcribed contract
+
+Contracts are specified by the architect and transcribed by the worker, because the guard forbids
+cloud-authored source. The architect then cannot read the contract back — that would put
+implementation-shaped code into the metered context — so it cannot tell a contract that caught a real bug
+from a contract that is itself broken. Both look like "tests failed".
+
+```bash
+node scripts/check-contract.cjs --contract path/to/spec.test.js --module path/to/module.js
+```
+
+It judges the contract against a **null implementation** that answers every property with itself, every
+call with itself, and never throws. That condition is the design: the module cannot be blamed there, so a
+test that fails by *malfunctioning* is the contract's own fault, which against a real module it might not
+be. Two checks, only the first deciding:
+
+| | against the null implementation | rejected when |
+| --- | --- | --- |
+| discriminates | at least one assertion failure | it passes a module that returns itself for everything |
+| well-formed | no malfunction failures | a test never reached an assertion |
+
+The run against the real module is printed and deliberately not judged. A contract can be well-formed,
+discriminating, and still test the wrong behaviours; this guard removes one class of failure, not all of
+them. See [`docs/experiment.md`](docs/experiment.md), where it exonerated a contract the architect had
+already published a misdiagnosis of.
+
 ## What this does not claim
 
 - **A patch must match exactly, and a stale one fails.** The worker returns either a whole file or a
