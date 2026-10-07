@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.LocalRouter = exports.DEFAULT_VERIFICATION_POLICY = exports.DELEGATE_WORKER_SCHEMA = exports.DELEGATE_WORKER_OPENAI_SCHEMA = exports.name = exports.using = exports.inject = exports.SavingsTracker = exports.PROFILES = void 0;
+exports.DELETE_PRIMITIVES = exports.LocalRouter = exports.DEFAULT_VERIFICATION_POLICY = exports.DELEGATE_WORKER_SCHEMA = exports.DELEGATE_WORKER_OPENAI_SCHEMA = exports.name = exports.using = exports.inject = exports.SavingsTracker = exports.PROFILES = void 0;
 exports.resolveDataDir = resolveDataDir;
 exports.scanDLP = scanDLP;
 exports.isPathWithin = isPathWithin;
@@ -50,6 +50,7 @@ exports.delegateWorker = delegateWorker;
 exports.extractPromptText = extractPromptText;
 exports.estimateTokenCount = estimateTokenCount;
 exports.hasCommandWriteSignal = hasCommandWriteSignal;
+exports.hasCommandDeleteSignal = hasCommandDeleteSignal;
 exports.evaluateCodeWriteGuard = evaluateCodeWriteGuard;
 exports.requestApprovalForWrite = requestApprovalForWrite;
 exports.resolveVerificationPolicy = resolveVerificationPolicy;
@@ -1441,6 +1442,19 @@ function hasCommandWriteSignal(command) {
         return true;
     return /(?:^|[^=\-])>>?(?![=&])/.test(command);
 }
+/**
+ * Delete-capable constructs, checked against BOTH a command line and a script body.
+ * Destroying a source file is at least as consequential as overwriting it, and the first
+ * version of this guard left deletion entirely ungated. API-level removals are included
+ * because inline program text (`python -c "os.remove(...)"`) never names a verb the
+ * command line displays. Word-anchored for the same reason as the write list: unanchored,
+ * `rm` matches inside unrelated paths and `Move-Item` matches inside `Remove-Item`.
+ */
+exports.DELETE_PRIMITIVES = /(?:\bRemove-Item\b|\brm\b|\bdel\b|\berase\b|\brmdir\b|\brd\b|\bunlink\b|\bshred\b|\bgit\s+rm\b|\bos\.remove\b|\bshutil\.rmtree\b|\bunlinkSync\b|\brmSync\b|\brmdirSync\b|\bfs\.unlink\b)/i;
+/** Does this command line or script body carry a delete signal? */
+function hasCommandDeleteSignal(text) {
+    return typeof text === 'string' && text.length > 0 && exports.DELETE_PRIMITIVES.test(text);
+}
 /** Tokens in a command line that name a script file. */
 function extractScriptPaths(command) {
     if (typeof command !== 'string' || !command)
@@ -1480,8 +1494,8 @@ function findWriteViaScript(command, readScript, depth, visited = new Set()) {
         const body = readScript(script);
         if (!body)
             continue;
-        // Both signals are required: a write primitive AND a source reference.
-        if (WRITE_PRIMITIVES.test(body)) {
+        // Both signals are required: a mutation primitive (write or delete) AND a source reference.
+        if (WRITE_PRIMITIVES.test(body) || exports.DELETE_PRIMITIVES.test(body)) {
             const reference = CODE_REFERENCE.exec(body);
             if (reference)
                 return { script, target: reference[0] };
@@ -1546,14 +1560,22 @@ function evaluateCodeWriteGuard(exec, config = {}) {
         // cleared by matching the write target itself: `cp`, `git checkout`, a real
         // redirection, or inline program text all write a file the pattern never sees.
         const referenced = CODE_REFERENCE.exec(command);
-        if (referenced && hasCommandWriteSignal(command)) {
-            return {
-                kind: 'ask',
-                target: referenced[0],
-                reason: `Shell command names source file '${referenced[0]}' and carries a write signal, so it may ` +
-                    `author source from the cloud context. Command-line inspection cannot prove otherwise, so ` +
-                    `this requires explicit approval; prefer delegate_worker for code work.`,
-            };
+        if (referenced) {
+            const writes = hasCommandWriteSignal(command);
+            const deletes = hasCommandDeleteSignal(command);
+            if (writes || deletes) {
+                return {
+                    kind: 'ask',
+                    target: referenced[0],
+                    reason: deletes && !writes
+                        ? `Shell command would delete source file '${referenced[0]}'. Destroying source from the ` +
+                            `cloud context is gated the same way as writing it, so this requires explicit approval; ` +
+                            `prefer delegate_worker for code work.`
+                        : `Shell command names source file '${referenced[0]}' and carries a write signal, so it may ` +
+                            `author source from the cloud context. Command-line inspection cannot prove otherwise, so ` +
+                            `this requires explicit approval; prefer delegate_worker for code work.`,
+                };
+            }
         }
         return null;
     }

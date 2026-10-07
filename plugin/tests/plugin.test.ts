@@ -16,6 +16,7 @@ import {
   using,
   apply,
   hasCommandWriteSignal,
+  hasCommandDeleteSignal,
   evaluateCodeWriteGuard,
 } from '../src/index'
 import { classifyLocally } from '../src/local-classifier'
@@ -394,5 +395,27 @@ describe('Local-code guard: command-line write detection', () => {
   it('stays silent for read-only commands that name a source file', () => {
     expect(evaluateCodeWriteGuard(shell('git diff src/index.ts'))).toBeNull()
     expect(evaluateCodeWriteGuard(shell("Test-Path 'src/index.ts'"))).toBeNull()
+  })
+
+  it('gates deletion of source files, not only overwriting them', () => {
+    // Destroying source from the cloud context is gated the same way as writing it.
+    expect(hasCommandDeleteSignal('Remove-Item src/gone.ts')).toBe(true)
+    expect(evaluateCodeWriteGuard(shell('Remove-Item src/gone.ts'))?.kind).toBe('ask')
+    expect(evaluateCodeWriteGuard(shell('rm src/gone.ts'))?.kind).toBe('ask')
+    expect(evaluateCodeWriteGuard(shell('git rm src/gone.ts'))?.kind).toBe('ask')
+  })
+
+  it('reports deletion as deletion, not as a write', () => {
+    const verdict = evaluateCodeWriteGuard(shell('rm src/gone.ts'))
+    expect(verdict?.reason).toMatch(/would delete/i)
+  })
+
+  it('detects deletion performed through inline program text', () => {
+    expect(evaluateCodeWriteGuard(shell('python -c "import os; os.remove(\'src/gone.ts\')"'))?.kind).toBe('ask')
+  })
+
+  it('leaves non-source files alone', () => {
+    // Only source extensions are in scope; a build artefact is not the guard's business.
+    expect(evaluateCodeWriteGuard(shell('Remove-Item build/output.log'))).toBeNull()
   })
 })

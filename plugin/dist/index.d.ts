@@ -345,6 +345,17 @@ export interface GuardVerdict {
  */
 export declare function hasCommandWriteSignal(command: string): boolean;
 /**
+ * Delete-capable constructs, checked against BOTH a command line and a script body.
+ * Destroying a source file is at least as consequential as overwriting it, and the first
+ * version of this guard left deletion entirely ungated. API-level removals are included
+ * because inline program text (`python -c "os.remove(...)"`) never names a verb the
+ * command line displays. Word-anchored for the same reason as the write list: unanchored,
+ * `rm` matches inside unrelated paths and `Move-Item` matches inside `Remove-Item`.
+ */
+export declare const DELETE_PRIMITIVES: RegExp;
+/** Does this command line or script body carry a delete signal? */
+export declare function hasCommandDeleteSignal(text: string): boolean;
+/**
  * Decide whether a tool call would author source code from the cloud context.
  * Pure and exported so it can be unit-tested without a running server.
  * Returns null when the call has nothing to do with code authoring.
