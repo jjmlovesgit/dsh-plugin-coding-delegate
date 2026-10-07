@@ -384,6 +384,8 @@ export declare function evaluateCodeWriteGuard(exec: any, config?: {
     readScript?: (script: string) => string | undefined;
     /** How deep to follow script-invokes-script (default 2). */
     scriptDepth?: number;
+    /** Paths a delegated worker wrote; reads of them are gated. Injectable for tests. */
+    delegatedPaths?: Iterable<string>;
 }): GuardVerdict | null;
 /** Closed approval vocabulary; only 'allowed-once' is a grant. */
 export type ApprovalOutcome = 'allowed-once' | 'rejected' | 'cancelled' | 'unavailable';

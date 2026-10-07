@@ -295,8 +295,12 @@ not ok 3 - PriorityQueue isEmpty
       tracker
     )
 
-    expect(res.success).toBe(true)
-    expect(res.status).toBe('SUCCESS')
+    // The worker wrote a file and no verification command was supplied, so the contract is
+    // unchecked. This used to report SUCCESS, which was the same false green as counting
+    // unrecognised test output as a pass.
+    expect(res.success).toBe(false)
+    expect(res.status).toBe('UNVERIFIED')
+    expect(res.summary).toContain('contract was never checked')
     expect(res.filesWrittenRelative).toContain(path.join('src', 'math.ts'))
     expect(path.isAbsolute(res.filesWritten[0])).toBe(true)
     expect(res.tokens.prompt).toBe(30)
@@ -481,5 +485,87 @@ describe('Local worker target configuration', () => {
 
     expect(fetchMock.mock.calls[0][0]).toBe('http://127.0.0.1:11434/v1/chat/completions')
     fs.rmSync(tmpDir, { recursive: true, force: true })
+  })
+})
+
+describe('A delegated result is a verdict on a contract', () => {
+  const workerReply = (content: string) => ({
+    ok: true,
+    json: async () => ({
+      choices: [{ message: { content } }],
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+    }),
+  })
+
+  it('reports SUCCESS when a supplied contract was actually checked', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(workerReply('```typescript file="src/ok.ts"\nexport const ok = 1\n```'))
+    )
+    const tmpDir = makeTempWorkspace('lr-contract')
+
+    const res = await delegateWorker(
+      {
+        taskName: 'Checked',
+        instruction: 'write it',
+        targetFiles: ['src/ok.ts'],
+        workspaceDir: tmpDir,
+        runVerification: 'node --version',
+        verificationPolicy: { mode: 'allow', allowlist: [], allowInProcessFallback: false },
+      },
+      new SavingsTracker(tmpDir)
+    )
+
+    expect(res.status).toBe('SUCCESS')
+    expect(res.success).toBe(true)
+    fs.rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  it('leaves a delegation with no files to verify as SUCCESS', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(workerReply('no files here')))
+    const tmpDir = makeTempWorkspace('lr-nofiles')
+
+    const res = await delegateWorker(
+      { taskName: 'AnswerOnly', instruction: 'just answer', workspaceDir: tmpDir },
+      new SavingsTracker(tmpDir)
+    )
+
+    expect(res.status).toBe('SUCCESS')
+    fs.rmSync(tmpDir, { recursive: true, force: true })
+  })
+})
+
+describe('Delegated code cannot be read back without approval', () => {
+  const read = (filePath: string) => ({ name: 'read', arguments: { file_path: filePath } })
+  const shell = (command: string) => ({ name: 'pwsh', arguments: { command } })
+  const delegated = ['/repo/src/thing.ts']
+
+  it('asks when the architect reads a file a worker wrote', () => {
+    const verdict = evaluateCodeWriteGuard(read('/repo/src/thing.ts'), { delegatedPaths: delegated })
+    expect(verdict?.kind).toBe('ask')
+    expect(verdict?.reason).toMatch(/delegated worker/)
+  })
+
+  it('leaves every other read alone', () => {
+    expect(evaluateCodeWriteGuard(read('/repo/src/other.ts'), { delegatedPaths: delegated })).toBeNull()
+    // No registry configured at all: nothing is gated.
+    expect(evaluateCodeWriteGuard(read('/repo/src/thing.ts'))).toBeNull()
+  })
+
+  it('asks when the same read goes through the shell', () => {
+    const verdict = evaluateCodeWriteGuard(shell('Get-Content C:/repo/src/thing.ts'), {
+      delegatedPaths: delegated,
+    })
+    expect(verdict?.kind).toBe('ask')
+    expect(verdict?.reason).toMatch(/reads/)
+  })
+
+  it('does not treat a delegated path as a write target', () => {
+    // Writes to a delegated file are still judged by the write rules, not this one.
+    const verdict = evaluateCodeWriteGuard(
+      { name: 'write', arguments: { file_path: '/repo/src/thing.ts' } },
+      { delegatedPaths: delegated }
+    )
+    expect(verdict?.kind).toBe('deny')
   })
 })

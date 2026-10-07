@@ -9,6 +9,24 @@ architect's explicit choice to delegate or not.
 > the honest limits are documented rather than glossed. See
 > [What this does not claim](#what-this-does-not-claim).
 
+## The policy
+
+**The architect may reason but not author. The worker may author but not stray. Neither may execute
+without consent.**
+
+Every rule here is an instance of that sentence, and every one fails closed — if a rule cannot be
+evaluated, or the approval service cannot be reached, the answer is no.
+
+| # | Rule | Enforced by |
+| --- | --- | --- |
+| 1 | A credential may not reach the cloud | DLP gate: refused, or pinned local |
+| 2 | The architect may not author or delete source | code guard: denied, or approval-gated |
+| 3 | The architect may not read back what it delegated | reads of worker-written files need approval |
+| 4 | The worker may not write outside the workspace | containment on every emitted path |
+| 5 | The worker's code may not run inside the server | subprocess only; in-process fallback off |
+| 6 | A command the architect proposes may not run unchecked | approval seam |
+| 7 | A delegated result is a verdict, not a claim | files written without verification report `UNVERIFIED` |
+
 ## What it does
 
 Four things, in the order they act:
@@ -19,8 +37,9 @@ Four things, in the order they act:
    high-entropy tokens before the cloud sees them. A hit is refused or rerouted to the local
    worker, never transmitted. The gate accumulates the user messages it has seen, so a credential
    from an earlier turn keeps it closed instead of scrolling out of view.
-3. **A code-write guard.** Cloud-authored writes to source files are denied or sent for approval,
-   so the model that plans is not the model that edits. Shell writes *and deletions* are covered,
+3. **A code guard, in both directions.** Cloud-authored writes *and deletions* of source are denied
+   or sent for approval — and so is reading back a file the worker wrote, since that pulls the
+   delegated code into the very context the delegation kept it out of. Shell forms are covered,
    including inline program text (`python -c`, `node -e`).
 4. **`delegate_worker`.** A tool the architect calls to hand implementation to a local
    OpenAI-compatible server (LM Studio, Ollama, vLLM, llama.cpp, a remote gateway). File writes

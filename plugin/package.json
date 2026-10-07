@@ -1,7 +1,7 @@
 {
   "name": "dsh-plugin-local-router",
   "version": "0.1.0",
-  "description": "Local-first routing for DeepSeek Harness by permission rather than preference: a credential never reaches the cloud, the cloud model cannot author source code, and implementation is delegated to a local worker",
+  "description": "DeepSeek Harness plugin where the architect may reason but not author: a credential never reaches the cloud, the cloud model can neither write nor read back source, and code work is delegated to a local worker and returns a verdict rather than code",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [

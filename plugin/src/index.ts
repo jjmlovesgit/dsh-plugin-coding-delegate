@@ -1149,6 +1149,8 @@ export async function delegateWorker(
       params.emitAllowlist ?? []
     )
     const filesWritten = emission.filesWritten
+    // Remember what we wrote on the architect's behalf, so reading it back can be gated.
+    rememberDelegated(filesWritten.map((f) => f.path))
 
     let testResults: TestResults | undefined = undefined
     let verificationGate: string | undefined = undefined
@@ -1177,8 +1179,18 @@ export async function delegateWorker(
       }
     }
 
+    // A result is a verdict on a contract, and the contract is the verification command. Code
+    // produced without one has an unchecked contract: reporting SUCCESS there would be the same
+    // false green as counting unrecognised test output as a pass, which this plugin has already
+    // been caught doing twice.
+    const wroteFiles = filesWritten.length > 0 && emission.errors.length === 0
+    const unverified = !verificationGate && !params.runVerification && wroteFiles
+
     const isSuccess =
-      !verificationGate && (!testResults || testResults.failed === 0) && emission.errors.length === 0
+      !verificationGate &&
+      !unverified &&
+      (!testResults || testResults.failed === 0) &&
+      emission.errors.length === 0
 
     let summaryText = ''
     if (filesWritten.length > 0) {
@@ -1200,6 +1212,11 @@ export async function delegateWorker(
     if (verificationGate) {
       summaryText += `\nVerification was NOT run: ${verificationGate}`
     }
+    if (unverified) {
+      summaryText +=
+        `\nUNVERIFIED: no verification command was supplied, so the contract was never checked. ` +
+        `Files were written; nothing was proven.`
+    }
     if (testResults) {
       summaryText += `\nVerification Results: Passed ${testResults.passed}, Failed ${testResults.failed}.`
       if (testResults.errorSummary) {
@@ -1220,6 +1237,8 @@ export async function delegateWorker(
           failed: 0,
           output: verificationGate
             ? `Verification not run: ${verificationGate}`
+            : unverified
+            ? 'No verification command was supplied; the contract is unchecked.'
             : 'No verification requested.',
         },
       ...(verificationGate ? { verificationSkipped: verificationGate } : {}),
@@ -1230,6 +1249,8 @@ export async function delegateWorker(
       summary: summaryText,
       status: verificationGate
         ? 'VERIFICATION_NOT_APPROVED'
+        : unverified
+        ? 'UNVERIFIED'
         : isSuccess
         ? 'SUCCESS'
         : 'VERIFICATION_FAILED',
@@ -1681,6 +1702,61 @@ const SHELL_TOOLS = new Set([
   'pwsh', 'bash', 'shell', 'terminal', 'run_command', 'pwsh_persistent', 'bash_persistent',
 ])
 
+/** Tools that read a file's contents into the caller's context. */
+const READ_TOOLS = new Set(['read', 'read_file', 'fs_read', 'view', 'view_file', 'cat'])
+
+/**
+ * Files this plugin wrote on the architect's behalf, so that reads of them can be gated.
+ *
+ * The separation this plugin enforces is meant to be mutual: the architect specifies, the worker
+ * authors, and the code stays on disk. Nothing stopped the architect from reading back what it had
+ * just delegated — which makes the delegation pointless, because the code lands in the very
+ * context it was kept out of. These paths are the ones the guard can be precise about, since the
+ * plugin is the thing that wrote them.
+ *
+ * In-memory and process-scoped on purpose: this is a workflow guard ("you delegated this; do you
+ * need to read it back?"), not durable state. Bounded so a long session cannot grow it forever.
+ */
+const delegatedPaths = new Set<string>()
+const DELEGATED_PATH_LIMIT = 500
+
+function rememberDelegated(paths: string[]): void {
+  for (const p of paths) {
+    if (typeof p !== 'string' || !p) continue
+    const canonical = canonicalisePath(p)
+    if (delegatedPaths.has(canonical)) continue
+    delegatedPaths.add(canonical)
+    if (delegatedPaths.size > DELEGATED_PATH_LIMIT) {
+      const oldest = delegatedPaths.values().next().value
+      if (typeof oldest === 'string') delegatedPaths.delete(oldest)
+    }
+  }
+}
+
+function isDelegatedPath(target: string, paths?: Iterable<string>): boolean {
+  const canonical = canonicalisePath(target)
+  for (const p of paths ?? []) {
+    if (canonicalisePath(String(p)) === canonical) return true
+  }
+  return false
+}
+
+/**
+ * A delegated file named by a read-only inspector in a shell command is the same read by another
+ * route. Only delegated paths are tested, so this cannot reintroduce the false positive that made
+ * `Select-String some.js` look like a script invocation.
+ */
+function findDelegatedRead(command: string, paths?: Iterable<string>): string | undefined {
+  if (typeof command !== 'string' || !command || !paths) return undefined
+  for (const p of paths) {
+    const canonical = canonicalisePath(String(p))
+    for (const form of [canonical, canonical.replace(/\\/g, '/')]) {
+      if (command.includes(form) && isReadArgument(command, form)) return form
+    }
+  }
+  return undefined
+}
+
 const DEFAULT_GUARD_ASK_PATHS = ['tests/', 'tools/']
 
 export interface GuardVerdict {
@@ -1899,6 +1975,8 @@ export function evaluateCodeWriteGuard(
     readScript?: (script: string) => string | undefined
     /** How deep to follow script-invokes-script (default 2). */
     scriptDepth?: number
+    /** Paths a delegated worker wrote; reads of them are gated. Injectable for tests. */
+    delegatedPaths?: Iterable<string>
   } = {}
 ): GuardVerdict | null {
   const name = String(exec?.name || '')
@@ -1910,6 +1988,24 @@ export function evaluateCodeWriteGuard(
     `Writing source file '${target}' from the cloud context is blocked by the local-only code guard. ` +
     `Delegate this work to the local RTX 5090 worker: call delegate_worker with targetFiles and ` +
     `workspaceDir set to the session workspace.`
+
+  // Reading a file the architect delegated pulls that code straight back into its context, which
+  // is precisely the noise delegation exists to keep out. Ask rather than deny: reviewing a line
+  // of it is sometimes exactly what the operator wants.
+  if (READ_TOOLS.has(name)) {
+    const target = extractWriteTarget(args)
+    if (target && isDelegatedPath(target, config.delegatedPaths)) {
+      return {
+        kind: 'ask',
+        target,
+        reason:
+          `'${target}' was written by a delegated worker, and reading it pulls that code into the ` +
+          `cloud architect's context — the noise the delegation exists to keep out. Ask the worker ` +
+          `to inspect it and report instead, or approve this read if you need the contents here.`,
+      }
+    }
+    return null
+  }
 
   if (WRITE_TOOLS.has(name)) {
     const target = extractWriteTarget(args)
@@ -1980,6 +2076,19 @@ export function evaluateCodeWriteGuard(
                 `author source from the cloud context. Command-line inspection cannot prove otherwise, so ` +
                 `this requires explicit approval; prefer delegate_worker for code work.`,
         }
+      }
+    }
+
+    // Reading a delegated file through the shell is the same read by another route.
+    const delegatedRead = findDelegatedRead(command, config.delegatedPaths)
+    if (delegatedRead) {
+      return {
+        kind: 'ask',
+        target: delegatedRead,
+        reason:
+          `Shell command reads '${delegatedRead}', which a delegated worker wrote. Reading it pulls ` +
+          `that code into the cloud architect's context; ask the worker to inspect it instead, or ` +
+          `approve this read if you need the contents here.`,
       }
     }
 
@@ -2224,7 +2333,10 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
       const decision = typeof next === 'function' ? await next() : { kind: 'allow' }
       if (!decision || decision.kind !== 'allow') return decision
       try {
-        const verdict = evaluateCodeWriteGuard(exec, { askPaths: options?.guardAskPaths })
+        const verdict = evaluateCodeWriteGuard(exec, {
+          askPaths: options?.guardAskPaths,
+          delegatedPaths,
+        })
         if (verdict) {
           // guardMode 'deny' wins outright: an operator who said "never prompt" must
           // not be prompted just because this path would otherwise be ask-eligible.

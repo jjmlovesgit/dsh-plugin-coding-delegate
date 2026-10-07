@@ -15,6 +15,32 @@ that dependency was removed, and the credential rules are now TypeScript in this
 > else — it adds no provider, no model and no API key. Provider setup is entirely yours.
 > `cordis.patch.example.yml` ships as an **unapplied** starting point you can copy from.
 
+## The policy
+
+**The architect may reason but not author. The worker may author but not stray. Neither may execute
+without consent.**
+
+Every rule in this plugin is an instance of that sentence, and every one fails closed — if a rule
+cannot be evaluated, or the approval service cannot be reached, the answer is no.
+
+| # | Rule | Enforced by |
+| --- | --- | --- |
+| 1 | A credential may not reach the cloud | DLP gate on every outbound request; refused, or pinned local |
+| 2 | The architect may not author or delete source | code guard on `tools/pre-execute`; denied, or approval-gated |
+| 3 | The architect may not read back what it delegated | reads of worker-written files require approval |
+| 4 | The worker may not write outside the workspace | containment on every emitted path, symlinks included |
+| 5 | The worker's code may not run inside the server | subprocess only; the in-process fallback is off |
+| 6 | A command the architect proposes may not run unchecked | approval seam via `verificationApproval` |
+| 7 | A delegated result is a verdict, not a claim | files written without verification report `UNVERIFIED`, never `SUCCESS` |
+
+The division is meant to be mutual and is enforced in both directions: rule 2 stops the architect
+typing code into your repository, rules 3–5 stop the worker reaching outside the work it was given,
+and rule 7 stops an unchecked result being reported as a pass.
+
+What the policy does **not** cover is listed under [Limitations](#limitations) rather than left
+implied: code in prose is not mediated, files this plugin did not write remain freely readable, and
+the guard is a deterrent at the tool layer, not an airtight boundary.
+
 ## What it does
 
 1. **Gates what may leave the machine.** Every outbound request is scanned for credentials. A hit
@@ -350,6 +376,18 @@ Stated plainly, so this is not over-read:
 Once enabled, `write`/`edit`-style tool calls targeting source extensions are refused with a
 message directing the work to `delegate_worker`.
 
+### Reading back what was delegated
+
+The guard runs in both directions. A `read`-style tool call — or a shell command that reads through
+`Get-Content`, `cat`, `Select-String`, `grep` and the like — is **asked** when the target is a file
+this plugin wrote on a delegation's behalf. The reason is the one the delegation exists for: pulling
+that code back into the architect's context defeats the point of having delegated it. Ask the worker
+to inspect the file and report instead, or approve the read if you need the contents.
+
+The registry is in-memory and process-scoped — it is a workflow guard, not durable state — and it is
+bounded at 500 paths. Only files this plugin wrote are covered; everything else reads freely, and a
+delegated path is only recognised in a shell command when the command names it in full.
+
 Paths matching `guardAskPaths` (default `tests/`, `tools/`) are **asked** rather than refused:
 the guard calls `ctx.approval.request(...)` on `@deepseek-ai/dsh-user-approval`, and only an
 `allowed-once` outcome lets the write through. That seam fails closed — no approval service, no
@@ -363,6 +401,9 @@ reaches for the approval service explicitly instead of returning `ask`.
 Known limits:
 
 - The guard sees tool calls, not prose — it cannot stop code being typed into a reply.
+- The read guard covers files **this plugin wrote**. Every other file is still freely readable, and a
+  delegated file is recognised in a shell command only when the command names it in full — a path
+  built at runtime, or a glob that happens to match one, is not detected.
 - Shell writes **and deletions** are detected heuristically. Two scans run: a script named on
   the command line **for execution** is read and followed up to depth 2 (with cycle protection),
   and the **command line itself** is checked for a source-extension reference combined with a
@@ -404,8 +445,14 @@ runs with the full authority of the DSH process. It is therefore gated:
 | `'deny'` | Verification never runs. |
 
 A command that does not run is reported as `status: 'VERIFICATION_NOT_APPROVED'` with a
-`verificationSkipped` reason and `success: false` — an unverified task is never reported as a
-success. `runVerification` is not confined to the workspace, so read the approval prompt, and see
+`verificationSkipped` reason and `success: false`.
+
+**A result is a verdict on a contract, and the verification command *is* the contract.** So a
+delegation that wrote files without being given a command to check them reports
+`status: 'UNVERIFIED'` and `success: false`, with the summary saying the contract was never checked.
+It previously reported `SUCCESS`, which was the same false green as counting unrecognised test output
+as a pass. A delegation that wrote no files — a question answered, say — has nothing to verify and
+still reports `SUCCESS`. `runVerification` is not confined to the workspace, so read the approval prompt, and see
 [verification runs as a subprocess](#verification-runs-as-a-subprocess--a-container-is-optional-hardening)
 for the container option.
 
