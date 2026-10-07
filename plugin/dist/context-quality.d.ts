@@ -45,18 +45,21 @@ export interface ContextQuality {
     /** Tokens the host reported as shadowed -- reclaimed -- by summaries and prunes. */
     tokensReclaimed: number;
     /**
-     * The provider's own input-token count for the most recent model call: the size of the request the
-     * model actually received, which is the window as it stood at that step.
+     * The prompt the model actually received on the most recent model call: the window as it stood at
+     * that step. Measured against a real session rather than inferred from a field name.
      *
-     * Not an estimate. `dsh-llm`'s `TokenUsage.inputTokens` is required and `assistant/message` carries
-     * the usage record, so this arrives on the same firehose as everything else here.
+     * Explicitly NOT `usage.inputTokens`, which is what the first version of this counter used and why
+     * it was wrong. That field is only the UNCACHED portion of the prompt: a live call reported
+     * `inputTokens` 228 alongside `cacheReadTokens` 659456 and `totalTokens` 661541, with
+     * `input + cacheRead + output === total` exactly. Reading it as the window understates a 660k-token
+     * window by a factor of about 2900 — in the direction that makes a full window look empty.
      */
-    lastModelInputTokens: number;
+    lastPromptTokens: number;
     /**
      * The high-water mark of that figure. This, not the last value, is the number that forces a
      * compaction, and it is the one to compare against a window.
      */
-    peakModelInputTokens: number;
+    peakPromptTokens: number;
     /** The context window the route advertised, when it advertised one. */
     contextWindow: number | null;
     /**

@@ -46,18 +46,21 @@ export interface ContextQuality {
   /** Tokens the host reported as shadowed -- reclaimed -- by summaries and prunes. */
   tokensReclaimed: number
   /**
-   * The provider's own input-token count for the most recent model call: the size of the request the
-   * model actually received, which is the window as it stood at that step.
+   * The prompt the model actually received on the most recent model call: the window as it stood at
+   * that step. Measured against a real session rather than inferred from a field name.
    *
-   * Not an estimate. `dsh-llm`'s `TokenUsage.inputTokens` is required and `assistant/message` carries
-   * the usage record, so this arrives on the same firehose as everything else here.
+   * Explicitly NOT `usage.inputTokens`, which is what the first version of this counter used and why
+   * it was wrong. That field is only the UNCACHED portion of the prompt: a live call reported
+   * `inputTokens` 228 alongside `cacheReadTokens` 659456 and `totalTokens` 661541, with
+   * `input + cacheRead + output === total` exactly. Reading it as the window understates a 660k-token
+   * window by a factor of about 2900 — in the direction that makes a full window look empty.
    */
-  lastModelInputTokens: number
+  lastPromptTokens: number
   /**
    * The high-water mark of that figure. This, not the last value, is the number that forces a
    * compaction, and it is the one to compare against a window.
    */
-  peakModelInputTokens: number
+  peakPromptTokens: number
   /** The context window the route advertised, when it advertised one. */
   contextWindow: number | null
   /**
@@ -78,8 +81,8 @@ export const EMPTY_CONTEXT_QUALITY: ContextQuality = {
   prunes: 0,
   failedCompactions: 0,
   tokensReclaimed: 0,
-  lastModelInputTokens: 0,
-  peakModelInputTokens: 0,
+  lastPromptTokens: 0,
+  peakPromptTokens: 0,
   contextWindow: null,
   route: '',
 }
@@ -99,16 +102,24 @@ function shadowedTokens(data: any): number | null {
 }
 
 /**
- * The provider's input-token figure for one model call, or null when it is missing or unusable.
+ * The prompt one model call received, or null when the record is unusable.
  *
- * Null is load-bearing rather than cosmetic: a model call that did not report usage must leave the last
- * known figure standing. Treating it as zero would render a full window as an empty one, which is the
- * wrong direction for a measurement whose whole purpose is to show the window filling up.
+ * `inputTokens` alone is NOT that number, and reading it as though it were is the defect this function
+ * was rewritten to fix: measured on a live session, a call reported `inputTokens` 228 with
+ * `cacheReadTokens` 659456 and `totalTokens` 661541, and `input + cacheRead + output === total` exactly.
+ * So `inputTokens` counts only the uncached remainder, and the cached prefix — which on any caching
+ * provider is most of the window — has to be added back.
+ *
+ * Null is load-bearing rather than cosmetic: a call that reported nothing must leave the last known
+ * figure standing. Treating it as zero would render a full window as an empty one, which is the wrong
+ * direction for a measurement whose whole purpose is to show the window filling up.
  */
-function modelInputTokens(usage: any): number | null {
-  const value = usage?.inputTokens
-  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return null
-  return value
+function promptTokens(usage: any): number | null {
+  const fresh = usage?.inputTokens
+  if (typeof fresh !== 'number' || !Number.isFinite(fresh) || fresh < 0) return null
+  const cached = usage?.cacheReadTokens
+  const cacheRead = typeof cached === 'number' && Number.isFinite(cached) && cached >= 0 ? cached : 0
+  return fresh + cacheRead
 }
 
 /** The advertised context window, or null when absent or not a positive finite number. */
@@ -157,14 +168,14 @@ export function foldContextQuality(state: ContextQuality, event: any): ContextQu
     }
 
     case 'assistant/message': {
-      const tokens = modelInputTokens(data?.usage)
+      const tokens = promptTokens(data?.usage)
       // No reported usage means no new information. Returning `state` keeps the last known window size
       // standing rather than reporting the call as free.
       if (tokens === null) return state
       return {
         ...state,
-        lastModelInputTokens: tokens,
-        peakModelInputTokens: Math.max(state.peakModelInputTokens, tokens),
+        lastPromptTokens: tokens,
+        peakPromptTokens: Math.max(state.peakPromptTokens, tokens),
       }
     }
 
@@ -200,13 +211,13 @@ export function describeContextQuality(state: ContextQuality): string {
     state.tokensReclaimed +
     ' token(s) reclaimed, ' +
     (state.contextWindow === null
-      ? state.lastModelInputTokens + ' token(s) at the last call'
-      : state.lastModelInputTokens +
+      ? state.lastPromptTokens + ' token(s) at the last call'
+      : state.lastPromptTokens +
         '/' +
         state.contextWindow +
         ' token(s) at the last call') +
-    (state.peakModelInputTokens > state.lastModelInputTokens
-      ? ' (peak ' + state.peakModelInputTokens + ')'
+    (state.peakPromptTokens > state.lastPromptTokens
+      ? ' (peak ' + state.peakPromptTokens + ')'
       : '') +
     (state.route ? ' on ' + state.route : '')
   )

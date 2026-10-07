@@ -3,6 +3,50 @@
 Small, real, and known-but-open. Each is the kind of thing this project would rather write down than
 rediscover. Resolved entries are kept in place, marked, so the reasoning is not lost.
 
+## `TokenUsage.inputTokens` is not the window — found by live testing, fixed
+
+The context-quality counters first reported the prompt as `usage.inputTokens`. That is wrong, and wrong by
+a factor of thousands.
+
+Measured by decoding a real session log — this project's own, in fact — and running the fold over the
+events it actually recorded. The last model call reported:
+
+| field | value |
+| --- | --- |
+| `inputTokens` | 228 |
+| `cacheReadTokens` | 659,456 |
+| `totalTokens` | 661,541 |
+| `outputTokens` | 1,857 |
+
+and `inputTokens + cacheReadTokens + outputTokens === totalTokens` exactly. So `inputTokens` counts only
+the **uncached remainder**; the cached prefix — which on any caching provider is most of the window — has
+to be added back. The first version reported **228 tokens for a 660,000-token window**, off by ~2,900×,
+and in the direction that makes a full window look empty.
+
+**Why the types did not catch it.** `TokenUsage` declares `inputTokens: number` and documents only
+`totalTokens` ("exact full-call total"). Nothing in the type says `inputTokens` excludes the cache; the
+semantics only exist in the data. Reading the `.d.ts` was enough to find the *field*, and not enough to
+find the *meaning*.
+
+**How it was caught.** Not by review and not by the oracle — the oracle asserted what the implementation
+did, and agreed with it. It was caught by folding a real session log and noticing that a session this
+long reported a 333-token prompt. The symptom was a number that was obviously too small, which is the
+argument for live verification over more assertions.
+
+**Fixed** by summing the cache read (`plugin/src/context-quality.ts`), and renamed
+`lastModelInputTokens`/`peakModelInputTokens` to `lastPromptTokens`/`peakPromptTokens`, because the old
+name is what invited the mistake: the provider's "input tokens" is not the prompt. The oracle now carries
+the measured figures as its case rather than a synthetic one.
+
+**Verified after the fix, on the same live log:** `675,105 / 1,000,000` tokens — 67.5% of the advertised
+window at the peak, where the broken version said `333 / 1,000,000`.
+
+Two notes on reading that log, for anyone repeating it: the session files are **multi-frame zstd**, and
+Node's `zstdDecompressSync` decodes only the first frame (201 bytes of header), so the frames have to be
+walked and each one decompressed separately. And DSH persists the *construction seed* alongside live
+events, so a fold over the whole file over-counts relative to what a live `session/event` subscriber sees
+— 15 turns / 564 steps against 12 / 335 here.
+
 ## The test suite polluted the operator's live registry — fixed
 
 `delegateWorker` calls `rememberDelegated`, which persists. So any test that delegates files wrote into
