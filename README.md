@@ -248,4 +248,6 @@ npm run test:all       # both
 
 ## License
 
-MIT — see [`plugin/LICENSE`](plugin/LICENSE).
+MIT — see [`LICENSE`](LICENSE). The package carries its own copy at [`plugin/LICENSE`](plugin/LICENSE),
+because `plugin/` is what gets published and a tarball without a licence file is a tarball without a
+licence.

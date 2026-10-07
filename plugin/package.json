@@ -38,6 +38,18 @@
   ],
   "author": "Jim McCormack <mccormackjim3@gmail.com>",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jjmlovesgit/dsh-plugin-coding-delegate.git",
+    "directory": "plugin"
+  },
+  "homepage": "https://github.com/jjmlovesgit/dsh-plugin-coding-delegate#readme",
+  "bugs": {
+    "url": "https://github.com/jjmlovesgit/dsh-plugin-coding-delegate/issues"
+  },
+  "engines": {
+    "node": ">=22"
+  },
   "devDependencies": {
     "@types/node": "^22.13.0",
     "cordis": "^3.18.1",
