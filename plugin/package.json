@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-local-router",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "DeepSeek Harness Cordis plugin for local-first LLM routing: in-process privacy and complexity classification, local GPU execution, and cloud escalation only when warranted",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -33,9 +33,8 @@
     "rtx5090",
     "lm-studio"
   ],
-  "author": "DeepMind Agentic Coding Team",
+  "author": "Jim McCormack <mccormackjim3@gmail.com>",
   "license": "MIT",
-
   "devDependencies": {
     "@types/node": "^22.13.0",
     "cordis": "^3.18.1",

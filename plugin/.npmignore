@@ -4,7 +4,6 @@ tests/
 node_modules/
 *.log
 *.bak*
-dry_run.js
 cordis.patch.yml.bak
 tsconfig.json
 tmp_test_*

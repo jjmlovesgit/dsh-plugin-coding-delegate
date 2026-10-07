@@ -9,6 +9,22 @@
 # remote gateway, ...) change baseURL and the model id, then point the plugin's
 # localProvider / localModel at it.
 
+# The plugin itself. Delete this whole block to accept the built-in defaults listed in
+# cordis.patch.yml.
+- id: local-router
+  config:
+    localProvider: 'lm-studio'
+    localModel: 'qwen/qwen3.8-27b'
+    cloudProvider: 'deepseek-official'
+    cloudModel: 'deepseek-chat'
+    # guardAskPaths REPLACES the built-in default rather than extending it, so list every
+    # path that should stay approval-eligible instead of hard-denied.
+    guardAskPaths:
+      - 'tests/'
+      - 'tools/'
+    # A tripped DLP firewall reroutes to the local worker rather than refusing the request.
+    dlpAction: 'local'
+
 - id: llm-pi-ai
   name: '@deepseek-ai/dsh-llm-pi-ai'
   config:
