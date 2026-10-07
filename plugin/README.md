@@ -1,5 +1,7 @@
 # dsh-plugin-local-router
 
+> **Your plan is for thinking. Your GPU does the typing.**
+
 A DeepSeek Harness (Cordis) plugin that decides where a request may go, and decides by
 **permission rather than preference**. A credential is not permitted to reach the cloud. The
 cloud model is not permitted to author source code. Beyond those two rules the destination is

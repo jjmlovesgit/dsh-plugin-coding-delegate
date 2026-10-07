@@ -111,7 +111,7 @@ class SavingsTracker {
             ...(elapsedMs !== undefined ? { elapsedMs } : {}),
             ...(tokensPerSecond !== undefined ? { tokensPerSecond } : {}),
         };
-        this.persist(record);
+        const ledger = this.persist(record);
         const rateText = tokensPerSecond !== undefined && elapsedMs !== undefined
             ? ` | Rate: ${tokensPerSecond} tok/s e2e (${completionTokens} tok in ${(elapsedMs / 1000).toFixed(2)}s)`
             : '';
@@ -119,7 +119,7 @@ class SavingsTracker {
         // reduces, so nothing here is money saved: a local card does not pay for itself against a
         // metered plan. This figure is what those tokens would have cost at the metered tier, which
         // measures the plan's exposure rather than a saving.
-        const auditMsg = `[LEDGER_AUDIT] Step ${turn} [${route.toUpperCase()}] -> Model: ${model} | Reason: ${reason} | Tokens: ${totalTokens} (Prompt: ${promptTokens}, Completion: ${completionTokens}, CacheHit: ${cacheHitTokens})${rateText} | Cost: $${costUSD.toFixed(6)} | CloudEquiv: $${savedUSD.toFixed(6)}`;
+        const auditMsg = `[LEDGER_AUDIT] Step ${turn} [${route.toUpperCase()}] -> Model: ${model} | Reason: ${reason} | Tokens: ${totalTokens} (Prompt: ${promptTokens}, Completion: ${completionTokens}, CacheHit: ${cacheHitTokens})${rateText} | Cost: $${costUSD.toFixed(6)} | CloudEquiv: $${savedUSD.toFixed(6)} | Metered: ${ledger.totalCloudTokens} tok | Local: ${ledger.totalLocalTokens} tok`;
         console.log(auditMsg);
         return record;
     }
@@ -233,6 +233,7 @@ class SavingsTracker {
         catch (err) {
             console.error('[SAVINGS_TRACKER] Failed to write ledger:', err);
         }
+        return ledger;
     }
 }
 exports.SavingsTracker = SavingsTracker;

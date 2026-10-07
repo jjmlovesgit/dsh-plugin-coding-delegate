@@ -1679,6 +1679,9 @@ function logWorkerBenchmarks() {
   console.log(
     '[WORKER_BENCH] That is the plan exposure you avoided, not money saved -- the GPU is a fixed cost.'
   )
+  console.log(
+    '[WORKER_BENCH] LEDGER_AUDIT carries running totals: Metered is what the plan paid, Local is what the GPU did.'
+  )
   console.log('[WORKER_BENCH]   model                     decode        ttft       note')
   for (const bench of WORKER_BENCHMARKS) {
     const active = bench.model === PROFILES.WORKER.model ? '  <- active worker' : ''

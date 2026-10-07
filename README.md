@@ -1,5 +1,7 @@
 # DSH Local Router
 
+> **Your plan is for thinking. Your GPU does the typing.**
+
 A [DeepSeek Harness](https://github.com/deepseek-ai) (DSH) plugin that decides where a request may
 go by **permission rather than preference**: a credential is not permitted to reach the cloud, the
 cloud model is not permitted to author source code, and everything beyond those rules is the

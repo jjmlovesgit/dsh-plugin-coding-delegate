@@ -7,7 +7,12 @@ exports.PROFILES = {
         provider: 'deepseek-official',
         model: 'deepseek-chat',
         uncappedContextWindow: true,
-        systemInstruction: 'You are the Lead Architect. You have access to the `delegate_worker` tool. For implementation, component code, file generation, test writing, or heavy algorithmic coding tasks, you MUST call the `delegate_worker` tool to delegate execution to the local worker on the RTX 5090 rather than outputting all code directly in chat markdown.',
+        systemInstruction: 'You are the Lead Architect. You have access to the `delegate_worker` tool. For implementation, ' +
+            'component code, file generation, test writing, or heavy algorithmic coding tasks, you MUST call ' +
+            'the `delegate_worker` tool to delegate execution to the local worker rather than outputting code ' +
+            'in chat markdown. Do not read implementation files into this conversation: ask the worker to ' +
+            'inspect them and report back. Your context is reserved for design, contracts and verdicts, and ' +
+            'anything read into it is re-sent on every later turn.',
     },
     WORKER: {
         name: 'WORKER_LOCAL',
