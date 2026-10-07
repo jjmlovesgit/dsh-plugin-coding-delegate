@@ -41,6 +41,11 @@ export const PROFILES: Profiles = {
    * deliberately local, because a cloud lead would mean source reaching the cloud and would spend the
    * metered allowance this plugin exists to protect. It is deliberately not given `delegate_worker`:
    * the lead authors contracts, the architect dispatches them.
+   *
+   * `systemInstruction` below is REFERENCE ONLY, and deliberately so. A lead request is left exactly
+   * as the host configured it, which means this plugin never injects this text into anything — the
+   * agent preset is what actually runs (see `presets/lead/`). It is kept here because the profile is
+   * where the lead tier is declared, and because a test asserts it has not drifted from the preset.
    */
   LEAD: {
     name: 'LEAD_LOCAL',

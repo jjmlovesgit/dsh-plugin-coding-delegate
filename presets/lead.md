@@ -98,14 +98,34 @@ Deliberately absent: subagents, workflows, plan mode, skills, todos and goals. T
 contracts; the architect dispatches them and holds state across units. An agent with both is the
 orchestrator, and the architect would have nothing left to do.
 
-The lead's instruction, for reference:
+### The instruction lives in the preset, and it has to carry the contract's shape
 
-> You are the Lead. You read the repository and author the contract for each unit of work. You do not
-> write implementation code, and you do not dispatch the worker — the architect does that with your
-> contract. For each unit, state: the files it touches, the exact change expected, the code the worker
-> must see, and the command that decides whether the unit passed. Quote any code you are changing
-> exactly as it appears, because a patch that does not match byte-for-byte is refused rather than
-> approximated.
+`PROFILES.LEAD.systemInstruction` is **reference only**. The plugin leaves lead requests untouched, so it
+never injects that text into anything — the preset's persona is the only copy that runs. A test
+(`tests/oracles/lead-tier.test.cjs`) asserts the two have not drifted apart on what the lead *is*, since
+documentation that can drift is documentation that lies.
+
+So the persona carries two things. What the lead is: it reads the repository, authors contracts, never
+writes implementation. And **the shape of the contract it hands back**, which is the part the architect
+consumes:
+
+```
+UNIT / TARGET FILES / CONTEXT FILES / CONTRACT FILES / INSTRUCTION / VERIFICATION
+```
+
+That shape is not decoration. The first version of this persona left it out, and the lead's response was
+to spend its window reverse-engineering the plugin's own source to work out what a contract even was —
+reading `delegate_worker`'s parameters, the patch parser, and the verification policy out of 3,500 lines
+of `index.ts`. On a 32K window, a lead that must rediscover the harness per unit cannot afford the second
+unit.
+
+The persona also states the repository conventions a contract has to respect, because the lead found
+every one of them the expensive way:
+
+- tests load `dist/`, not `src/`, so verification must build before it tests;
+- a verification command is killed at **30 seconds**, hardcoded in `runSandboxVerification`;
+- changes to an existing file are exact search/replace patches;
+- the lead stops seeing a contract file the moment it names it, and so does the worker.
 
 ## What is verified, and what is not
 
