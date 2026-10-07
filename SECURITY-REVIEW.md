@@ -218,6 +218,13 @@ reads become an explicit operator decision rather than a silent allowance, and n
 the API cannot provide. Tier 2 lands properly when DSH exposes agent lineage to plugins — or when the
 guard and the routing hook can key on something other than an opaque id.
 
+## Design record
+
+The path to closing the loop on existing code — architect-blind context injection, search/replace
+emission, and contract-path integrity — is designed but not built. It is kept out of the published
+package on purpose, so that a plan cannot be mistaken for a promise:
+[`docs/delta-emission.md`](docs/delta-emission.md).
+
 ## What this does not claim
 
 The guard remains a deterrent at the tool layer, not an airtight boundary. Still open:
