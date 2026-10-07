@@ -105,7 +105,14 @@ test("no classifier rationale or gate names hardware, on any route", () => {
 });
 
 test("the guard points at a delegation the worker can actually perform", () => {
-  const built = fs.readFileSync(path.join(PLUGIN, "dist", "index.js"), "utf8");
+  // Scanned across the built output rather than index.js alone: the guard moved to dist/guard.js
+  // when index.ts was split, and this contract is about what ships, not about which module holds it.
+  // The same reasoning as the src/dist scans above, which already read every .js in dist.
+  const built = fs
+    .readdirSync(path.join(PLUGIN, "dist"))
+    .filter((name) => name.endsWith(".js"))
+    .map((name) => fs.readFileSync(path.join(PLUGIN, "dist", name), "utf8"))
+    .join("\n");
   // The old text told the architect to delegate a blocked write to the worker. The worker has no
   // repository read, so for an existing file that advice was impossible to follow.
   assert.match(built, /cannot modify an existing file/i);
