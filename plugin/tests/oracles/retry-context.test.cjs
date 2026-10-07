@@ -242,3 +242,50 @@ test("automatic context never turns a workable delegation into a refusal", async
   assert.equal(second.status, "UNVERIFIED", "and the unit proceeds exactly as it would have without it");
   assert.deepEqual(second.filesWritten, [path.join(dir, "r2.ts")], "the work still ran and was written");
 });
+
+test("a retry is never shown a file the unit declared as its contract", async () => {
+  const dir = tmp();
+  // A failing contract names itself, so the failure location is usually INSIDE the contract. Feeding that
+  // back without a guard hands the implementer the very file `contractFiles` exists to withhold, and the
+  // integrity check would not notice: the file is protected from being written, not from being shown.
+  write(
+    dir,
+    "contracts/spec.test.cjs",
+    [
+      "console.log('not ok 1 - the contract failed');",
+      "console.log('  ---');",
+      "console.log('  location: contracts/spec.test.cjs:3:1');",
+      "console.log('  ...');",
+    ].join("\n")
+  );
+
+  const first = await runAgainstWorker(emitted("c1.ts"), {
+    taskName: "contract-seed",
+    instruction: "First.",
+    targetFiles: ["c1.ts"],
+    workspaceDir: dir,
+    runVerification: "node contracts/spec.test.cjs",
+    redactVerification: true,
+    contractFiles: ["contracts/spec.test.cjs"],
+    verificationPolicy: ALLOW,
+  });
+  assert.equal(first.status, "VERIFICATION_FAILED", "the first attempt fails on its contract");
+  assert.ok(
+    (first.testResults.failures || []).some((f) => /spec\.test\.cjs/.test(String(f.location))),
+    "and the failure names the contract, which is what makes this reachable"
+  );
+
+  const second = await runAgainstWorker(emitted("c2.ts"), {
+    taskName: "contract-retry",
+    instruction: "Second.",
+    targetFiles: ["c2.ts"],
+    workspaceDir: dir,
+    contractFiles: ["contracts/spec.test.cjs"],
+  });
+  const injected = (second.contextInjected || []).map((c) => c.path);
+  assert.deepEqual(
+    injected.filter((p) => /spec\.test\.cjs$/.test(p)),
+    [],
+    "a declared contract must never be injected into the worker"
+  );
+});

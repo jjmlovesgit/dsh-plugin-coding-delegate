@@ -374,8 +374,26 @@ export async function delegateWorker(
   let context = resolveContextFiles(declaredContext, workspaceBase)
   let retryInjected: ContextRequest[] = []
   if (pendingRetry.length > 0 && context.errors.length === 0) {
-    const declaredPaths = new Set(declaredContext.map((r) => String(r?.path ?? '')))
-    const additions = retryContextRequests(pendingRetry).filter((r) => !declaredPaths.has(r.path))
+    // Compared as resolved paths, not as the strings the architect typed. A failure reports its location
+    // relative to the workspace its command ran in, so a raw string comparison matches only when the
+    // architect happened to spell the path exactly as the failing tool did.
+    const locate = (p: string) =>
+      canonicalisePath(path.isAbsolute(p) ? p : path.resolve(workspaceBase, p))
+
+    const declaredPaths = new Set(context.injected.map((c) => canonicalisePath(c.path)))
+
+    // A contract file is not context. `contractFiles` exists so the implementer cannot see or edit what
+    // judges it -- and a failing contract names itself, so the locations fed back here point straight at
+    // it. Resolved independently of `contractPaths` further down because the retry set is decided before
+    // that is computed. The integrity check does not cover this case: it protects the contract from being
+    // WRITTEN, not from being shown.
+    const protectedPaths = new Set(
+      resolveContractFiles(params.contractFiles, workspaceBase).map((p) => canonicalisePath(p))
+    )
+
+    const additions = retryContextRequests(pendingRetry).filter(
+      (r) => !declaredPaths.has(locate(r.path)) && !protectedPaths.has(locate(r.path))
+    )
     if (additions.length > 0) {
       // Best-effort, and deliberately so. If widening the injection would push it over its byte budget,
       // resolveContextFiles refuses the WHOLE injection and this unit dies for a reason the architect
