@@ -64,6 +64,9 @@ exports.evaluateCodeWriteGuard = evaluateCodeWriteGuard;
 exports.requestApprovalForWrite = requestApprovalForWrite;
 exports.resolveVerificationPolicy = resolveVerificationPolicy;
 exports.requestApprovalForVerification = requestApprovalForVerification;
+exports.resolveAgentRole = resolveAgentRole;
+exports.applyArchitectConfig = applyArchitectConfig;
+exports.applyAgentRole = applyAgentRole;
 exports.apply = apply;
 const fs = __importStar(require("fs"));
 const os = __importStar(require("os"));
@@ -2228,6 +2231,101 @@ async function requestApprovalForVerification(ctx, exec, command) {
         return false;
     }
 }
+/**
+ * Which role does this request belong to?
+ *
+ * The hook used to treat every agent as the architect: it repinned the provider, appended the
+ * architect's system instruction, and injected `delegate_worker`. That is correct for the architect
+ * and wrong for everything else — a lead configured to run locally would be redirected to the cloud
+ * and told it was the architect, silently undoing the preset.
+ *
+ * The discriminator is an explicit operator allowlist. Inferring the role from "the resolved provider
+ * is not the architect's" would be worse than useless: a profile that named its provider anything else
+ * would stop being pinned, and the failure would be silent and in the direction of the cloud.
+ */
+function resolveAgentRole(input) {
+    const host = String(input.hostProvider ?? '')
+        .trim()
+        .toLowerCase();
+    const declared = (input.leadProviders ?? [])
+        .map((p) => String(p ?? '').trim().toLowerCase())
+        .filter(Boolean);
+    if (!host) {
+        return {
+            role: 'architect',
+            reason: 'the host resolved no provider, so the architect default applies',
+        };
+    }
+    if (declared.includes(host)) {
+        return {
+            role: 'lead',
+            reason: `provider '${host}' is declared as a non-architect (lead) provider`,
+        };
+    }
+    return { role: 'architect', reason: `provider '${host}' is not declared as a lead provider` };
+}
+/**
+ * The architect's request treatment: pin the provider, uncap the window, supply the tool and the role
+ * instruction. Extracted from the hook so the behaviour is testable without a host.
+ *
+ * Deliberately unchanged: the instruction is only injected into a `system` string or a `messages`
+ * array. A request carrying neither is left without it, because inventing a field the host may not
+ * read would be a silent no-op dressed up as a fix.
+ */
+function applyArchitectConfig(requestConfig, options = {}) {
+    // A tripped DLP under dlpAction 'local' pins this request to the local provider instead of the cloud.
+    const mutatedConfig = {
+        ...(requestConfig || {}),
+        provider: options.rerouteLocal ? options.localProvider : options.cloudProvider,
+        model: options.rerouteLocal ? options.localModel : options.cloudModel,
+    };
+    // Uncap the context window for the cloud architect.
+    delete mutatedConfig.contextWindow;
+    delete mutatedConfig.maxTokens;
+    delete mutatedConfig.max_tokens;
+    delete mutatedConfig.max_completion_tokens;
+    delete mutatedConfig.apiKey;
+    // Inject the `delegate_worker` tool definition for the architect thread.
+    if (Array.isArray(mutatedConfig.tools)) {
+        const hasWorker = mutatedConfig.tools.some((t) => (t?.function?.name || t?.name) === 'delegate_worker');
+        if (!hasWorker && options.workerTool)
+            mutatedConfig.tools.push(options.workerTool);
+    }
+    else if (options.workerTool) {
+        mutatedConfig.tools = [options.workerTool];
+    }
+    if (options.architectInstruction) {
+        if (typeof mutatedConfig.system === 'string') {
+            if (!mutatedConfig.system.includes('delegate_worker')) {
+                mutatedConfig.system += '\n\n' + options.architectInstruction;
+            }
+        }
+        else if (Array.isArray(mutatedConfig.messages)) {
+            const sysMsg = mutatedConfig.messages.find((m) => m.role === 'system');
+            if (sysMsg) {
+                if (typeof sysMsg.content === 'string' && !sysMsg.content.includes('delegate_worker')) {
+                    sysMsg.content += '\n\n' + options.architectInstruction;
+                }
+            }
+            else {
+                mutatedConfig.messages.unshift({
+                    role: 'system',
+                    content: options.architectInstruction,
+                });
+            }
+        }
+    }
+    return mutatedConfig;
+}
+/**
+ * Apply the role. A lead request is returned unchanged: the plugin's job is to enforce boundaries, not
+ * to reinvent a preset it did not write.
+ */
+function applyAgentRole(requestConfig, role, architectOptions = {}) {
+    if (role.role === 'lead')
+        return { ...(requestConfig || {}) };
+    return applyArchitectConfig(requestConfig, architectOptions);
+}
 function apply(ctx, options = {}) {
     const REGISTERED_KEY = Symbol.for('dsh-plugin-coding-delegate.registered');
     const isTest = process.env.NODE_ENV === 'test';
@@ -2493,55 +2591,33 @@ function apply(ctx, options = {}) {
             }
             console.warn(`[DLP_FIREWALL_REROUTE] Sensitive data (${violations}) pinned to the LOCAL worker; it will not reach the WAN.`);
         }
-        // Architect Primary Thread configuration. A tripped DLP under dlpAction
-        // 'local' pins this request to the local provider instead of the cloud.
-        const mutatedConfig = {
-            ...resolvedConfig,
-            provider: rerouteLocal ? config.localProvider : config.cloudProvider,
-            model: rerouteLocal ? config.localModel : config.cloudModel,
-        };
-        // Uncap context window for DeepSeek Cloud Architect
-        delete mutatedConfig.contextWindow;
-        delete mutatedConfig.maxTokens;
-        delete mutatedConfig.max_tokens;
-        delete mutatedConfig.max_completion_tokens;
-        delete mutatedConfig.apiKey;
-        // Inject `delegate_worker` function tool definition for DeepSeek Cloud
-        if (Array.isArray(mutatedConfig.tools)) {
-            const hasWorker = mutatedConfig.tools.some((t) => (t?.function?.name || t?.name) === 'delegate_worker');
-            if (!hasWorker) {
-                mutatedConfig.tools.push(exports.DELEGATE_WORKER_OPENAI_SCHEMA);
-            }
-        }
-        else {
-            mutatedConfig.tools = [exports.DELEGATE_WORKER_OPENAI_SCHEMA];
-        }
-        // Inject system instructions if provided in ARCHITECT profile
-        if (profiles_1.PROFILES.ARCHITECT.systemInstruction) {
-            if (typeof mutatedConfig.system === 'string') {
-                if (!mutatedConfig.system.includes('delegate_worker')) {
-                    mutatedConfig.system += '\n\n' + profiles_1.PROFILES.ARCHITECT.systemInstruction;
-                }
-            }
-            else if (Array.isArray(mutatedConfig.messages)) {
-                const sysMsg = mutatedConfig.messages.find((m) => m.role === 'system');
-                if (sysMsg) {
-                    if (typeof sysMsg.content === 'string' && !sysMsg.content.includes('delegate_worker')) {
-                        sysMsg.content += '\n\n' + profiles_1.PROFILES.ARCHITECT.systemInstruction;
-                    }
-                }
-                else {
-                    mutatedConfig.messages.unshift({
-                        role: 'system',
-                        content: profiles_1.PROFILES.ARCHITECT.systemInstruction,
-                    });
-                }
-            }
-        }
-        trace(rerouteLocal ? 'HOOK_EXIT: DLP_PINNED_LOCAL (agent/request)' : 'HOOK_EXIT: ARCHITECT_CLOUD_PINNED (agent/request)', {
+        // Which role is this request? The plugin used to treat every agent as the architect, which is
+        // right for the architect and wrong for everything else: a lead configured to run locally would
+        // be repinned to the cloud and told it was the architect. The DLP gate above runs either way, so
+        // opting a provider out of the architect role does not opt it out of the firewall.
+        const role = resolveAgentRole({
+            hostProvider: resolvedConfig?.provider,
+            leadProviders: options?.leadProviders,
+        });
+        const mutatedConfig = applyAgentRole(resolvedConfig || {}, role, {
+            cloudProvider: config.cloudProvider,
+            cloudModel: config.cloudModel,
+            localProvider: config.localProvider,
+            localModel: config.localModel,
+            rerouteLocal,
+            architectInstruction: profiles_1.PROFILES.ARCHITECT.systemInstruction,
+            workerTool: exports.DELEGATE_WORKER_OPENAI_SCHEMA,
+        });
+        trace(role.role === 'lead'
+            ? 'HOOK_EXIT: LEAD_LEFT_AS_CONFIGURED (agent/request)'
+            : rerouteLocal
+                ? 'HOOK_EXIT: DLP_PINNED_LOCAL (agent/request)'
+                : 'HOOK_EXIT: ARCHITECT_CLOUD_PINNED (agent/request)', {
+            role: role.role,
+            roleReason: role.reason,
             provider: mutatedConfig.provider,
             model: mutatedConfig.model,
-            uncappedContextWindow: true,
+            uncappedContextWindow: role.role === 'architect',
             toolsCount: mutatedConfig.tools?.length || 0,
         });
         return mutatedConfig;
@@ -2622,6 +2698,9 @@ const pluginExport = {
     contractFileHashes,
     contractViolations,
     resolveDelegateStatus,
+    resolveAgentRole,
+    applyArchitectConfig,
+    applyAgentRole,
     DELEGATE_WORKER_SCHEMA: exports.DELEGATE_WORKER_SCHEMA,
     DELEGATE_WORKER_OPENAI_SCHEMA: exports.DELEGATE_WORKER_OPENAI_SCHEMA,
     PROFILES: profiles_1.PROFILES,

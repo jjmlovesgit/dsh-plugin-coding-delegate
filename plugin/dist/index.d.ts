@@ -65,6 +65,17 @@ export interface PluginConfig {
      * a task — and the file contents it carries — to any address.
      */
     localEndpoint?: string;
+    /**
+     * Provider ids whose requests are NOT the architect — the lead tier. A request the host has already
+     * resolved to one of these is left exactly as configured: not repinned to the cloud, not given the
+     * architect's instruction, and not offered `delegate_worker`. The DLP gate still runs.
+     *
+     * Empty by default, which means every request is the architect — the behaviour before this option
+     * existed. An allowlist rather than an inference on purpose: guessing the role from "the provider is
+     * not the architect's" would stop pinning the architect as soon as a profile named its provider
+     * something else, and the failure would be silent and in the direction of the cloud.
+     */
+    leadProviders?: string[];
 }
 export interface RouterMetadata {
     provider: string;
@@ -579,6 +590,49 @@ export declare function resolveVerificationPolicy(options?: PluginConfig): Verif
  * Fails closed on every error path.
  */
 export declare function requestApprovalForVerification(ctx: any, exec: any, command: string): Promise<boolean>;
+/**
+ * Which role does this request belong to?
+ *
+ * The hook used to treat every agent as the architect: it repinned the provider, appended the
+ * architect's system instruction, and injected `delegate_worker`. That is correct for the architect
+ * and wrong for everything else — a lead configured to run locally would be redirected to the cloud
+ * and told it was the architect, silently undoing the preset.
+ *
+ * The discriminator is an explicit operator allowlist. Inferring the role from "the resolved provider
+ * is not the architect's" would be worse than useless: a profile that named its provider anything else
+ * would stop being pinned, and the failure would be silent and in the direction of the cloud.
+ */
+export declare function resolveAgentRole(input: {
+    hostProvider?: string;
+    leadProviders?: string[];
+}): {
+    role: 'architect' | 'lead';
+    reason: string;
+};
+/**
+ * The architect's request treatment: pin the provider, uncap the window, supply the tool and the role
+ * instruction. Extracted from the hook so the behaviour is testable without a host.
+ *
+ * Deliberately unchanged: the instruction is only injected into a `system` string or a `messages`
+ * array. A request carrying neither is left without it, because inventing a field the host may not
+ * read would be a silent no-op dressed up as a fix.
+ */
+export declare function applyArchitectConfig(requestConfig: Record<string, any>, options?: {
+    cloudProvider?: string;
+    cloudModel?: string;
+    localProvider?: string;
+    localModel?: string;
+    rerouteLocal?: boolean;
+    architectInstruction?: string;
+    workerTool?: any;
+}): Record<string, any>;
+/**
+ * Apply the role. A lead request is returned unchanged: the plugin's job is to enforce boundaries, not
+ * to reinvent a preset it did not write.
+ */
+export declare function applyAgentRole(requestConfig: Record<string, any>, role: {
+    role: 'architect' | 'lead';
+}, architectOptions?: Parameters<typeof applyArchitectConfig>[1]): Record<string, any>;
 export declare function apply(ctx: Context, options?: PluginConfig): void;
 declare const pluginExport: {
     name: string;
@@ -602,6 +656,9 @@ declare const pluginExport: {
     contractFileHashes: typeof contractFileHashes;
     contractViolations: typeof contractViolations;
     resolveDelegateStatus: typeof resolveDelegateStatus;
+    resolveAgentRole: typeof resolveAgentRole;
+    applyArchitectConfig: typeof applyArchitectConfig;
+    applyAgentRole: typeof applyAgentRole;
     DELEGATE_WORKER_SCHEMA: {
         type: string;
         function: {

@@ -256,17 +256,41 @@ When you call `predictRoute` directly, its decision output is
 | `verificationAllowlist` | `[]` | Programs whose verification commands skip the prompt (matches the program, not its arguments) |
 | `emitAllowlist` | `[]` | Extra directories a delegated worker may write into besides the workspace |
 | `allowInProcessFallback` | `false` | Run a denied spawn's verification module inside the server process |
+| `leadProviders` | `[]` | Provider ids that are **not** the architect. Their requests are left exactly as configured |
 
 `guardAskPaths` **replaces** the built-in default rather than adding to it. Setting it to
 `["plugin/src/"]` therefore makes `tests/` and `tools/` hard denies: list every path you want to
 stay approval-eligible, e.g. `["plugin/src/", "tests/", "tools/"]`.
 
+### Running a lead alongside the architect
+
+The `agent/request` hook treats every request as the architect: it pins the provider, uncaps the
+context window, and supplies the architect's instruction plus `delegate_worker`. That is right for the
+architect and wrong for anything else — a lead agent you configured to run locally would be redirected
+to the cloud and told it was the architect, silently undoing the preset.
+
+`leadProviders` names the provider ids that are **not** the architect. A request the host has already
+resolved to one of them is passed through untouched: same provider, same model, same context window,
+same instruction, and no `delegate_worker`. The DLP firewall still runs on it, because opting a
+provider out of the architect role does not opt it out of the credential gate.
+
+```yaml
+- id: local-router
+  config:
+    leadProviders: ['lm-studio']   # anything resolved to lm-studio is left alone
+```
+
+It is an **allowlist rather than an inference** on purpose. Guessing the role from "the provider is not
+the architect's" would stop pinning the architect the moment a profile named its provider something
+else, and the failure would be silent — and pointed at the cloud. Empty by default, which means every
+request is the architect, exactly as before this option existed.
+
 ## The `delegate_worker` tool
 
 Dispatches a discrete implementation task to the local worker and returns a structured
 receipt: `{ success, status, filesWritten, filesWrittenRelative, resolvedWorkspace,
-workspaceSource, testResults, tokens, summary }`, plus `contractFiles` and `contractViolations`
-when the unit declared a contract.
+workspaceSource, testResults, tokens, summary }`, plus `contextInjected` when the unit declared
+context, and `contractFiles` and `contractViolations` when it declared a contract.
 
 The worker receives the `instruction`, the `targetFiles` **paths**, the verification command, and any
 `contextFiles` the architect declared — and nothing else. It has no repository read, so it cannot

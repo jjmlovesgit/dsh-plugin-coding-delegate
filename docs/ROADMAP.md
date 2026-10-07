@@ -61,6 +61,7 @@ Gated. Nothing here starts until the host gap and two decisions clear.
 
 | # | Item | Status |
 | --- | --- | --- |
+| 2a | **`agent/request` respects a lead provider** — a request the host resolved to a declared lead provider is left as configured, so a local lead is not repinned to the cloud or told it is the architect | **Built.** `tests/oracles/agent-role.test.cjs`, 8 assertions, failing 8 of 8 before implementation. `leadProviders` is empty by default, so this is a no-op until an operator opts in |
 | 1 | Read-guard scoping: distinguish architect from lead | **Blocked on the host** — see `SECURITY-REVIEW.md`, "Blocked on the host: agent lineage". Interim: fail closed with an explicit `delegateReadPolicy` escape hatch |
 | 2 | Choose the lead model | **Needs a decision** |
 | 4 | Delivery: documented subagent preset, or plugin support | **Needs a decision** |
