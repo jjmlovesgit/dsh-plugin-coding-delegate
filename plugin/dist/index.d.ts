@@ -94,6 +94,19 @@ export interface PluginConfig {
      */
     delegateReadPolicy?: DelegateReadPolicy;
     /**
+     * Paths whose source the architect may author, because a contract test is the specification rather
+     * than the implementation. Rule 2 forbids the architect writing source and rule 7 needs the architect
+     * to own the tests, which conflict for exactly this case, so this is the declared exception.
+     * Defaults to `['tests/']`; an empty list disables the carve-out.
+     */
+    contractPaths?: string[];
+    /**
+     * What a write to a contract path does: `ask` (default), `allow`, or `deny`. Deliberately separate
+     * from `guardAskPaths`, which decides what may be written at all; this decides what the architect is
+     * allowed to specify. Setting `allow` is the opt-in that makes contract authoring frictionless.
+     */
+    contractWriteMode?: 'allow' | 'ask' | 'deny';
+    /**
      * Rule 8: what happens when a cloud-bound request carries source code in its own payload.
      *
      * `deny` (default) refuses the request, `ask` puts it to the operator, `allow` transmits it. A
@@ -708,6 +721,10 @@ export declare function evaluateCodeWriteGuard(exec: any, config?: {
     delegatedPaths?: Iterable<string>;
     /** ask | allow | deny for reading a delegated file back. Defaults to ask. */
     delegateReadPolicy?: DelegateReadPolicy;
+    /** Paths the architect may author as the specification. Defaults to tests/. */
+    contractPaths?: string[];
+    /** allow | ask | deny for a write to a contract path. Defaults to ask. */
+    contractWriteMode?: 'allow' | 'ask' | 'deny';
 }): GuardVerdict | null;
 /** Closed approval vocabulary; only 'allowed-once' is a grant. */
 export type ApprovalOutcome = 'allowed-once' | 'rejected' | 'cancelled' | 'unavailable';

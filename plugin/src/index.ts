@@ -103,6 +103,19 @@ export interface PluginConfig {
    */
   delegateReadPolicy?: DelegateReadPolicy
   /**
+   * Paths whose source the architect may author, because a contract test is the specification rather
+   * than the implementation. Rule 2 forbids the architect writing source and rule 7 needs the architect
+   * to own the tests, which conflict for exactly this case, so this is the declared exception.
+   * Defaults to `['tests/']`; an empty list disables the carve-out.
+   */
+  contractPaths?: string[]
+  /**
+   * What a write to a contract path does: `ask` (default), `allow`, or `deny`. Deliberately separate
+   * from `guardAskPaths`, which decides what may be written at all; this decides what the architect is
+   * allowed to specify. Setting `allow` is the opt-in that makes contract authoring frictionless.
+   */
+  contractWriteMode?: 'allow' | 'ask' | 'deny'
+  /**
    * Rule 8: what happens when a cloud-bound request carries source code in its own payload.
    *
    * `deny` (default) refuses the request, `ask` puts it to the operator, `allow` transmits it. A
@@ -2864,6 +2877,10 @@ export function evaluateCodeWriteGuard(
     delegatedPaths?: Iterable<string>
     /** ask | allow | deny for reading a delegated file back. Defaults to ask. */
     delegateReadPolicy?: DelegateReadPolicy
+    /** Paths the architect may author as the specification. Defaults to tests/. */
+    contractPaths?: string[]
+    /** allow | ask | deny for a write to a contract path. Defaults to ask. */
+    contractWriteMode?: 'allow' | 'ask' | 'deny'
   } = {}
 ): GuardVerdict | null {
   const name = String(exec?.name || '')
@@ -2901,7 +2918,37 @@ export function evaluateCodeWriteGuard(
     const target = extractWriteTarget(args)
     if (!target) return null
     if (!CODE_EXTENSIONS.has(path.extname(target).toLowerCase())) return null
+
     const normalized = target.replace(/\\/g, '/').toLowerCase()
+
+    // A contract test is the specification the worker is held to, not the implementation. Rule 2
+    // forbids the architect authoring source and rule 7 needs the architect to own those tests, so
+    // this is the one declared exception, and its scope is the operator's to widen or refuse.
+    const contractPaths = config.contractPaths ?? ['tests/']
+    const isContract = contractPaths.some((fragment) =>
+      normalized.includes(String(fragment).replace(/\\/g, '/').toLowerCase())
+    )
+    if (isContract) {
+      // Defaults to 'ask', not 'allow'. guardAskPaths already makes tests/ approval-eligible, and
+      // silently withdrawing that prompt would be a weakening nobody asked for; opting in is explicit.
+      const mode = config.contractWriteMode ?? 'ask'
+      if (mode === 'allow') return null
+      if (mode === 'deny') {
+        return {
+          kind: 'deny',
+          target,
+          reason:
+            `'${target}' is a contract file, and contractWriteMode is 'deny'. A contract test is the ` +
+            `specification the worker is held to, so this refusal is deliberate: set ` +
+            `contractWriteMode: 'allow' to author contract files, or narrow contractPaths.`,
+        }
+      }
+      // 'ask' falls through to the ordinary rule deliberately. Where guardAskPaths already makes this
+      // path ask-eligible the write still asks, with the message it always had. Short-circuiting here
+      // would have replaced the reason for every test write in the repository and broken assertions
+      // that predate this carve-out by a long way -- which is exactly what it did on the first attempt.
+    }
+
     const downgrade = askPaths.some((fragment) =>
       normalized.includes(String(fragment).replace(/\\/g, '/').toLowerCase())
     )
@@ -3382,6 +3429,8 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
           askPaths: options?.guardAskPaths,
           delegatedPaths,
           delegateReadPolicy: options?.delegateReadPolicy,
+          contractPaths: options?.contractPaths,
+          contractWriteMode: options?.contractWriteMode,
         })
         if (verdict) {
           // guardMode 'deny' wins outright: an operator who said "never prompt" must

@@ -2366,6 +2366,31 @@ function evaluateCodeWriteGuard(exec, config = {}) {
         if (!CODE_EXTENSIONS.has(path.extname(target).toLowerCase()))
             return null;
         const normalized = target.replace(/\\/g, '/').toLowerCase();
+        // A contract test is the specification the worker is held to, not the implementation. Rule 2
+        // forbids the architect authoring source and rule 7 needs the architect to own those tests, so
+        // this is the one declared exception, and its scope is the operator's to widen or refuse.
+        const contractPaths = config.contractPaths ?? ['tests/'];
+        const isContract = contractPaths.some((fragment) => normalized.includes(String(fragment).replace(/\\/g, '/').toLowerCase()));
+        if (isContract) {
+            // Defaults to 'ask', not 'allow'. guardAskPaths already makes tests/ approval-eligible, and
+            // silently withdrawing that prompt would be a weakening nobody asked for; opting in is explicit.
+            const mode = config.contractWriteMode ?? 'ask';
+            if (mode === 'allow')
+                return null;
+            if (mode === 'deny') {
+                return {
+                    kind: 'deny',
+                    target,
+                    reason: `'${target}' is a contract file, and contractWriteMode is 'deny'. A contract test is the ` +
+                        `specification the worker is held to, so this refusal is deliberate: set ` +
+                        `contractWriteMode: 'allow' to author contract files, or narrow contractPaths.`,
+                };
+            }
+            // 'ask' falls through to the ordinary rule deliberately. Where guardAskPaths already makes this
+            // path ask-eligible the write still asks, with the message it always had. Short-circuiting here
+            // would have replaced the reason for every test write in the repository and broken assertions
+            // that predate this carve-out by a long way -- which is exactly what it did on the first attempt.
+        }
         const downgrade = askPaths.some((fragment) => normalized.includes(String(fragment).replace(/\\/g, '/').toLowerCase()));
         return {
             kind: downgrade ? 'ask' : 'deny',
@@ -2773,6 +2798,8 @@ function apply(ctx, options = {}) {
                     askPaths: options?.guardAskPaths,
                     delegatedPaths,
                     delegateReadPolicy: options?.delegateReadPolicy,
+                    contractPaths: options?.contractPaths,
+                    contractWriteMode: options?.contractWriteMode,
                 });
                 if (verdict) {
                     // guardMode 'deny' wins outright: an operator who said "never prompt" must
