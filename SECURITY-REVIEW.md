@@ -165,6 +165,58 @@ pair in the session audit is separated by 1.9–3.1 s, and no `permission/preset
 session to the `auto` preset. That matters, because a fail-closed gate is worth nothing if the
 approver is never actually asked.
 
+## Live verification: the lead-tier work
+
+Recorded 2026-10-07 on the desktop app (the `tauri` profile), Node 22.19, against the local worker on
+`127.0.0.1:1234`. This is the run that re-verified the lead-tier changes after a reload.
+
+| Check | Result |
+| --- | --- |
+| The reload actually loaded the new build | pass — hook traces before 12:15:45Z carry no `role`; traces after carry `role: architect` and a `roleReason`. Both fields exist only in the new code |
+| Rule 2: the guard refuses a cloud-authored source write | pass — the architect's own `write` of `target.js` was denied, with the corrected message |
+| `guardAskPaths` carve-out for architect-owned tests | pass — the same write under a `tests/` path was permitted |
+| Unit A: context injection | pass — `contextInjected: [{ lines: 5, bytes: 67, sha256: 4b03a4dd… }]` |
+| Unit B: search/replace emission, from a real local model | pass — *"patched in place with 1 hunk(s)"*; on disk `OTHER` went 3→5 with `VALUE` and `module.exports` untouched, for 30 completion tokens |
+| Unit C: contract integrity | pass — `contractFiles: [{ sha256, unchanged: true }]`, `contractViolations: []` |
+| Rule 7: failure output is redacted | pass — `redacted: true`, the reason withheld from the receipt and kept in `last-verification.log` |
+| Verdict semantics | pass — `UNVERIFIED`, `VERIFICATION_FAILED` and `SUCCESS` each observed live |
+| Rule 6: verification is gated | pass — verification ran under the approval seam, three times |
+
+### The failing verdict was the useful one
+
+The patch call returned `VERIFICATION_FAILED` **with a correct patch**. The fixture was at fault:
+`package.json` in that workspace declares `"type": "module"`, so a `.js` fixture loads as ESM and
+`module.exports` is undefined. The plugin was right to fail it. That is rule 7 doing exactly its job —
+a correct patch does not launder a failing contract, and the receipt does not explain itself — and it
+demonstrates the rule better than a designed test would have.
+
+### One observation that does not match the design
+
+**The delegated-read prompt did not fire.** After `delegate_worker` recorded writing `target.js`, the
+architect read that file and received its contents with no prompt. Either an approval was granted
+without reaching the operator, or the read guard is not gating reads at all. Both readings matter and
+this run cannot tell them apart.
+
+The discriminating test is `delegateReadPolicy: 'deny'`, whose refusal is visible without any approval:
+if the read still succeeds with that set, the gate is not firing.
+
+### Approval seam: open, not concluded
+
+Three approval-gated operations completed — the `tests/` write and two verification commands — and no
+prompt reached the agent. That is expected if the operator was prompted and approved. It would be a
+finding against the paragraph above if they were not. **Recorded as an open question rather than a
+conclusion:** the operator has been asked to confirm, and the latency evidence above (1.9–3.1 s
+ask/decision pairs, no `auto` preset) stands until something contradicts it.
+
+### Still unverified
+
+- **Rule 8.** Armed with its default `deny`, but it never fired, because no user message carried a
+  fenced source block. Loaded is not verified.
+- **Rule 8's `ask` path**, which relies on the approval seam reached from `agent/request` — a different
+  hook from the one the write guard uses, and not exercised.
+- **The lead tier.** `leadProviders` is empty in both live profiles, so no lead request has been made
+  and no DSH agent preset has been created. The plugin half is oracle-tested; the host half is not.
+
 ## Containers are optional
 
 Verification runs as an ordinary child process and **does not require a container runtime**. Most

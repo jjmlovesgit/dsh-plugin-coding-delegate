@@ -86,8 +86,8 @@ which files a unit needs, and how units stay coherent with each other — which 
 | 17 | npm publication, or GitHub-only | **Decided: GitHub-only.** No publish step. Install stays clone-and-register, which the README already documents; nothing npm-specific is required |
 | — | `package.json` has no `repository`, `homepage`/`bugs`, or `engines` | Found. Lower priority now that publication is GitHub-only; `repository` is still worth adding so the package points at its own source |
 | — | No root `LICENSE` (only `plugin/LICENSE`), which is what GitHub's licence detection reads | Found, not fixed |
-| 19 | Reload the desktop app, which is still serving the pre-rename module | Not started |
-| 16 | Live-verify `UNVERIFIED` and the delegated-read prompt after a reload | Not started |
+| 19 | Reload the desktop app, which is still serving the pre-rename module | **Done.** Confirmed from `router-debug.log`: after `PLUGIN_INIT_ASYMMETRIC_ORCHESTRATOR` the hook trace gains `role` and `roleReason`, fields that exist only in the new code |
+| 16 | Live-verify `UNVERIFIED` and the delegated-read prompt after a reload | **Half done.** The reload is confirmed and `UNVERIFIED` is verified live, alongside `VERIFICATION_FAILED` and `SUCCESS`. The delegated-read prompt did **not** fire, which is an open observation recorded in `SECURITY-REVIEW.md` |
 | 14 | Context-quality counters: frontier tokens in the window per turn, compactions per session, turns before restart | Not started |
 | 15 | The experiment: an architect-authored contract for a module with internal structure, plus checks from outside the contract | Partly prefigured by the debrand oracle, but that unit was small |
 
