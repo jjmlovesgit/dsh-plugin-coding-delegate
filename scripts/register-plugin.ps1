@@ -1,206 +1,184 @@
 [CmdletBinding()]
 param(
     # Which DSH profile to register into. `web` is the CLI profile; the desktop app boots
-    # `tauri` instead, and any other profile name works the same way:
+    # `tauri`. Any profile name works:
     #   .\scripts\register-plugin.ps1 -Profile tauri
     [string]$Profile = "web"
 )
 
-# BOM-less UTF-8 writer. PowerShell 5.1's `Set-Content -Encoding UTF8` writes a BOM,
-# and JSON.parse rejects a BOM outright (it broke `dsh web` profile loading).
+# Registration for the DSH Local Router plugin.
+#
+# It writes exactly two things, both of which DSH actually reads:
+#   1. the profile's package.json     -- lists the plugin in dsh.profile.bundles
+#   2. the profile's cordis.patch.yml -- merges the plugin config and the provider entries
+#
+# It deliberately does NOT write ~/.dsh/settings.yaml or ~/.dsh/config.json.
+#   * A `dsh-plugin-local-router:` section in settings.yaml is never merged into the plugin's
+#     options -- only the profile patch is -- so it looks like configuration while doing
+#     nothing.
+#   * Nothing in the DSH runtime reads a `plugins` array from config.json.
+# An earlier version of this script wrote both and reported success for both.
+#
+# It MERGES: it never overwrites either file wholesale, so settings you added by hand survive.
+
+# BOM-less UTF-8 writer. PowerShell 5.1's `Set-Content -Encoding UTF8` writes a BOM, and
+# JSON.parse rejects a BOM outright (it broke profile loading once).
 function Write-Utf8NoBom([string]$Path, [string]$Content) {
-  $utf8 = New-Object System.Text.UTF8Encoding($false)
-  [System.IO.File]::WriteAllText($Path, $Content, $utf8)
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($Path, $Content, $utf8)
 }
 
-# Registration script for the DeepSeek Harness (DSH) Local Router plugin & provider config.
-#
-# Renamed from the Laya era: the plugin is `dsh-plugin-local-router` and decides routing
-# in-process, so no `layaEndpoint` is written anywhere.
-#
-# This script MERGES. It never overwrites settings.yaml or cordis.patch.yml wholesale --
-# an earlier version did, which would silently discard the plugin's dlpAction setting and
-# any other block the operator had added.
+# The YAML payload of a patch file, with comments and blank lines removed, for detection only.
+function Get-PatchBody([string]$Text) {
+    ($Text -split "`r?`n" | Where-Object { $_.Trim() -and -not $_.TrimStart().StartsWith('#') }) -join "`n"
+}
+
 $ErrorActionPreference = "Stop"
 
 $PluginName = "dsh-plugin-local-router"
+# The id of the entry that the plugin's own bundle patch INSERTS. A config override must
+# target this id: targeting the package name silently does nothing, which is the kind of
+# failure that looks like the plugin ignoring your settings.
+$PluginEntryId = "local-router"
 
 $RootDir = Resolve-Path "$PSScriptRoot\.."
 $PluginDir = Join-Path $RootDir "plugin"
 $PluginDist = Join-Path $PluginDir "dist\index.js"
 
 Write-Host "====================================================" -ForegroundColor Cyan
-Write-Host " Registering DSH Local Router Plugin & Provider Config" -ForegroundColor Cyan
+Write-Host " Registering the DSH Local Router plugin" -ForegroundColor Cyan
+Write-Host " Profile: $Profile" -ForegroundColor Cyan
 Write-Host "====================================================" -ForegroundColor Cyan
 
 if (-not (Test-Path $PluginDist)) {
-    Write-Host "Building plugin first..." -ForegroundColor Yellow
-    Set-Location $PluginDir
+    Write-Host "No build found; running npm run build first..." -ForegroundColor Yellow
+    Push-Location $PluginDir
     npm run build
-    Set-Location $RootDir
+    Pop-Location
 }
 
 $UserDshDir = Join-Path $env:USERPROFILE ".dsh"
-if (-not (Test-Path $UserDshDir)) {
-    New-Item -ItemType Directory -Path $UserDshDir -Force | Out-Null
+$ProfileDir = Join-Path $UserDshDir "profiles\$Profile"
+if (-not (Test-Path $ProfileDir)) {
+    Write-Host "Profile '$Profile' does not exist at:" -ForegroundColor Red
+    Write-Host "  $ProfileDir" -ForegroundColor Red
+    Write-Host "Boot it once (dsh --profile $Profile), then run this again." -ForegroundColor Red
+    exit 1
 }
 
-# 1. Register via the DSH CLI (best effort; the file steps below are authoritative)
+# 1. Register the package into the profile
 $dshCli = Get-Command "dsh" -ErrorAction SilentlyContinue
 if ($dshCli) {
-    Write-Host "[1/3] Registering plugin via DSH CLI..." -ForegroundColor Yellow
+    Write-Host "[1/2] dsh plugin --profile $Profile add ..." -ForegroundColor Yellow
     try {
         & dsh plugin --profile $Profile add $PluginDir
     } catch {
-        Write-Host "CLI plugin registration step completed." -ForegroundColor Yellow
-    }
-}
-
-# Ensure the target profile's package.json lists the plugin in dsh.profile.bundles
-$ProfileDir = Join-Path $UserDshDir "profiles\$Profile"
-if (-not (Test-Path $ProfileDir)) {
-    Write-Host "Profile '$Profile' not found at $ProfileDir - has it been booted at least once?" -ForegroundColor Yellow
-}
-if (Test-Path $ProfileDir) {
-    $ProfilePkgFile = Join-Path $ProfileDir "package.json"
-    if (Test-Path $ProfilePkgFile) {
-        try {
-            $profilePkg = Get-Content $ProfilePkgFile -Raw | ConvertFrom-Json
-            if ($profilePkg.dsh -and $profilePkg.dsh.profile -and $profilePkg.dsh.profile.bundles) {
-                $bundles = @($profilePkg.dsh.profile.bundles)
-                if ($bundles -notcontains $PluginName) {
-                    $bundles += $PluginName
-                    $profilePkg.dsh.profile.bundles = $bundles
-                    Write-Utf8NoBom $ProfilePkgFile ($profilePkg | ConvertTo-Json -Depth 5)
-                    Write-Host "Added $PluginName to dsh.profile.bundles" -ForegroundColor Green
-                }
-            }
-        } catch {}
-    }
-}
-
-# 2. Update ~/.dsh/config.json plugin registry
-$ConfigFile = Join-Path $UserDshDir "config.json"
-$ConfigObj = @{ plugins = @() }
-
-if (Test-Path $ConfigFile) {
-    try {
-        $rawConfig = Get-Content $ConfigFile -Raw | ConvertFrom-Json
-        if ($rawConfig.plugins) { $ConfigObj = $rawConfig }
-    } catch {}
-}
-
-$pluginEntry = @{
-    name = $PluginName
-    path = $PluginDir
-    main = $PluginDist
-    enabled = $true
-}
-
-$alreadyRegistered = $false
-$newPlugins = @()
-foreach ($p in $ConfigObj.plugins) {
-    $isLegacy = ($p.name -eq "dsh-plugin-laya-router")
-    if ($p.name -eq $PluginName -or $isLegacy) {
-        $newPlugins += $pluginEntry
-        $alreadyRegistered = $true
-    } else {
-        $newPlugins += $p
-    }
-}
-if (-not $alreadyRegistered) { $newPlugins += $pluginEntry }
-
-$ConfigObj.plugins = $newPlugins
-Write-Utf8NoBom $ConfigFile ($ConfigObj | ConvertTo-Json -Depth 5)
-Write-Host "[2/3] DSH Plugin registered in $ConfigFile" -ForegroundColor Green
-
-# 3. Provider configuration -- MERGE ONLY, never overwrite
-Write-Host "[3/3] Merging provider configuration..." -ForegroundColor Yellow
-
-$SettingsFile = Join-Path $UserDshDir "settings.yaml"
-$pluginBlock = @"
-${PluginName}:
-  localProvider: 'lm-studio'
-  cloudProvider: 'deepseek-official'
-  localModel: 'qwen/qwen3.8-27b'
-  cloudModel: 'deepseek-chat'
-  contextThreshold: 30000
-  # 'local' pins a credential-bearing request to the local worker; 'block' refuses it.
-  # Neither ever transmits the credential.
-  dlpAction: 'local'
-"@
-
-if (Test-Path $SettingsFile) {
-    $existing = [System.IO.File]::ReadAllText($SettingsFile)
-    if ($existing -match ("(?m)^" + [regex]::Escape($PluginName) + ":")) {
-        Write-Host "settings.yaml already has a $PluginName block - left untouched." -ForegroundColor Yellow
-    } else {
-        $merged = $existing.TrimEnd() + "`r`n`r`n" + $pluginBlock + "`r`n"
-        Write-Utf8NoBom $SettingsFile $merged
-        Write-Host "Added the $PluginName block to settings.yaml" -ForegroundColor Green
+        Write-Host "The CLI step reported: $($_.Exception.Message)" -ForegroundColor Yellow
     }
 } else {
-    $full = @"
-ui-onboarding:
-  welcomeNoticeVersion: 2026-08-13.1
-
-$pluginBlock
-
-llm-deepseek:
-  apiKeyEnv: DEEPSEEK_API_KEY
-
-llm-pi-ai:
-  providers:
-    lm-studio:
-      api: openai-completions
-      baseURL: http://127.0.0.1:1234/v1
-      apiKeyEnv: LM_STUDIO_API_KEY
-      models:
-        - id: qwen/qwen3.8-27b
-          name: 'Qwen 3.8 27B Local'
-          maxTokens: 16384
-"@
-    Write-Utf8NoBom $SettingsFile $full
-    Write-Host "Created $SettingsFile" -ForegroundColor Green
+    Write-Host "[1/2] No 'dsh' on PATH; skipping the CLI step." -ForegroundColor Yellow
 }
 
-# Profile cordis.patch.yml -- migrate a legacy entry, otherwise append, never clobber
-if (Test-Path $ProfileDir) {
-    $PatchFile = Join-Path $ProfileDir "cordis.patch.yml"
-    $patchEntry = @"
-- id: $PluginName
+# 2. Make sure dsh.profile.bundles lists the plugin
+$ProfilePkgFile = Join-Path $ProfileDir "package.json"
+if (Test-Path $ProfilePkgFile) {
+    try {
+        $profilePkg = Get-Content $ProfilePkgFile -Raw | ConvertFrom-Json
+        if ($profilePkg.dsh -and $profilePkg.dsh.profile -and $profilePkg.dsh.profile.bundles) {
+            $bundles = @($profilePkg.dsh.profile.bundles)
+            if ($bundles -notcontains $PluginName) {
+                $profilePkg.dsh.profile.bundles = $bundles + $PluginName
+                Write-Utf8NoBom $ProfilePkgFile ($profilePkg | ConvertTo-Json -Depth 5)
+                Write-Host "      Added $PluginName to dsh.profile.bundles" -ForegroundColor Green
+            } else {
+                Write-Host "      $PluginName is already in dsh.profile.bundles" -ForegroundColor Yellow
+            }
+        } else {
+            Write-Host "      package.json has no dsh.profile.bundles list; left untouched." -ForegroundColor Yellow
+        }
+    } catch {
+        Write-Host "      Could not update package.json: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+} else {
+    Write-Host "      No package.json in the profile; left untouched." -ForegroundColor Yellow
+}
+
+# 3. Merge the plugin config and the provider entries into the profile patch
+Write-Host "[2/2] Merging the profile patch..." -ForegroundColor Yellow
+$PatchFile = Join-Path $ProfileDir "cordis.patch.yml"
+
+$routerEntry = @"
+- id: $PluginEntryId
   config:
     localProvider: 'lm-studio'
     localModel: 'qwen/qwen3.8-27b'
     cloudProvider: 'deepseek-official'
     cloudModel: 'deepseek-chat'
+    # guardAskPaths REPLACES the built-in default (tests/, tools/), so list every path that
+    # should stay approval-eligible rather than hard-denied.
+    guardAskPaths:
+      - 'tests/'
+      - 'tools/'
+    dlpAction: 'local'
 "@
 
-    if (Test-Path $PatchFile) {
-        $existingPatch = [System.IO.File]::ReadAllText($PatchFile)
-        if ($existingPatch -match ("(?m)^- id: " + [regex]::Escape($PluginName) + "\s*$")) {
-            Write-Host "cordis.patch.yml already lists $PluginName - left untouched." -ForegroundColor Yellow
-        } elseif ($existingPatch -match '(?m)^- id: laya-router\s*$') {
-            $existingPatch = [regex]::Replace($existingPatch, '(?m)^- id: laya-router\s*$', "- id: $PluginName")
-            $existingPatch = [regex]::Replace($existingPatch, '(?m)^\s*layaEndpoint:.*\r?\n', '')
-            Write-Utf8NoBom $PatchFile $existingPatch
-            Write-Host "Migrated the legacy laya-router entry in cordis.patch.yml" -ForegroundColor Green
-        } else {
-            $mergedPatch = $existingPatch.TrimEnd() + "`r`n`r`n" + $patchEntry + "`r`n"
-            Write-Utf8NoBom $PatchFile $mergedPatch
-            Write-Host "Appended the $PluginName entry to cordis.patch.yml" -ForegroundColor Green
-        }
+$providerEntries = @"
+- id: llm-pi-ai
+  name: '@deepseek-ai/dsh-llm-pi-ai'
+  config:
+    providers:
+      lm-studio:
+        api: openai-completions
+        baseURL: http://127.0.0.1:1234/v1
+        apiKeyEnv: LM_STUDIO_API_KEY
+        models:
+          - id: qwen/qwen3.8-27b
+            name: 'Qwen 3.8 27B Local'
+            maxTokens: 16384
+
+- id: llm-deepseek
+  name: '@deepseek-ai/dsh-llm-deepseek'
+  config:
+    apiKeyEnv: DEEPSEEK_API_KEY
+"@
+
+$existingPatch = ""
+if (Test-Path $PatchFile) { $existingPatch = [System.IO.File]::ReadAllText($PatchFile) }
+$body = Get-PatchBody $existingPatch
+
+if ($body.Trim() -eq "[]") {
+    # A fresh profile ships an empty array with advisory comments above it. Appending to `[]`
+    # would produce invalid YAML, so replace the array and keep the comments.
+    $replaced = [regex]::Replace($existingPatch, '(?m)^\[\]\s*$', ($routerEntry + "`n`n" + $providerEntries))
+    Write-Utf8NoBom $PatchFile $replaced
+    Write-Host "      Wrote the plugin config and provider entries" -ForegroundColor Green
+}
+elseif ($body.Trim() -eq "") {
+    Write-Utf8NoBom $PatchFile (($routerEntry + "`n`n" + $providerEntries) + "`n")
+    Write-Host "      Created cordis.patch.yml" -ForegroundColor Green
+}
+else {
+    $missing = @()
+    if ($body -notmatch ("(?m)^- id: " + [regex]::Escape($PluginEntryId) + "\s*$")) { $missing += $routerEntry }
+    if ($body -notmatch '(?m)^- id: llm-pi-ai\s*$') { $missing += $providerEntries }
+
+    if ($missing.Count -eq 0) {
+        Write-Host "      Already configures the plugin and providers; left untouched." -ForegroundColor Yellow
     } else {
-        Write-Utf8NoBom $PatchFile ($patchEntry + "`r`n")
-        Write-Host "Created $PatchFile" -ForegroundColor Green
+        $merged = $existingPatch.TrimEnd() + "`n`n" + ($missing -join "`n`n") + "`n"
+        Write-Utf8NoBom $PatchFile $merged
+        Write-Host "      Merged $($missing.Count) missing entry/entries" -ForegroundColor Green
     }
 }
 
 Write-Host ""
 Write-Host "====================================================" -ForegroundColor Cyan
-Write-Host " Router & Provider Registration Complete!" -ForegroundColor Cyan
-Write-Host " Router Plugin:      $PluginName (in-process routing, no daemon)" -ForegroundColor Cyan
-Write-Host " LM Studio Provider: lm-studio (http://127.0.0.1:1234/v1)" -ForegroundColor Cyan
-Write-Host " LM Studio Model:    qwen/qwen3.8-27b (maxTokens: 16384)" -ForegroundColor Cyan
-Write-Host " DeepSeek Provider:  deepseek-official / deepseek-chat (API key: `$env:DEEPSEEK_API_KEY)" -ForegroundColor Cyan
+Write-Host " Registration complete" -ForegroundColor Cyan
+Write-Host " Config written to: $PatchFile" -ForegroundColor Cyan
+Write-Host " Plugin:  $PluginName (id: $PluginEntryId, in-process routing)" -ForegroundColor Cyan
+Write-Host " Local:   lm-studio at http://127.0.0.1:1234/v1 (override with localEndpoint)" -ForegroundColor Cyan
+Write-Host " Cloud:   deepseek-official / deepseek-chat (needs `$env:DEEPSEEK_API_KEY)" -ForegroundColor Cyan
+Write-Host ""
+Write-Host " Restart the profile for the plugin to load." -ForegroundColor Cyan
+Write-Host " If you do not run LM Studio, set localEndpoint and localModel." -ForegroundColor Cyan
 Write-Host "====================================================" -ForegroundColor Cyan
