@@ -297,8 +297,8 @@ tier in one place — a local thinking model on the worker's endpoint, deliberat
 `leadProviders` list always wins over the shortcut.
 
 The other half — a DSH agent preset that gives the lead its instruction and repository-read tools — is
-the operator's to write. `presets/lead.md` at the repository root documents the shape and is explicit
-about which half is verified and which is not.
+the operator's to write. [`../docs/lead-tier.md`](../docs/lead-tier.md) records the shape, the host
+capabilities involved, and why the tier was retired after measurement.
 
 ## Rule 8: source may not reach the cloud
 

@@ -45,7 +45,7 @@ export const PROFILES: Profiles = {
    *
    * `systemInstruction` below is REFERENCE ONLY, and deliberately so. A lead request is left exactly
    * as the host configured it, which means this plugin never injects this text into anything — the
-   * agent preset is what actually runs (see `presets/lead/`). It is kept here because the profile is
+   * agent preset is what actually runs (see `docs/lead-tier.md`). It is kept here because the profile is
    * where the lead tier is declared, and because a test asserts it has not drifted from the preset.
    */
   LEAD: {
