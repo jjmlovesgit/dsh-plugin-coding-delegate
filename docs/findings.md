@@ -289,3 +289,15 @@ documented in `docs/refactor.md` as a bare `node --test`, so the manual was inst
 session to reintroduce the bug. A contract check that fails loudly is worth more than a convention that is
 usually followed — and a documented command is part of the system, not a comment on it.
 
+**The polluted history, archived rather than deleted.** The log up to 2026-10-07 19:27 local moved to
+`~/.dsh/local-router/archive/router-debug.pre-oracle-isolation-2026-10-07.log` (3,392,964 bytes), and a
+clean `router-debug.log` began 22 ms later — the plugin appends per write rather than holding the file
+open, so it recreated the path with no restart and no change to `logging.ts`.
+
+The file was archived and not deleted because it is not garbage: it holds the live evidence
+`docs/live-verification.md` quotes, and several entries in this file were found in it. It is mixed, not
+worthless. Note what the split costs, though — a quote from before that timestamp will no longer be in the
+current log, which is why `live-verification.md` now says where to look. Splitting the evidence base is
+itself a small loss, and it was the cheaper of the two options only because the alternative was an
+instrument that could not be trusted at all.
+

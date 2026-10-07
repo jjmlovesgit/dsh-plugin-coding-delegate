@@ -4,6 +4,14 @@ A DSH restart was the last unverified link for two units, because the running se
 loaded at startup — so every commit this session was invisible to the process that was exercising it.
 After the restart, both were observed working, and the observation found two further defects.
 
+> **Where this evidence lives.** Every `router-debug.log` extract below was read before
+> 2026-10-07 19:27 local, when the log was 3.4 MB and still shared with the oracle runner — test fixtures
+> were being interleaved into it, which is why an earlier reading of it was inconclusive. It has since been
+> split: the history up to that moment is archived at
+> `~/.dsh/local-router/archive/router-debug.pre-oracle-isolation-2026-10-07.log`, and a clean
+> `router-debug.log` begins there. Any quote below that cannot be found in the current log is in the
+> archive. See `findings.md` and `scripts/check-oracle-isolation.cjs`.
+
 ## What the restart verified
 
 **1. The fence scanner fix (`ad08939`) is live.** The probe that failed before the restart was re-run
