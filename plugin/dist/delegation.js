@@ -226,10 +226,19 @@ function applySearchReplaceBlocks(content, blocks) {
  * what passed was no longer the contract.
  */
 function resolveDelegateStatus(input) {
+    // Tampering voids the run whatever else happened: what passed was no longer the contract.
     if (input.contractViolations.length > 0)
         return 'CONTRACT_MODIFIED';
+    // Nothing ran, so the outcome is unknown rather than a pass.
     if (input.verificationGate)
         return 'VERIFICATION_NOT_APPROVED';
+    // The project check is evaluated BEFORE `unverified`, and that order is the point. `unverified` is an
+    // absence of evidence -- no command was supplied for the unit. A failed project check is positive
+    // evidence: something was proven, and what was proven is that the tree is broken. Reporting
+    // "unverified" for a unit that demonstrably broke the build would understate what is known.
+    if (input.coherenceFailed) {
+        return input.isSuccess ? 'INCOHERENT' : 'VERIFICATION_FAILED';
+    }
     if (input.unverified)
         return 'UNVERIFIED';
     return input.isSuccess ? 'SUCCESS' : 'VERIFICATION_FAILED';
@@ -397,10 +406,10 @@ async function delegateWorker(params = {}, tracker) {
             (0, contracts_1.rememberDelegated)(createdPaths, 'created');
         if (patchedPaths.length > 0)
             (0, contracts_1.rememberDelegated)(patchedPaths, 'patched');
+        const policy = params.verificationPolicy ?? verification_1.DEFAULT_VERIFICATION_POLICY;
         let testResults = undefined;
         let verificationGate = undefined;
         if (params.runVerification) {
-            const policy = params.verificationPolicy ?? verification_1.DEFAULT_VERIFICATION_POLICY;
             const decision = (0, verification_1.evaluateVerificationPolicy)(params.runVerification, policy);
             let permitted = decision.kind === 'allow';
             if (decision.kind === 'ask') {
@@ -431,15 +440,40 @@ async function delegateWorker(params = {}, tracker) {
         // been caught doing twice.
         const wroteFiles = filesWritten.length > 0 && emission.errors.length === 0;
         const unverified = !verificationGate && !params.runVerification && wroteFiles;
+        // The project's own check, which is the only thing here that spans units.
+        //
+        // Skipped in two cases, both deliberate. A unit that wrote no files cannot have broken coherence, so
+        // a delegation that only answered a question does not pay for a build. And `mode: 'deny'` means no
+        // verification command is executed, which this is -- consistent rather than an exception to it.
+        let coherenceResults = undefined;
+        const coherenceCommand = policy.coherenceVerification;
+        if (coherenceCommand && wroteFiles && policy.mode !== 'deny') {
+            coherenceResults = (0, verification_1.runSandboxVerification)(coherenceCommand, workspaceBase, {
+                redact: params.redactVerification ?? process.env.DSH_LOCAL_ROUTER_RAW_VERIFICATION !== '1',
+                // A separate raw log, so a failing project check cannot overwrite the unit's own evidence.
+                rawLogPath: path.join((0, logging_1.resolveDataDir)(), 'last-coherence.log'),
+                timeoutMs: policy.timeoutMs,
+            });
+        }
+        // A spawn the sandbox refused reports failed > 0, so a check that could not run is a failure here
+        // rather than a silent pass -- which is the direction this has to fail in.
+        const coherenceFailed = Boolean(coherenceResults && coherenceResults.failed > 0);
         // Re-hash once the worker has finished and verification has run. A violation voids the verdict
         // regardless of what the tests reported, because the tests are no longer the contract.
         const contractAfter = (0, contracts_1.contractFileHashes)(contractPaths);
         const contractViolationsFound = (0, contracts_1.contractViolations)(contractBefore, contractAfter);
-        const isSuccess = contractViolationsFound.length === 0 &&
+        // The unit's own verdict, before the project is considered -- kept separate on purpose.
+        // `resolveDelegateStatus` needs this one rather than the combined one, because INCOHERENT means
+        // exactly "the unit passed and the project did not", so the status function has to be told which of
+        // the two failed. Folding coherence in here first made every broken tree report VERIFICATION_FAILED,
+        // which points the architect at the unit when the unit is fine.
+        const unitSuccess = contractViolationsFound.length === 0 &&
             !verificationGate &&
             !unverified &&
             (!testResults || testResults.failed === 0) &&
             emission.errors.length === 0;
+        // What the caller is told: both the unit and the project have to hold.
+        const isSuccess = unitSuccess && !coherenceFailed;
         let summaryText = '';
         if (filesWritten.length > 0) {
             summaryText =
@@ -502,6 +536,22 @@ async function delegateWorker(params = {}, tracker) {
                 summaryText += '\nFailures: ' + testResults.errorSummary;
             }
         }
+        if (coherenceResults) {
+            summaryText +=
+                '\nCoherence check: Passed ' +
+                    coherenceResults.passed +
+                    ', Failed ' +
+                    coherenceResults.failed +
+                    '.';
+            if (coherenceFailed) {
+                summaryText +=
+                    '\nINCOHERENT: this unit passed its own contract, but the project check failed. The tree is ' +
+                        'broken by this unit even though the tests written for it pass, so the verdict is void.';
+            }
+            if (coherenceResults.errorSummary) {
+                summaryText += '\nCoherence failures: ' + coherenceResults.errorSummary;
+            }
+        }
         if (contractPaths.length > 0) {
             summaryText +=
                 contractViolationsFound.length > 0
@@ -554,12 +604,14 @@ async function delegateWorker(params = {}, tracker) {
                 prompt: promptTokens,
                 completion: completionTokens,
             },
+            ...(coherenceResults ? { coherenceResults } : {}),
             summary: summaryText,
             status: resolveDelegateStatus({
                 verificationGate,
                 unverified,
                 contractViolations: contractViolationsFound,
-                isSuccess,
+                isSuccess: unitSuccess,
+                coherenceFailed,
             }),
             taskName: params.taskName || 'Subtask',
             tokensUsed: totalTokens,

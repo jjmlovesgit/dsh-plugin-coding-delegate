@@ -219,6 +219,11 @@ export declare function resolveDelegateStatus(input: {
     unverified: boolean;
     contractViolations: string[];
     isSuccess: boolean;
+    /**
+     * The project's own check ran and failed, whatever the unit's own contract said. Absent means no
+     * coherence check was configured, or it was skipped -- never "it passed".
+     */
+    coherenceFailed?: boolean;
 }): string;
 export declare function delegateWorker(params?: DelegateWorkerParams, tracker?: SavingsTracker): Promise<any>;
 export declare function extractPromptText(session: LLMSession | any): string;

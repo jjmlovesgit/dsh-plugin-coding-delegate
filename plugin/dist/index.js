@@ -510,11 +510,17 @@ async function requestApprovalForWrite(ctx, exec, verdict) {
     }
 }
 function resolveVerificationPolicy(options = {}) {
+    // A blank or non-string coherence command is absent, not an empty command: an empty string would run
+    // as a no-op subprocess and report success, which is a project check that checks nothing.
+    const coherence = typeof options.coherenceVerification === 'string' && options.coherenceVerification.trim()
+        ? options.coherenceVerification.trim()
+        : undefined;
     return {
         mode: options.verificationApproval ?? 'ask',
         allowlist: Array.isArray(options.verificationAllowlist) ? options.verificationAllowlist : [],
         allowInProcessFallback: options.allowInProcessFallback === true,
         timeoutMs: (0, verification_1.resolveVerificationTimeoutMs)(options.verificationTimeoutMs),
+        ...(coherence ? { coherenceVerification: coherence } : {}),
     };
 }
 /**

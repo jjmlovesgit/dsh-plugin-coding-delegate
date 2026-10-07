@@ -313,6 +313,19 @@ export interface VerificationPolicy {
    * alternative is a command that never returns.
    */
   timeoutMs: number
+  /**
+   * The PROJECT's own check -- a build, a full suite -- run after the unit's contract, and given the
+   * power to void an otherwise passing unit.
+   *
+   * Operator configuration rather than model input. That is why it is deliberately absent from the tool
+   * schema and is not put through the approval seam: the operator wrote this string in their profile
+   * patch, exactly as they would write it in CI, so there is nothing for them to approve that they did
+   * not already write. `runVerification` is model-selected and is gated for precisely that reason.
+   *
+   * It exists because every other check in this plugin is per unit: `contractFiles` judges one unit's
+   * tests, verification runs one unit's command, and nothing asks whether the tree still works.
+   */
+  coherenceVerification?: string
 }
 
 export const DEFAULT_VERIFICATION_POLICY: VerificationPolicy = {
