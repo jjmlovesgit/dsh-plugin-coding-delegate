@@ -107,18 +107,47 @@ detector; it was caught only by disbelieving the result and reading the file.
 **Does the plugin still work end to end?** Re-run the three-call A2 loop. It remains the closest thing to a
 host integration test this project has.
 
+## One open question, resolved
+
+The earlier version of this document left this unanswered: `~/.dsh/config.json` registers the plugin under
+its **old name** `dsh-plugin-local-router` pointing at the same `dist/index.js`, while
+`~/.dsh/profiles/web/package.json` registers it as the bundle `dsh-plugin-coding-delegate`. Two
+registrations of one plugin.
+
+**It is not a double mount.** The plugin's `console.log`/`console.warn` go to
+`%APPDATA%\dsh-tauri\logs\desktop.log` — **not** to `router-debug.log`, which receives only `trace()` output.
+Searching the trace log for the duplicate-mount guard was invalid before that log's pollution is even
+considered; the earlier note cited the pollution as the reason, which was the wrong reason.
+
+Read from the right file, `desktop.log` carries exactly one
+`[LOCAL_ROUTER_INIT] Tool 'delegate_worker' registered successfully on ctx.tools.` per host start, and no
+`Plugin already registered` line among 311 plugin markers. Single mount; the guard was never needed.
+
+That file is worth knowing about for a second reason: lines like
+`[LOCAL_GUARD] ALLOWED-ONCE pwsh -> plugin/vitest.config.ts` show the guard mediating **reads** of source
+files, not only writes.
+
+## The 0.22.4 update, applied and verified
+
+The update was installed. Checked against the same questions as before:
+
+| | before | after |
+| --- | --- | --- |
+| Desktop shell | 0.22.3 | **0.22.4** |
+| manifest recommends dsh | 0.2.0-rc.2 | **0.2.0-rc.2** — unchanged |
+| `dependencies.json` → `dsh` | managed root | **same root**, unchanged |
+| managed core | 0.2.0-rc.2 | **0.2.0-rc.2**, root untouched |
+
+The app update did not touch the core, which is what the manifest check was for. The plugin re-mounted once
+on the restart (one `LOCAL_ROUTER_INIT`), a smoke delegation returned `SUCCESS` while writing no files, and
+the trace log shows live `agent/request` and `CONTEXT_QUALITY` entries from the running session afterwards.
+
 ## What this does not establish
 
-- **Which core 0.22.4 would install.** Its `manifest.jsonc` is inside the installer; the currently installed
-  one recommends `0.2.0-rc.2`. If a future manifest raises `recommend` above what is installed, the core
-  changes and the event-vocabulary check above becomes a real check again rather than a formality.
-- **That the Desktop's plugin list and the core's profile bundles agree.** `~/.dsh/config.json` registers
-  this plugin under its **old name** `dsh-plugin-local-router`, pointing at the same `dist/index.js`, while
-  `~/.dsh/profiles/web/package.json` registers it as the bundle `dsh-plugin-coding-delegate`. Two
-  registrations of one plugin is a smell; the plugin has a duplicate-mount guard that logs "Plugin already
-  registered", and no such line appears in the log — but the log is polluted (above), so that is weaker
-  evidence than it looks. Not investigated further here.
-- **Anything about a *future* core upgrade.** The static audit that the earlier version of this document
+- **Which core a *future* Desktop update would install.** The `manifest.jsonc` inside 0.22.4 still
+  recommends `0.2.0-rc.2`. If a later manifest raises `recommend` above what is installed, the core changes
+  and the event-vocabulary check above becomes a real check again rather than a formality.
+- **Anything about a *future* core upgrade.** The static audit the earlier version of this document
   contained is still a reasonable method; it was simply pointed at the wrong install.
 
 ## The shortcut for next time
