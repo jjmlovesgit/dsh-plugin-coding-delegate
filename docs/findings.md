@@ -112,3 +112,18 @@ and "no complete search/replace block" failure in the emission.ts round traces t
 large file must arrive in several small requests, or the fence/parse path must be made robust enough that
 truncation is visible as truncation.
 
+## The context-quality counters cannot see a resumed session's history
+
+`context-quality.ts` folds DSH's `session/event` firehose. That firehose does **not** publish events that
+entered through construction — replay, fork, or resume — which DSH's own session service documents: a
+constructor seed never emits.
+
+**Impact:** a resumed session is counted from the resume, not from its true beginning. For "compactions
+per session" and "turns before restart" that is the wrong denominator, and it fails in the direction of
+under-reporting: a session that was compacted five times before a restart shows zero once resumed.
+
+It is not fixable by subscribing harder. The honest options are to read the persisted log for the seed
+(the `session-stats` projection shows the pattern: a fold with a state version, seeded from stored rows),
+or to label the counter as process-scoped rather than session-scoped. The second is truer to what the
+firehose can actually answer, and is what the module's doc comment says today.
+

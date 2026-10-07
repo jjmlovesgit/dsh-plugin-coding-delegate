@@ -85,6 +85,12 @@ import {
   saveDelegatedRegistry,
   sha256File,
 } from './contracts'
+import {
+  ContextQuality,
+  EMPTY_CONTEXT_QUALITY,
+  describeContextQuality,
+  foldContextQuality,
+} from './context-quality'
 
 export { PROFILES, ProfileConfig, SavingsTracker, RouteType, StepUsage }
 export { resolveDataDir, trace } from './logging'
@@ -143,6 +149,12 @@ export {
   runInProcessFallback,
   runSandboxVerification,
 } from './verification'
+export {
+  ContextQuality,
+  EMPTY_CONTEXT_QUALITY,
+  describeContextQuality,
+  foldContextQuality,
+} from './context-quality'
 export {
   DELEGATE_WORKER_OPENAI_SCHEMA,
   DELEGATE_WORKER_SCHEMA,
@@ -1132,6 +1144,47 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
     },
     { prepend: true } as any
   )
+
+  // Context-quality counters: the measurement that turns "your GPU does the typing" into an observation
+  // rather than an argument.
+  //
+  // DSH publishes every session event on a `session/event` firehose, and its own session service
+  // documents observation as "a plugin concern (subscribe to `session/event`)". So this needs no injected
+  // service, which is what keeps the plugin's `inject` list -- and the oracle that asserts it -- unchanged.
+  //
+  // Counted per session, traced on the events that move the figures. The reclaimed-token number comes
+  // from the host (`shadowedTokenCount` on `compaction/summary` and `compaction/prune`), so it is
+  // reported rather than estimated.
+  //
+  // One limit worth knowing while reading the trace: events that entered through construction (replay,
+  // fork, resume) are not published on this firehose, so a resumed session is counted from the resume
+  // rather than from its true beginning. Recorded in `docs/findings.md`.
+  const contextQuality = new Map<string, ContextQuality>()
+  const qualityKeyFor = (session: any): string => {
+    const id = session?.id ?? session?.header?.id
+    return typeof id === 'string' && id.length > 0 ? id : '__global__'
+  }
+  ctx.on('session/event' as any, (session: any, event: any) => {
+    const key = qualityKeyFor(session)
+    const current = contextQuality.get(key) ?? EMPTY_CONTEXT_QUALITY
+    const next = foldContextQuality(current, event)
+    if (next === current) return
+    contextQuality.set(key, next)
+
+    const type = String(event?.type ?? '')
+    if (
+      type === 'turn/start' ||
+      type === 'compaction/summary' ||
+      type === 'compaction/prune' ||
+      type === 'compaction/end'
+    ) {
+      trace('CONTEXT_QUALITY', {
+        session: key.slice(0, 8),
+        event: type,
+        summary: describeContextQuality(next),
+      })
+    }
+  })
 
   // 2. Primary Thread (Architect) Request Hook: Pin primary thread to DeepSeek Cloud with native uncapped context and tool schema injection
   ctx.on(

@@ -91,9 +91,17 @@ Stated plainly, because these limits decide whether it fits your work:
   failure mode of splitting work up, and splitting it here does not remove it.
 
 > The mechanism above is well established — attention dilution and lossy compaction are properties of
-> how these models and harnesses behave. What the plugin does *not* yet do is measure context quality;
-> it measures tokens. The observable proxies would be frontier tokens in the window per turn,
-> compactions per session, and turns completed before a restart.
+> how these models and harnesses behave. What the plugin measures directly is **tokens**. It also counts
+> the context-quality events the harness itself reports: turns, steps, compactions, model-free prunes,
+> failed compactions, and **tokens reclaimed** — the last read from DSH's own `shadowedTokenCount` on
+> `compaction/summary` and `compaction/prune`, so it is the harness's figure rather than this plugin's
+> estimate. That is reported on a `CONTEXT_QUALITY` trace line.
+>
+> Two limits worth stating. The counters are **process-scoped, not lifetime-of-session**: DSH does not
+> publish events that entered through replay, fork, or resume, so a resumed session counts from the
+> resume. And **per-turn frontier tokens in the window are still not measured** — that needs the
+> `dsh-token-meter` projection, and until it is wired up the strongest claim here remains the token
+> counts, not a per-turn window figure.
 
 ## The policy
 

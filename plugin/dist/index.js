@@ -33,8 +33,8 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.DEFAULT_LOCAL_ENDPOINT = exports.DELEGATE_WORKER_SCHEMA = exports.DELEGATE_WORKER_OPENAI_SCHEMA = exports.runSandboxVerification = exports.runInProcessFallback = exports.resolveVerificationTimeoutMs = exports.redactVerificationOutput = exports.parseTestOutput = exports.evaluateVerificationPolicy = exports.describeFailures = exports.commandProgram = exports.DEFAULT_VERIFICATION_TIMEOUT_MS = exports.DEFAULT_VERIFICATION_POLICY = exports.sha256File = exports.saveDelegatedRegistry = exports.resolveDelegatedRegistryPath = exports.resolveContractFiles = exports.rememberDelegated = exports.pruneDelegatedRecords = exports.parseDelegatedRegistry = exports.mergeDelegatedRecords = exports.loadDelegatedRegistry = exports.contractViolations = exports.contractFileHashes = exports.resolveContextFiles = exports.DEFAULT_CONTEXT_MAX_BYTES = exports.roleForAgent = exports.resolveLeadProviders = exports.resolveAgentRole = exports.resetAgentRoles = exports.rememberAgentRole = exports.evaluateSourceEgress = exports.detectSourceEgress = exports.describeSourceRead = exports.applyArchitectConfig = exports.applyAgentRole = exports.DEFAULT_SOURCE_EGRESS_MIN_LINES = exports.AGENT_ROLE_LIMIT = exports.hasCommandWriteSignal = exports.hasCommandDeleteSignal = exports.evaluateDelegatedReadPolicy = exports.evaluateCodeWriteGuard = exports.DELETE_PRIMITIVES = exports.extractAndEmitFiles = exports.evaluateEmissionPath = exports.isPathWithin = exports.trace = exports.resolveDataDir = exports.SavingsTracker = exports.PROFILES = void 0;
-exports.LocalRouter = exports.name = exports.using = exports.inject = exports.resolveDelegateStatus = exports.resolveChatCompletionsUrl = exports.parseSearchReplaceBlocks = exports.extractPromptText = exports.estimateTokenCount = exports.delegateWorker = exports.applySearchReplaceBlocks = exports.MIN_SEARCH_CHARS = void 0;
+exports.foldContextQuality = exports.describeContextQuality = exports.EMPTY_CONTEXT_QUALITY = exports.runSandboxVerification = exports.runInProcessFallback = exports.resolveVerificationTimeoutMs = exports.redactVerificationOutput = exports.parseTestOutput = exports.evaluateVerificationPolicy = exports.describeFailures = exports.commandProgram = exports.DEFAULT_VERIFICATION_TIMEOUT_MS = exports.DEFAULT_VERIFICATION_POLICY = exports.sha256File = exports.saveDelegatedRegistry = exports.resolveDelegatedRegistryPath = exports.resolveContractFiles = exports.rememberDelegated = exports.pruneDelegatedRecords = exports.parseDelegatedRegistry = exports.mergeDelegatedRecords = exports.loadDelegatedRegistry = exports.contractViolations = exports.contractFileHashes = exports.resolveContextFiles = exports.DEFAULT_CONTEXT_MAX_BYTES = exports.roleForAgent = exports.resolveLeadProviders = exports.resolveAgentRole = exports.resetAgentRoles = exports.rememberAgentRole = exports.evaluateSourceEgress = exports.detectSourceEgress = exports.describeSourceRead = exports.applyArchitectConfig = exports.applyAgentRole = exports.DEFAULT_SOURCE_EGRESS_MIN_LINES = exports.AGENT_ROLE_LIMIT = exports.hasCommandWriteSignal = exports.hasCommandDeleteSignal = exports.evaluateDelegatedReadPolicy = exports.evaluateCodeWriteGuard = exports.DELETE_PRIMITIVES = exports.extractAndEmitFiles = exports.evaluateEmissionPath = exports.isPathWithin = exports.trace = exports.resolveDataDir = exports.SavingsTracker = exports.PROFILES = void 0;
+exports.LocalRouter = exports.name = exports.using = exports.inject = exports.resolveDelegateStatus = exports.resolveChatCompletionsUrl = exports.parseSearchReplaceBlocks = exports.extractPromptText = exports.estimateTokenCount = exports.delegateWorker = exports.applySearchReplaceBlocks = exports.MIN_SEARCH_CHARS = exports.DEFAULT_LOCAL_ENDPOINT = exports.DELEGATE_WORKER_SCHEMA = exports.DELEGATE_WORKER_OPENAI_SCHEMA = void 0;
 exports.scanDLP = scanDLP;
 exports.requestApprovalForWrite = requestApprovalForWrite;
 exports.resolveVerificationPolicy = resolveVerificationPolicy;
@@ -55,6 +55,7 @@ const guard_1 = require("./guard");
 const roles_1 = require("./roles");
 const delegation_1 = require("./delegation");
 const contracts_1 = require("./contracts");
+const context_quality_1 = require("./context-quality");
 var logging_2 = require("./logging");
 Object.defineProperty(exports, "resolveDataDir", { enumerable: true, get: function () { return logging_2.resolveDataDir; } });
 Object.defineProperty(exports, "trace", { enumerable: true, get: function () { return logging_2.trace; } });
@@ -108,6 +109,10 @@ Object.defineProperty(exports, "redactVerificationOutput", { enumerable: true, g
 Object.defineProperty(exports, "resolveVerificationTimeoutMs", { enumerable: true, get: function () { return verification_2.resolveVerificationTimeoutMs; } });
 Object.defineProperty(exports, "runInProcessFallback", { enumerable: true, get: function () { return verification_2.runInProcessFallback; } });
 Object.defineProperty(exports, "runSandboxVerification", { enumerable: true, get: function () { return verification_2.runSandboxVerification; } });
+var context_quality_2 = require("./context-quality");
+Object.defineProperty(exports, "EMPTY_CONTEXT_QUALITY", { enumerable: true, get: function () { return context_quality_2.EMPTY_CONTEXT_QUALITY; } });
+Object.defineProperty(exports, "describeContextQuality", { enumerable: true, get: function () { return context_quality_2.describeContextQuality; } });
+Object.defineProperty(exports, "foldContextQuality", { enumerable: true, get: function () { return context_quality_2.foldContextQuality; } });
 var delegation_2 = require("./delegation");
 Object.defineProperty(exports, "DELEGATE_WORKER_OPENAI_SCHEMA", { enumerable: true, get: function () { return delegation_2.DELEGATE_WORKER_OPENAI_SCHEMA; } });
 Object.defineProperty(exports, "DELEGATE_WORKER_SCHEMA", { enumerable: true, get: function () { return delegation_2.DELEGATE_WORKER_SCHEMA; } });
@@ -771,6 +776,44 @@ function apply(ctx, options = {}) {
         }
         return typeof next === 'function' ? await next() : payload;
     }, { prepend: true });
+    // Context-quality counters: the measurement that turns "your GPU does the typing" into an observation
+    // rather than an argument.
+    //
+    // DSH publishes every session event on a `session/event` firehose, and its own session service
+    // documents observation as "a plugin concern (subscribe to `session/event`)". So this needs no injected
+    // service, which is what keeps the plugin's `inject` list -- and the oracle that asserts it -- unchanged.
+    //
+    // Counted per session, traced on the events that move the figures. The reclaimed-token number comes
+    // from the host (`shadowedTokenCount` on `compaction/summary` and `compaction/prune`), so it is
+    // reported rather than estimated.
+    //
+    // One limit worth knowing while reading the trace: events that entered through construction (replay,
+    // fork, resume) are not published on this firehose, so a resumed session is counted from the resume
+    // rather than from its true beginning. Recorded in `docs/findings.md`.
+    const contextQuality = new Map();
+    const qualityKeyFor = (session) => {
+        const id = session?.id ?? session?.header?.id;
+        return typeof id === 'string' && id.length > 0 ? id : '__global__';
+    };
+    ctx.on('session/event', (session, event) => {
+        const key = qualityKeyFor(session);
+        const current = contextQuality.get(key) ?? context_quality_1.EMPTY_CONTEXT_QUALITY;
+        const next = (0, context_quality_1.foldContextQuality)(current, event);
+        if (next === current)
+            return;
+        contextQuality.set(key, next);
+        const type = String(event?.type ?? '');
+        if (type === 'turn/start' ||
+            type === 'compaction/summary' ||
+            type === 'compaction/prune' ||
+            type === 'compaction/end') {
+            (0, logging_1.trace)('CONTEXT_QUALITY', {
+                session: key.slice(0, 8),
+                event: type,
+                summary: (0, context_quality_1.describeContextQuality)(next),
+            });
+        }
+    });
     // 2. Primary Thread (Architect) Request Hook: Pin primary thread to DeepSeek Cloud with native uncapped context and tool schema injection
     ctx.on('agent/request', async (payload, next) => {
         const resolvedConfig = typeof next === 'function' ? await next() : {};
