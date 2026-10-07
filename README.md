@@ -94,9 +94,10 @@ Stated plainly, because these limits decide whether it fits your work:
 > how these models and harnesses behave. What this plugin reports is the **harness's own accounting
 > rather than a proxy**, written to a `CONTEXT_QUALITY` trace line: turns, steps, compactions, model-free
 > prunes, failed compactions, **tokens reclaimed** (DSH's `shadowedTokenCount` on `compaction/summary`
-> and `compaction/prune`), and the **input tokens the model actually received, per call**, with its
-> high-water mark and the route's advertised window (the provider's own `TokenUsage.inputTokens` on
-> `assistant/message`).
+> and `compaction/prune`), and the **prompt the model actually received, per call**, with its high-water
+> mark and the route's advertised window (from the provider's `usage` on `assistant/message` — summing
+> `inputTokens` **and** `cacheReadTokens`, because `inputTokens` alone is only the uncached remainder and
+> reading it as the window understates a full one by orders of magnitude).
 >
 > Two things worth stating plainly. The counters are **process-scoped, not lifetime-of-session**: DSH
 > does not publish events that entered through replay, fork, or resume, so a resumed session counts from
