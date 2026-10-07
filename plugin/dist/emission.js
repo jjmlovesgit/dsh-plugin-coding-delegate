@@ -186,7 +186,12 @@ function extractAndEmitFiles(content, targetFilesHint, baseDir = process.cwd(), 
         }
     }
     const FENCE = '\x60\x60\x60';
-    const fileAttrRegex = new RegExp(FENCE + '[a-zA-Z0-9_-]*\\s+(?:file|filename)=["\']?([^"\'\\s\\n>]+)["\']?\\s*\\n([\\s\\S]*?)' + FENCE, 'gi');
+    // The closing fence is matched only where a fence can legally close: nothing follows it on its line,
+    // and nothing but whitespace precedes it. A non-greedy scan to the next bare run of backticks stops
+    // at the first one *anywhere*, so a body that itself contains a fence -- a patch quoting one, or a
+    // markdown example inside a source file -- had its tail silently dropped and was then refused as a
+    // malformed patch. The comment is kept fence-free so this line stays patchable by a confined agent.
+    const fileAttrRegex = new RegExp(FENCE + '[a-zA-Z0-9_-]*\\s+(?:file|filename)=["\']?([^"\'\\s\\n>]+)["\']?\\s*\\n([\\s\\S]*?)[ \\t]*' + FENCE + '[ \\t]*(?:\\r?\\n|$)', 'gi');
     let match;
     while ((match = fileAttrRegex.exec(content)) !== null) {
         emitFile(match[1], match[2]);
