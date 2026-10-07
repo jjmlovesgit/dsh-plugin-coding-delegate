@@ -115,6 +115,24 @@ describe('DSH Local Router Cordis Plugin Test Suite', () => {
     expect(path.isAbsolute(dir)).toBe(true)
     expect(dir).not.toMatch(/DSHLaya/i)
     expect(dir.endsWith('local-router')).toBe(true)
+
+    // vitest.config.ts sets DSH_HOME so that a test run cannot write into the operator's real ~/.dsh,
+    // which means the assertions above exercise the DSH_HOME branch. Pin the unset default as well:
+    // with no override at all, the path must still be derived from the home directory rather than
+    // being a literal, or the original point of this test would have quietly stopped being checked.
+    const savedHome = process.env.DSH_HOME
+    const savedDataDir = process.env.DSH_LOCAL_ROUTER_DATA_DIR
+    delete process.env.DSH_HOME
+    delete process.env.DSH_LOCAL_ROUTER_DATA_DIR
+    try {
+      const fallback = resolveDataDir()
+      expect(path.isAbsolute(fallback)).toBe(true)
+      expect(fallback).not.toMatch(/DSHLaya/i)
+      expect(fallback.endsWith('local-router')).toBe(true)
+    } finally {
+      if (savedHome !== undefined) process.env.DSH_HOME = savedHome
+      if (savedDataDir !== undefined) process.env.DSH_LOCAL_ROUTER_DATA_DIR = savedDataDir
+    }
   })
 
   it('File Emitter: Parses structured code blocks and writes files to workspace', () => {

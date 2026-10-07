@@ -17,6 +17,13 @@ const http = require("node:http");
 const os = require("node:os");
 const path = require("node:path");
 
+// The delegation tests write files on the worker's behalf, and `rememberDelegated` persists what it
+// wrote to the plugin data directory. Without this redirect a test run appends to the operator's real
+// delegated-registry.json -- measured: one record per run. Set before the first require of DIST and
+// read at call time, so it always wins.
+const DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "dsh-delta-data-"));
+process.env.DSH_LOCAL_ROUTER_DATA_DIR = DATA_DIR;
+
 const PLUGIN = path.resolve(__dirname, "..", "..");
 const DIST = PLUGIN + "/dist/index.js";
 

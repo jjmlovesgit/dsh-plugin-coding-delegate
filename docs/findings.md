@@ -1,23 +1,38 @@
 # Findings not yet fixed
 
 Small, real, and known-but-open. Each is the kind of thing this project would rather write down than
-rediscover.
+rediscover. Resolved entries are kept in place, marked, so the reasoning is not lost.
 
-## Running the test suite pollutes the operator's live registry
+## The test suite polluted the operator's live registry — fixed
 
-`delta-emission.test.cjs` and `context-injection.test.cjs` call `delegateWorker`, and `delegateWorker`
-calls `rememberDelegated`, which persists. So running the oracles writes into the operator's real
-`~/.dsh/local-router/delegated-registry.json`.
+`delegateWorker` calls `rememberDelegated`, which persists. So any test that delegates files wrote into
+the operator's real `~/.dsh/local-router/delegated-registry.json`.
 
 Observed directly: the registry's newest entries were
-`C:\Users\Jim\AppData\Local\Temp\dsh-delta-*\target.ts` — one per oracle run, forever.
+`C:\Users\Jim\AppData\Local\Temp\dsh-delta-*\target.ts`. **Measured rather than attributed by reading:**
+one `vitest` run and one `node --test tests/oracles/*.test.cjs` run each grew the registry by exactly one
+record, repeatably. `delta-emission.test.cjs` was the oracle responsible; `context-injection.test.cjs`
+delegates but writes nothing today, because its refusal paths return before emission.
 
-Impact is low, because they are temp paths and gating reads of them is moot. But it is undeclared state
-mutation from a test run, which is the same category as the config that claimed a control it did not have.
+The first draft of this finding named the wrong pair of files and the wrong fix. Reading the source
+suggested `context-injection` and `delta-emission`; instrumenting the registry showed `vitest` was the
+other contributor, which source-reading had missed entirely.
 
-**Fix:** set `DSH_LOCAL_ROUTER_DATA_DIR` to a temp directory for *every* oracle that delegates, not only
-for `durable-registry.test.cjs`, which is the one that already does it. `resolveDataDir()` honours that
-variable and reads it at call time, so an env assignment in the oracle is sufficient.
+**Fixed** by redirecting plugin state in the two runners:
+
+- `plugin/vitest.config.ts` sets `DSH_HOME` to a temp directory through `test.env`, which covers every
+  unit test including `plugin.test.ts`.
+- `delta-emission.test.cjs` and `context-injection.test.cjs` set `DSH_LOCAL_ROUTER_DATA_DIR` before the
+  first `require` of `DIST`.
+
+Two details worth keeping:
+
+- **`DSH_HOME` was used for vitest, not `DSH_LOCAL_ROUTER_DATA_DIR`.** The data-dir override is taken
+  verbatim, so it would have broken `resolveDataDir`'s own assertion that the result ends in
+  `local-router`; `DSH_HOME` is joined with that segment. That test was then strengthened to pin the
+  *unset* default as well, rather than quietly testing the new override instead.
+- **Verified by measurement, not by inspection:** registry size before and after each suite. Both are
+  now 0 growth, where each was 1.
 
 ## `enable_thinking: false` on the worker does nothing — documented as advisory
 

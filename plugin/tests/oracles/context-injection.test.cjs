@@ -13,6 +13,13 @@ const http = require("node:http");
 const os = require("node:os");
 const path = require("node:path");
 
+// This oracle delegates, so it can write files on the worker's behalf and `rememberDelegated` would
+// persist them to the plugin data directory. It does not write any today -- the refusal paths return
+// before emission -- but the redirect is here so that a future test cannot start mutating the
+// operator's real registry without anyone noticing. Set before the first require of DIST.
+const DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "dsh-context-data-"));
+process.env.DSH_LOCAL_ROUTER_DATA_DIR = DATA_DIR;
+
 const PLUGIN = path.resolve(__dirname, "..", "..");
 const DIST = PLUGIN + "/dist/index.js";
 
