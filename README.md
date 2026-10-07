@@ -1,8 +1,9 @@
 # DSH Local Router
 
-A [DeepSeek Harness](https://github.com/deepseek-ai) (DSH) plugin that routes each request to the
-cheapest place it can safely run: a local GPU for what it can handle, and a cloud architect for
-what it cannot — with an enforced gate in front of anything that would leave the machine.
+A [DeepSeek Harness](https://github.com/deepseek-ai) (DSH) plugin that decides where a request may
+go by **permission rather than preference**: a credential is not permitted to reach the cloud, the
+cloud model is not permitted to author source code, and everything beyond those rules is the
+architect's explicit choice to delegate or not.
 
 > **Status: 0.1.0, a personal project.** It works and is tested, but the API is not frozen and
 > the honest limits are documented rather than glossed. See
@@ -12,8 +13,8 @@ what it cannot — with an enforced gate in front of anything that would leave t
 
 Four things, in the order they act:
 
-1. **In-process routing.** No sidecar, no daemon, no extra port. Classification and routing happen
-   inside the plugin, so there is nothing extra to run or supervise.
+1. **In-process, no sidecar.** No daemon, no extra port, nothing to supervise. The gate and the
+   authorship guard run inside the plugin.
 2. **A DLP gate on every outbound request.** Prompts are scanned for credentials and
    high-entropy tokens before the cloud sees them. A hit is refused or rerouted to the local
    worker, never transmitted. The gate accumulates the user messages it has seen, so a credential

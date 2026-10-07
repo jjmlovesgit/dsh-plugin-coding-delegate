@@ -1,14 +1,13 @@
 # dsh-plugin-local-router
 
-A DeepSeek Harness (Cordis) plugin for **local-first LLM routing**. It classifies every
-request in-process and routes it to either a local OpenAI-compatible worker (LM Studio is
-the default assumption) or a cloud provider — keeping private material on the machine by
-default.
+A DeepSeek Harness (Cordis) plugin that decides where a request may go, and decides by
+**permission rather than preference**. A credential is not permitted to reach the cloud. The
+cloud model is not permitted to author source code. Beyond those two rules the destination is
+the cloud, and moving work off it is the architect's explicit choice — not a heuristic's guess.
 
-Routing is **fully in-process**: there is no separate decision daemon, no HTTP hop, and
-no timeout on the routing path. (Earlier versions called an external Python "Laya" scoring
-service; that dependency has been removed. The classifier is now TypeScript inside this
-package.)
+Everything runs **in-process**: there is no separate decision daemon, no HTTP hop, and no
+timeout on the routing path. (Earlier versions called an external Python "Laya" scoring service;
+that dependency was removed, and the credential rules are now TypeScript in this package.)
 
 > **This plugin does not modify your provider configuration.**
 >
@@ -18,8 +17,9 @@ package.)
 
 ## What it does
 
-1. **Routes requests** between a local provider and a cloud provider based on a three-layer
-   decision, cheapest check first.
+1. **Gates what may leave the machine.** Every outbound request is scanned for credentials. A hit
+   is refused or pinned to the local provider; absent a hit, the request goes to the cloud
+   provider. This is the only rule that changes the destination.
 2. **Provides a `delegate_worker` tool** that dispatches code-generation subtasks to the
    local model, writes the emitted files, and optionally runs a verification command.
 3. **Guards code authorship** with a `tools/pre-execute` hook that refuses cloud-authored
@@ -130,18 +130,36 @@ Two things to know here:
 
 ## Routing
 
-`predictRoute` applies three layers, in order:
+There is **one enforced rule**, and it is a permission rule rather than a cost or capability
+heuristic:
 
-| Layer | Condition | Result |
-| --- | --- | --- |
-| 1. DLP firewall | The prompt matches a credential pattern | **local**, `Gate 1 (Local Classifier - DLP Firewall)` |
-| 2. Token guard | Estimated tokens exceed `contextThreshold` | **cloud**, `Gate 0 (Guard - Token Threshold)` |
-| 3. Local classifier | Otherwise | privacy > 0.80 → local; complexity ≥ 2 → cloud; else local |
+| Condition | Result |
+| --- | --- |
+| The outbound payload matches a credential rule | **refused** (`dlpAction: 'block'`) or **pinned to the local provider** (`'local'`) |
+| High-entropy token, no keyword and no vendor prefix | **always pinned local**, never refused — a digest or a base64 payload looks identical |
+| Otherwise | **the cloud provider** |
 
-The classifier scans the **entire prompt** for credentials, while complexity scoring is
-applied to a bounded tail window (`windowChars`, default 2000). This asymmetry is
-deliberate: a key near the top of a long file must still be caught, but complexity scoring
-must stay cheap.
+So the plugin does not pick a model because one is cheaper or faster. It decides what is
+*allowed*: a credential has no cloud clearance, and absent that, the destination is the cloud.
+Moving work off the cloud beyond this is the architect's own decision — it calls
+`delegate_worker`, or it does not.
+
+The scan covers the whole conversation rather than only the newest message: user text is
+accumulated per session and re-scanned, so a credential from an earlier turn keeps the gate
+closed instead of scrolling out of view.
+
+### The classifier is available but not wired in
+
+`LocalRouter.predictRoute` implements a three-layer heuristic — `scanDLP`, a token-count
+threshold, then `classifyLocally` (a privacy score and a complexity score over a bounded window).
+It is exported, unit-tested, and has golden fixtures in `tests/fixtures/classifier-goldens.json`.
+
+**The plugin's hooks never call it, so it does not affect where requests go.** An earlier version
+of this README presented it as the routing path; that was wrong, and it is corrected here. It is
+kept because it is useful on its own and the fixtures document behaviour worth preserving. If you
+want complexity-based escalation, call it yourself — but note that making it the routing rule
+would turn this into a cost/latency router with a permission gate attached, which is not the
+premise this plugin is built on.
 
 ### The DLP firewall is enforced on every outbound request
 
@@ -180,11 +198,12 @@ payloads, UUIDs, git SHAs, long file paths, prose and minified CSS, 4.5 bits/cha
 noise ~4.2-4.4). Tune against your own code before trusting that boundary — the constants live
 in `src/local-classifier.ts`.
 
-The entropy scan is applied to the **gate only**, not to `classifyLocally`, so the classifier
-stays behaviour-compatible with its frozen reference corpus.
+The entropy scan is applied to the **gate only**, not to `classifyLocally`, so the unwired
+classifier stays behaviour-compatible with its frozen reference corpus.
 
-Decision output: `{ provider, model, route, gate, rationale, scores, latencyMs }`, where
-`route` is `WORKER_LOCAL` or `ARCHITECT_CLOUD`.
+When you call `predictRoute` directly, its decision output is
+`{ provider, model, route, gate, rationale, scores, latencyMs }`, where `route` is
+`WORKER_LOCAL` or `ARCHITECT_CLOUD`. Nothing in the plugin acts on it.
 
 ## Configuration
 

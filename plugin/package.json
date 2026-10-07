@@ -1,7 +1,7 @@
 {
   "name": "dsh-plugin-local-router",
   "version": "0.1.0",
-  "description": "DeepSeek Harness Cordis plugin for local-first LLM routing: in-process privacy and complexity classification, local GPU execution, and cloud escalation only when warranted",
+  "description": "Local-first routing for DeepSeek Harness by permission rather than preference: a credential never reaches the cloud, the cloud model cannot author source code, and implementation is delegated to a local worker",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [
