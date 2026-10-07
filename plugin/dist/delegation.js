@@ -47,6 +47,7 @@ const profiles_1 = require("./profiles");
 const logging_1 = require("./logging");
 const emission_1 = require("./emission");
 const context_1 = require("./context");
+const retry_context_1 = require("./retry-context");
 const verification_1 = require("./verification");
 const contracts_1 = require("./contracts");
 // `scanDLP` deliberately stays in index.ts and is imported from there. Moving it here instead would
@@ -54,6 +55,14 @@ const contracts_1 = require("./contracts");
 // between two leaves. A cycle through the composition root is the shape that already works.
 const index_1 = require("./index");
 const paths_1 = require("./paths");
+/**
+ * Locations from the last failed unit, per workspace, waiting to be offered to the next attempt.
+ *
+ * Process-scoped and consumed once. Keyed by workspace rather than by task name because a retry is
+ * usually the same designer asking again in different words, and keying on the words would miss exactly
+ * the case this exists for.
+ */
+const pendingRetryContext = new Map();
 exports.DELEGATE_WORKER_OPENAI_SCHEMA = {
     type: 'function',
     function: {
@@ -267,8 +276,33 @@ async function delegateWorker(params = {}, tracker) {
     // Resolved before the worker runs: the contract hashes have to describe the tree as it was handed
     // over, and context has to be read while the architect is still blind to it.
     const workspaceBase = params.workspaceDir || process.cwd();
-    const context = (0, context_1.resolveContextFiles)(params.contextFiles, workspaceBase);
-    if (params.contextFiles && params.contextFiles.length > 0) {
+    // Recovery from the previous failure in this workspace. Its locations become context for this attempt,
+    // once: an old failure must not quietly influence every later unit in the session, so the pending set
+    // is consumed here whether or not it turns out to be usable.
+    const pendingRetry = params.retryContext === 'off' ? [] : pendingRetryContext.get(workspaceBase) ?? [];
+    if (pendingRetry.length > 0)
+        pendingRetryContext.delete(workspaceBase);
+    const declaredContext = Array.isArray(params.contextFiles) ? params.contextFiles : [];
+    let context = (0, context_1.resolveContextFiles)(declaredContext, workspaceBase);
+    let retryInjected = [];
+    if (pendingRetry.length > 0 && context.errors.length === 0) {
+        const declaredPaths = new Set(declaredContext.map((r) => String(r?.path ?? '')));
+        const additions = (0, retry_context_1.retryContextRequests)(pendingRetry).filter((r) => !declaredPaths.has(r.path));
+        if (additions.length > 0) {
+            // Best-effort, and deliberately so. If widening the injection would push it over its byte budget,
+            // resolveContextFiles refuses the WHOLE injection and this unit dies for a reason the architect
+            // never asked for. So the widened set is used only when it resolves cleanly; otherwise the declared
+            // set stands, exactly as it would have without this feature.
+            const widened = (0, context_1.resolveContextFiles)([...declaredContext, ...additions], workspaceBase);
+            if (widened.errors.length === 0) {
+                context = widened;
+                retryInjected = additions;
+            }
+        }
+    }
+    // Covers the auto-injected set as well as the declared one, so a credential in a file that was pulled
+    // in automatically is refused on the same terms as one the architect named.
+    if (declaredContext.length > 0 || context.injected.length > 0) {
         if (context.errors.length > 0) {
             return {
                 success: false,
@@ -557,6 +591,25 @@ async function delegateWorker(params = {}, tracker) {
                 contractViolationsFound.length > 0
                     ? '\nCONTRACT MODIFIED, verdict void: ' + contractViolationsFound.join('; ') + '.'
                     : '\nContract: ' + contractPaths.length + ' declared file(s), unchanged.';
+        }
+        if (retryInjected.length > 0) {
+            summaryText +=
+                '\nContext widened with the previous failure at ' +
+                    retryInjected.map((c) => c.path).join(', ') +
+                    '. The worker was shown code the architect did not name.';
+        }
+        // What the next attempt in this workspace should be shown. Stored only for a failure, and only from
+        // locations the failure actually carried: a unit that passed must not seed a retry, and a failure with
+        // no usable location clears the set rather than leaving a stale one to resurface later.
+        if (unitSuccess) {
+            pendingRetryContext.delete(workspaceBase);
+        }
+        else {
+            const failureLocations = (0, retry_context_1.parseFailureLocations)(testResults?.failures);
+            if (failureLocations.length > 0)
+                pendingRetryContext.set(workspaceBase, failureLocations);
+            else
+                pendingRetryContext.delete(workspaceBase);
         }
         return {
             success: isSuccess,

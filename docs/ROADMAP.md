@@ -60,7 +60,7 @@ D was added after that closure, and not from design review: the live run's *inva
 exposed it. Reloading to load the test flag also emptied the in-memory registry, which is how the gap
 became visible — the guard had no way to know, after a restart, what it had been protecting.
 
-## Track 1b — cross-unit coherence: **B1 built**
+## Track 1b — cross-unit coherence: **B1, A1 and A2 all built**
 
 The one thing README lists as not closed. Everything Track 1 built is *per unit*: the contract judges one
 unit, verification runs one command, and `UNVERIFIED` is about one unit's evidence. Nothing ever asked
@@ -68,15 +68,15 @@ whether the tree still works.
 
 The decision material is [`cross-unit-coherence.md`](cross-unit-coherence.md), written from the code
 rather than from memory. It separates the two problems hiding behind the phrase — *which files does a
-unit need* and *do two units agree* — and finds a measured gap underneath both: **`targetFiles` is a hint,
-not a boundary.** It is read as prompt text and as a fallback path-chooser, so a unit told to change
-`parser.ts` can rewrite `types.ts` and nothing refuses, reports, or notices.
+unit need* and *do two units agree* — and finds a measured gap underneath both: **`targetFiles` was a hint,
+not a boundary.** It was read as prompt text and as a fallback path-chooser, so a unit told to change
+`parser.ts` could rewrite `types.ts` and nothing refused, reported, or noticed. A1 below closed that.
 
 | # | Unit | Status |
 | --- | --- | --- |
 | B1 | **A project-level verification gate** — a second, operator-declared command (build, full suite) run after the unit's contract, with the power to void it | **Built.** `coherenceVerification`, with `INCOHERENT` as its own status because "your unit passed, the project did not" is a different instruction to the architect than "your unit failed". `tests/oracles/coherence.test.cjs`, 10 assertions, **4 failing before implementation**; the other 6 are characterisation controls. Skipped when the unit wrote no files, and when verification is denied. Operator configuration rather than model input, so it is absent from the tool schema and not approval-gated |
 | A1 | **Declared targets as a boundary** — refuse an emission to a path the unit did not declare, so a unit stays in its lane and B1's failures are attributable | **Built.** `evaluateUnitScope`, with `unitScope: 'enforce'` as the default and `'off'` as the escape hatch. A declared directory covers its subtree, so `src`, `src/` and an exact filename all work with one rule; a sibling sharing a prefix is refused; declaring nothing constrains nothing. The tool schema now says `targetFiles` is ENFORCED, because the model is the one declaring. `tests/oracles/unit-scope.test.cjs`, 10 assertions. **Found a real defect while writing it**: a refused emission was retried at the declared hint, so containment, contract and scope refusals all moved the write rather than stopping it — see `findings.md` |
-| A2 | **Feed a failure's `file:line` back into the next attempt's context** — widens the worker's view without widening the architect's | Not started. `RedactedFailure.location` is produced today and then discarded |
+| A2 | **Feed a failure's `file:line` back into the next attempt's context** — widens the worker's view without widening the architect's | **Built.** `parseFailureLocations` + `retryContextRequests` in `retry-context.ts`, wired into `delegateWorker` with `retryContext: 'auto'` as the default and `'off'` as the escape hatch. A failed unit's reported locations are kept per workspace, cleared by any later unit that passes, and folded into the next attempt's injection as one window per file, consumed once. The code goes to the **worker** and the architect is told which files were added, never their contents — this plugin's thesis applied to its own failure path. Best-effort by construction: the widened set replaces the declared one only if it resolves cleanly, so an auto-injection can never turn a runnable delegation into `CONTEXT_REFUSED`. `tests/oracles/retry-context.test.cjs`, 7 assertions. **Three of its seven pre-implementation failures were the oracle's fault, not the feature's** — see `findings.md` |
 
 Rejected with reasons in the scoping note: B2 (re-running prior contracts) is subsumed by B1; B3
 (file-conflict detection) is diagnostics rather than a gate, and a check that cries wolf is worse than

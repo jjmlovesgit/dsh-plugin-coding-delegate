@@ -6,6 +6,11 @@ import { resolveDataDir } from './logging'
 import { configurePatchEngine, extractAndEmitFiles } from './emission'
 import { ContextRequest, resolveContextFiles } from './context'
 import {
+  FailureLocation,
+  parseFailureLocations,
+  retryContextRequests,
+} from './retry-context'
+import {
   DEFAULT_VERIFICATION_POLICY,
   TestResults,
   VerificationPolicy,
@@ -24,6 +29,15 @@ import {
 import { scanDLP } from './index'
 import type { LLMSession } from './index'
 import { canonicalisePath } from './paths'
+
+/**
+ * Locations from the last failed unit, per workspace, waiting to be offered to the next attempt.
+ *
+ * Process-scoped and consumed once. Keyed by workspace rather than by task name because a retry is
+ * usually the same designer asking again in different words, and keying on the words would miss exactly
+ * the case this exists for.
+ */
+const pendingRetryContext = new Map<string, FailureLocation[]>()
 
 export const DELEGATE_WORKER_OPENAI_SCHEMA = {
   type: 'function',
@@ -135,6 +149,14 @@ export interface DelegateWorkerParams {
    * attributable: without it, a unit can sprawl and no record says which unit broke the tree.
    */
   unitScope?: 'enforce' | 'off'
+  /**
+   * Whether the previous failure's locations are offered to this attempt as context. `'auto'` (the
+   * default) adds a window around each file the last failure named, once; `'off'` disables it.
+   *
+   * Bounded three ways: it is consumed by a single attempt, it never overrides a file the caller already
+   * declared, and it is dropped entirely if adding it would push the injection over its byte budget.
+   */
+  retryContext?: 'auto' | 'off'
 }
 
 /** Where the local worker is assumed to live when nothing else is configured. */
@@ -341,8 +363,35 @@ export async function delegateWorker(
   // over, and context has to be read while the architect is still blind to it.
   const workspaceBase = params.workspaceDir || process.cwd()
 
-  const context = resolveContextFiles(params.contextFiles, workspaceBase)
-  if (params.contextFiles && params.contextFiles.length > 0) {
+  // Recovery from the previous failure in this workspace. Its locations become context for this attempt,
+  // once: an old failure must not quietly influence every later unit in the session, so the pending set
+  // is consumed here whether or not it turns out to be usable.
+  const pendingRetry =
+    params.retryContext === 'off' ? [] : pendingRetryContext.get(workspaceBase) ?? []
+  if (pendingRetry.length > 0) pendingRetryContext.delete(workspaceBase)
+
+  const declaredContext = Array.isArray(params.contextFiles) ? params.contextFiles : []
+  let context = resolveContextFiles(declaredContext, workspaceBase)
+  let retryInjected: ContextRequest[] = []
+  if (pendingRetry.length > 0 && context.errors.length === 0) {
+    const declaredPaths = new Set(declaredContext.map((r) => String(r?.path ?? '')))
+    const additions = retryContextRequests(pendingRetry).filter((r) => !declaredPaths.has(r.path))
+    if (additions.length > 0) {
+      // Best-effort, and deliberately so. If widening the injection would push it over its byte budget,
+      // resolveContextFiles refuses the WHOLE injection and this unit dies for a reason the architect
+      // never asked for. So the widened set is used only when it resolves cleanly; otherwise the declared
+      // set stands, exactly as it would have without this feature.
+      const widened = resolveContextFiles([...declaredContext, ...additions], workspaceBase)
+      if (widened.errors.length === 0) {
+        context = widened
+        retryInjected = additions
+      }
+    }
+  }
+
+  // Covers the auto-injected set as well as the declared one, so a credential in a file that was pulled
+  // in automatically is refused on the same terms as one the architect named.
+  if (declaredContext.length > 0 || context.injected.length > 0) {
     if (context.errors.length > 0) {
       return {
         success: false,
@@ -662,6 +711,23 @@ export async function delegateWorker(
         contractViolationsFound.length > 0
           ? '\nCONTRACT MODIFIED, verdict void: ' + contractViolationsFound.join('; ') + '.'
           : '\nContract: ' + contractPaths.length + ' declared file(s), unchanged.'
+    }
+    if (retryInjected.length > 0) {
+      summaryText +=
+        '\nContext widened with the previous failure at ' +
+        retryInjected.map((c) => c.path).join(', ') +
+        '. The worker was shown code the architect did not name.'
+    }
+
+    // What the next attempt in this workspace should be shown. Stored only for a failure, and only from
+    // locations the failure actually carried: a unit that passed must not seed a retry, and a failure with
+    // no usable location clears the set rather than leaving a stale one to resurface later.
+    if (unitSuccess) {
+      pendingRetryContext.delete(workspaceBase)
+    } else {
+      const failureLocations = parseFailureLocations(testResults?.failures)
+      if (failureLocations.length > 0) pendingRetryContext.set(workspaceBase, failureLocations)
+      else pendingRetryContext.delete(workspaceBase)
     }
 
     return {

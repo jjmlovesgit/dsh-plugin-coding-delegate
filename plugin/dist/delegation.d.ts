@@ -175,6 +175,14 @@ export interface DelegateWorkerParams {
      * attributable: without it, a unit can sprawl and no record says which unit broke the tree.
      */
     unitScope?: 'enforce' | 'off';
+    /**
+     * Whether the previous failure's locations are offered to this attempt as context. `'auto'` (the
+     * default) adds a window around each file the last failure named, once; `'off'` disables it.
+     *
+     * Bounded three ways: it is consumed by a single attempt, it never overrides a file the caller already
+     * declared, and it is dropped entirely if adding it would push the injection over its byte budget.
+     */
+    retryContext?: 'auto' | 'off';
 }
 /** Where the local worker is assumed to live when nothing else is configured. */
 export declare const DEFAULT_LOCAL_ENDPOINT = "http://127.0.0.1:1234/v1";

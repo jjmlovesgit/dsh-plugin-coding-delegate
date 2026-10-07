@@ -199,3 +199,31 @@ It is not fixable by subscribing harder. The honest options are to read the pers
 or to label the counter as process-scoped rather than session-scoped. The second is truer to what the
 firehose can actually answer, and is what the module's doc comment says today.
 
+## Three of the retry-context oracle's seven failures were the test's fault, not the feature's
+
+The A2 oracle was written first and demonstrated failing **7 of 7**, which is what a contract-first oracle
+is supposed to do. Four of those were the feature genuinely missing — the two parsers, the window builder,
+and the end-to-end injection. Three were not.
+
+Two of the three called `delegateWorker` with a `runVerification` command and **no `verificationPolicy`**.
+The default policy is `ask`, and an oracle has no approver, so the command was refused rather than run: the
+first attempt came back `VERIFICATION_NOT_APPROVED` instead of `VERIFICATION_FAILED`, and the "unit that
+passed" case never passed at all. The delegation that would have run did not run, for a reason with nothing
+to do with context. The fix is one `ALLOW` policy object, named once, with a comment saying why it is there.
+
+The third asserted `second.success === true` on a call that supplied **no verification command**. That call
+is `UNVERIFIED` — this plugin's entire position is that nothing was then proven — so `success` is `false` by
+design and always will be. The assertion was never true; it merely happened to fail for a different reason
+first.
+
+**Why this is worth recording.** A pre-implementation failure count is only evidence when every failure is
+the feature's absence. Here the same 7 of 7 would have been reported for an oracle carrying three wrong
+assertions, and after implementation the feature would have looked broken when it was not — or, worse, the
+assertions would have been "fixed" by weakening the code until they passed. The rule this repo keeps
+rediscovering: when an oracle fails, read *why* it failed before believing it. `verificationPolicy` is
+especially easy to forget, because the refusal is silent and comes back wearing a plausible status.
+
+An honest amendment to the ROADMAP entry, then: retry-context's oracle proves the feature four times, not
+seven. The three harness assertions above are worth keeping — the two policy cases are real controls on the
+end-to-end path — but they are not evidence that the feature was absent before it existed.
+

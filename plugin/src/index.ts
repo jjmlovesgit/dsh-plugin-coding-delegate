@@ -168,6 +168,12 @@ export {
   resolveChatCompletionsUrl,
   resolveDelegateStatus,
 } from './delegation'
+export {
+  FailureLocation,
+  RETRY_CONTEXT_WINDOW_LINES,
+  parseFailureLocations,
+  retryContextRequests,
+} from './retry-context'
 
 export const inject = ['tools']
 export const using = ['tools'] as const
@@ -246,6 +252,17 @@ export interface PluginConfig {
    * not *what*. Declared targets, enforced, are the other half of that pair.
    */
   unitScope?: 'enforce' | 'off'
+  /**
+   * Whether a unit that failed has its failure locations read back and offered to the next attempt in
+   * the same workspace as context. `'auto'` (the default) does this once per failure; `'off'` disables it.
+   *
+   * This is the loop closing on itself. The ordinary cause of a unit that failed "for no visible reason"
+   * is that the worker was never shown the code it had to change, and the failure already names the file.
+   * The plugin reads that file into the WORKER's prompt while the architect is handed metadata only, so a
+   * retry can widen the worker's view without widening the architect's window. It is best-effort by
+   * construction: it is dropped rather than allowed to turn a runnable delegation into a refusal.
+   */
+  retryContext?: 'auto' | 'off'
   /**
    * Extra directories a delegated worker may write into besides the resolved session
    * workspace. Absolute worker paths and `..` escapes outside every allowed root are
@@ -1041,6 +1058,10 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
               workspaceSource: explicitDir ? 'caller-supplied workspaceDir' : resolved.source,
               verificationPolicy: policy,
               emitAllowlist: options?.emitAllowlist,
+              // Operator setting, placed after the caller args for the same reason as `unitScope` below:
+              // a caller must not be able to switch this off, and an operator who has switched it off must
+              // not have it switched back on by a caller.
+              retryContext: options?.retryContext ?? 'auto',
               verificationApproval: (command: string) =>
                 requestApprovalForVerification(ctx, exec, command),
             },
@@ -1084,6 +1105,7 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
           // default 'ask' policy the verification command is refused rather than run.
           verificationPolicy: resolveVerificationPolicy(options),
           emitAllowlist: options?.emitAllowlist,
+          retryContext: options?.retryContext ?? 'auto',
           // Operator setting, placed after the caller args deliberately: a caller that sent its own
           // `unitScope` must not be able to switch off the boundary that keeps it in its lane.
           unitScope: options?.unitScope ?? 'enforce',
