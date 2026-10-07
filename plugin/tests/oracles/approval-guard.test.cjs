@@ -10,7 +10,7 @@ process.env.NODE_ENV = "test";
 const PLUGIN = require("node:path").resolve(__dirname, "..", "..");
 const { apply, requestApprovalForWrite, evaluateCodeWriteGuard } = require(PLUGIN + "/dist/index.js");
 
-const REGISTERED_KEY = Symbol.for("dsh-plugin-local-router.registered");
+const REGISTERED_KEY = Symbol.for("dsh-plugin-codeoffload.registered");
 
 /** Build a mock ctx, run apply(), and hand back the captured pre-execute listener. */
 function guardFor(approvalImpl) {

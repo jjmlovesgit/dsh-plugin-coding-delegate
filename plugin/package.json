@@ -1,5 +1,5 @@
 {
-  "name": "dsh-plugin-local-router",
+  "name": "dsh-plugin-codeoffload",
   "version": "0.1.0",
   "description": "Your plan is for thinking, your GPU does the typing: a DeepSeek Harness plugin that keeps code out of the metered context, so credentials stay local, the cloud model cannot write or read back source, and code work is delegated and returns a verdict",
   "main": "dist/index.js",
@@ -8,12 +8,11 @@
     "dist",
     "LICENSE",
     "README.md",
-    "cordis.yml",
     "cordis.patch.yml",
     "cordis.patch.example.yml"
   ],
   "cordis": {
-    "name": "dsh-plugin-local-router"
+    "name": "dsh-plugin-codeoffload"
   },
   "scripts": {
     "build": "tsc",

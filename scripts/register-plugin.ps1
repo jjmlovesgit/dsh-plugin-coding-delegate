@@ -13,7 +13,7 @@ param(
 #   2. the profile's cordis.patch.yml -- merges the plugin config and the provider entries
 #
 # It deliberately does NOT write ~/.dsh/settings.yaml or ~/.dsh/config.json.
-#   * A `dsh-plugin-local-router:` section in settings.yaml is never merged into the plugin's
+#   * A `dsh-plugin-codeoffload:` section in settings.yaml is never merged into the plugin's
 #     options -- only the profile patch is -- so it looks like configuration while doing
 #     nothing.
 #   * Nothing in the DSH runtime reads a `plugins` array from config.json.
@@ -35,7 +35,7 @@ function Get-PatchBody([string]$Text) {
 
 $ErrorActionPreference = "Stop"
 
-$PluginName = "dsh-plugin-local-router"
+$PluginName = "dsh-plugin-codeoffload"
 # The id of the entry that the plugin's own bundle patch INSERTS. A config override must
 # target this id: targeting the package name silently does nothing, which is the kind of
 # failure that looks like the plugin ignoring your settings.

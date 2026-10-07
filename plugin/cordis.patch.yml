@@ -10,4 +10,4 @@
 # cloud-only setups.
 - insert:
     - id: local-router
-      name: 'dsh-plugin-local-router'
+      name: 'dsh-plugin-codeoffload'

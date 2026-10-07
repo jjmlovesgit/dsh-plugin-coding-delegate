@@ -110,7 +110,7 @@ export interface LLMSession {
     retry?: () => Promise<any>;
     [key: string]: any;
 }
-export declare const name = "dsh-plugin-local-router";
+export declare const name = "dsh-plugin-codeoffload";
 /**
  * All plugin state (debug log, savings ledger) lives under one derived directory.
  * It must never be a hard-coded absolute path: the previous build wrote its log

@@ -76,7 +76,7 @@ Or by hand, which is all the script does:
 
 ```bash
 dsh plugin --profile <name> add ./plugin
-# then add "dsh-plugin-local-router" to dsh.profile.bundles in
+# then add "dsh-plugin-codeoffload" to dsh.profile.bundles in
 # ~/.dsh/profiles/<name>/package.json
 ```
 
