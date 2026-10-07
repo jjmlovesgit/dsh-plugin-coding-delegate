@@ -288,6 +288,10 @@ files the case this closes cleanly today, and editing an existing file a problem
   verification — because what passed was no longer the contract. A declared file that does not exist
   is a violation too, so a typo fails closed rather than passing quietly. The receipt carries paths,
   hashes and an `unchanged` flag, never contents.
+
+  Enforcement is **opt-in**, and that is a real limit. A unit that declares no `contractFiles` gets no
+  protection, and nothing detects that the architect should have declared one. The mechanism makes a
+  declared contract unrewritable; it cannot make declaring one mandatory.
 - **Verification** runs `runVerification` with the resolved workspace as cwd, and the
   command's **exit code is authoritative** — unrecognised output can never be scored a pass,
   because `tsc`-style failures would otherwise report success.
