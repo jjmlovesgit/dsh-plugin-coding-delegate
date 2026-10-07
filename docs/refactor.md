@@ -2,7 +2,14 @@
 
 Operational note for whoever picks this up, including a fresh agent with no prior context.
 
-## Why this exists
+> **Status: complete.** Every module in the queue below is out. `plugin/src/index.ts` is **53,531 bytes
+> ≈ 13,383 tokens**, from 149,337 bytes ≈ 37,000 — inside the worker's 32,768-token window for the first
+> time, which was the whole point. The round-by-round record, the measured done-condition, and the
+> method learned along the way are in [`refactor-complete.md`](refactor-complete.md). Read this file for
+> the *method*; read that one to see how it went. The queue below is kept as the order that worked, not
+> as work outstanding.
+
+## Why this existed
 
 `plugin/src/index.ts` was 3,799 lines and roughly **41,000 tokens**. The local worker's context window is
 **32,768**, so that file can never be handed to it — not as `contextFiles`, not in an instruction. Every
@@ -34,28 +41,35 @@ Two cuts have been done this way, both green first time:
 
 ## The queue
 
-In dependency order. `paths.ts` and `logging.ts` are done; the rest are roughly decreasing cohesion.
+In dependency order, roughly decreasing cohesion. **All eight steps are done**; the list is kept as the
+order that worked, with the deviations noted.
 
-1. **`emission.ts`** — `evaluateEmissionPath`, `extractAndEmitFiles`, `evaluateContextRequest` if separate,
-   the emission-result types. *Next.*
+1. **`emission.ts`** — `evaluateEmissionPath`, `extractAndEmitFiles`, the emission-result types. **Done.**
+   `evaluateContextRequest` turned out not to exist; the patch engine was left behind and injected via
+   `configurePatchEngine` to avoid a cycle.
 2. **`verification.ts`** — `captureCommandOutput`, `runSandboxVerification`, `parseTestOutput`,
-   `redactVerificationOutput`, `describeFailures`, `persistRaw`, `evaluateVerificationPolicy`,
-   `resolveVerificationPolicy`, `requestApprovalForVerification`.
+   `redactVerificationOutput`, `describeFailures`, `persistRaw`, `evaluateVerificationPolicy`.
+   **Done.** `resolveVerificationPolicy` and `requestApprovalForVerification` stayed in `index.ts` — the
+   policy source and the approval seam, and the former takes `PluginConfig`.
 3. **`contracts.ts`** — the durable delegated-path registry (`resolveDelegatedRegistryPath`,
    `parseDelegatedRegistry`, `mergeDelegatedRecords`, `pruneDelegatedRecords`, `saveDelegatedRegistry`,
    `loadDelegatedRegistry`, `rememberDelegated`), `sha256File`, `resolveContractFiles`,
-   `contractFileHashes`, `contractViolations`, `resolveDelegateStatus`.
-4. **`context.ts`** — `resolveContextFiles` and its types.
-5. **`guard.ts`** — `evaluateCodeWriteGuard` and its helpers (`extractWriteTarget`,
-   `hasCommandWriteSignal`, `hasCommandDeleteSignal`, `READ_ONLY_INSPECTORS`, `isReadArgument`,
-   `longestCodeReference`, `isDelegatedPath`, `findDelegatedRead`, `evaluateDelegatedReadPolicy`,
-   `WRITE_TOOLS`/`READ_TOOLS`/`SHELL_TOOLS`, `DELETE_PRIMITIVES`).
-6. **`roles.ts`** — `resolveAgentRole`, `applyArchitectConfig`, `applyAgentRole`,
-   `resolveLeadProviders`, the agent-role map, `describeSourceRead`, source-egress policy.
-7. **`delegation.ts`** — `delegateWorker`, the search/replace patch parser, `DELEGATE_WORKER_*_SCHEMA`.
-8. **`index.ts`** — `apply`, the hooks, tool registration, and the re-exports.
+   `contractFileHashes`, `contractViolations`. **Done.** `resolveDelegateStatus` went to
+   `delegation.ts` instead — it is verdict precedence, not a contracts concern.
+4. **`context.ts`** — `resolveContextFiles` and its types. **Done**, and moved verbatim: the only cut
+   small enough for one emission.
+5. **`guard.ts`** — `evaluateCodeWriteGuard` and its helpers. **Done**, as three edits landed together,
+   because the guard and roles blocks are interleaved in the file.
+6. **`roles.ts`** — the role decision and config layer, `describeSourceRead`, source-egress policy.
+   **Done.** `lead-tier.md` and `source-egress` work moved with it.
+7. **`delegation.ts`** — `delegateWorker`, the search/replace patch parser, `DELEGATE_WORKER_*_SCHEMA`,
+   `extractPromptText`, `estimateTokenCount`. **Done**, and `configurePatchEngine` moved in with it.
+8. **`index.ts`** — `apply`, the hooks, tool registration, and the re-exports. **This is the endpoint,
+   not a step to finish**: what remains in the file is exactly what belongs there.
 
-An eighth pass may be needed for `LocalRouter` / routing, and for the DLP rules still in `index.ts`.
+The predicted eighth pass for `LocalRouter` / routing and the DLP rules in `index.ts` was **not taken**.
+`index.ts` is at 53,531 bytes against the ~70 KB target, so it is not needed for the stated goal; see
+[`handoff-contracts.md`](handoff-contracts.md) for the note on `scanDLP` if anyone picks it up.
 
 ## Rules that are not negotiable
 
