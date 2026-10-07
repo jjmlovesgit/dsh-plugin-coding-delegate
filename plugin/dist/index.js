@@ -33,27 +33,16 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.AGENT_ROLE_LIMIT = exports.DEFAULT_SOURCE_EGRESS_MIN_LINES = exports.DELETE_PRIMITIVES = exports.LocalRouter = exports.DEFAULT_CONTEXT_MAX_BYTES = exports.MIN_SEARCH_CHARS = exports.DEFAULT_LOCAL_ENDPOINT = exports.DELEGATE_WORKER_SCHEMA = exports.DELEGATE_WORKER_OPENAI_SCHEMA = exports.name = exports.using = exports.inject = exports.runSandboxVerification = exports.runInProcessFallback = exports.redactVerificationOutput = exports.parseTestOutput = exports.evaluateVerificationPolicy = exports.describeFailures = exports.commandProgram = exports.DEFAULT_VERIFICATION_POLICY = exports.extractAndEmitFiles = exports.evaluateEmissionPath = exports.isPathWithin = exports.trace = exports.resolveDataDir = exports.SavingsTracker = exports.PROFILES = void 0;
+exports.AGENT_ROLE_LIMIT = exports.DEFAULT_SOURCE_EGRESS_MIN_LINES = exports.DELETE_PRIMITIVES = exports.LocalRouter = exports.DEFAULT_CONTEXT_MAX_BYTES = exports.MIN_SEARCH_CHARS = exports.DEFAULT_LOCAL_ENDPOINT = exports.DELEGATE_WORKER_SCHEMA = exports.DELEGATE_WORKER_OPENAI_SCHEMA = exports.name = exports.using = exports.inject = exports.runSandboxVerification = exports.runInProcessFallback = exports.redactVerificationOutput = exports.parseTestOutput = exports.evaluateVerificationPolicy = exports.describeFailures = exports.commandProgram = exports.DEFAULT_VERIFICATION_POLICY = exports.sha256File = exports.saveDelegatedRegistry = exports.resolveDelegatedRegistryPath = exports.resolveContractFiles = exports.rememberDelegated = exports.pruneDelegatedRecords = exports.parseDelegatedRegistry = exports.mergeDelegatedRecords = exports.loadDelegatedRegistry = exports.contractViolations = exports.contractFileHashes = exports.extractAndEmitFiles = exports.evaluateEmissionPath = exports.isPathWithin = exports.trace = exports.resolveDataDir = exports.SavingsTracker = exports.PROFILES = void 0;
 exports.scanDLP = scanDLP;
 exports.resolveChatCompletionsUrl = resolveChatCompletionsUrl;
 exports.parseSearchReplaceBlocks = parseSearchReplaceBlocks;
 exports.applySearchReplaceBlocks = applySearchReplaceBlocks;
 exports.resolveContextFiles = resolveContextFiles;
-exports.sha256File = sha256File;
-exports.resolveContractFiles = resolveContractFiles;
-exports.contractFileHashes = contractFileHashes;
-exports.contractViolations = contractViolations;
 exports.resolveDelegateStatus = resolveDelegateStatus;
 exports.delegateWorker = delegateWorker;
 exports.extractPromptText = extractPromptText;
 exports.estimateTokenCount = estimateTokenCount;
-exports.resolveDelegatedRegistryPath = resolveDelegatedRegistryPath;
-exports.parseDelegatedRegistry = parseDelegatedRegistry;
-exports.mergeDelegatedRecords = mergeDelegatedRecords;
-exports.pruneDelegatedRecords = pruneDelegatedRecords;
-exports.saveDelegatedRegistry = saveDelegatedRegistry;
-exports.loadDelegatedRegistry = loadDelegatedRegistry;
-exports.rememberDelegated = rememberDelegated;
 exports.hasCommandWriteSignal = hasCommandWriteSignal;
 exports.hasCommandDeleteSignal = hasCommandDeleteSignal;
 exports.detectSourceEgress = detectSourceEgress;
@@ -84,6 +73,7 @@ const logging_1 = require("./logging");
 const paths_1 = require("./paths");
 const emission_1 = require("./emission");
 const verification_1 = require("./verification");
+const contracts_1 = require("./contracts");
 var logging_2 = require("./logging");
 Object.defineProperty(exports, "resolveDataDir", { enumerable: true, get: function () { return logging_2.resolveDataDir; } });
 Object.defineProperty(exports, "trace", { enumerable: true, get: function () { return logging_2.trace; } });
@@ -92,6 +82,18 @@ Object.defineProperty(exports, "isPathWithin", { enumerable: true, get: function
 var emission_2 = require("./emission");
 Object.defineProperty(exports, "evaluateEmissionPath", { enumerable: true, get: function () { return emission_2.evaluateEmissionPath; } });
 Object.defineProperty(exports, "extractAndEmitFiles", { enumerable: true, get: function () { return emission_2.extractAndEmitFiles; } });
+var contracts_2 = require("./contracts");
+Object.defineProperty(exports, "contractFileHashes", { enumerable: true, get: function () { return contracts_2.contractFileHashes; } });
+Object.defineProperty(exports, "contractViolations", { enumerable: true, get: function () { return contracts_2.contractViolations; } });
+Object.defineProperty(exports, "loadDelegatedRegistry", { enumerable: true, get: function () { return contracts_2.loadDelegatedRegistry; } });
+Object.defineProperty(exports, "mergeDelegatedRecords", { enumerable: true, get: function () { return contracts_2.mergeDelegatedRecords; } });
+Object.defineProperty(exports, "parseDelegatedRegistry", { enumerable: true, get: function () { return contracts_2.parseDelegatedRegistry; } });
+Object.defineProperty(exports, "pruneDelegatedRecords", { enumerable: true, get: function () { return contracts_2.pruneDelegatedRecords; } });
+Object.defineProperty(exports, "rememberDelegated", { enumerable: true, get: function () { return contracts_2.rememberDelegated; } });
+Object.defineProperty(exports, "resolveContractFiles", { enumerable: true, get: function () { return contracts_2.resolveContractFiles; } });
+Object.defineProperty(exports, "resolveDelegatedRegistryPath", { enumerable: true, get: function () { return contracts_2.resolveDelegatedRegistryPath; } });
+Object.defineProperty(exports, "saveDelegatedRegistry", { enumerable: true, get: function () { return contracts_2.saveDelegatedRegistry; } });
+Object.defineProperty(exports, "sha256File", { enumerable: true, get: function () { return contracts_2.sha256File; } });
 var verification_2 = require("./verification");
 Object.defineProperty(exports, "DEFAULT_VERIFICATION_POLICY", { enumerable: true, get: function () { return verification_2.DEFAULT_VERIFICATION_POLICY; } });
 Object.defineProperty(exports, "commandProgram", { enumerable: true, get: function () { return verification_2.commandProgram; } });
@@ -409,63 +411,6 @@ function resolveContextFiles(requests, baseDir, allowedRoots = [], maxBytes = ex
     return { injected, text, errors };
 }
 /**
- * sha256 of a file, or null when it cannot be read. Callers treat null as a failure rather than as
- * absence: a contract file that vanished is a violation, not an empty string.
- */
-function sha256File(filePath) {
-    try {
-        return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
-    }
-    catch (err) {
-        return null;
-    }
-}
-/**
- * Resolve the architect's declared contract paths against the workspace. Names only: the architect
- * never supplies contents, and the resolved list is what the worker is forbidden to write.
- */
-function resolveContractFiles(files, baseDir) {
-    const resolved = [];
-    for (const file of files ?? []) {
-        const name = String(file || '').trim();
-        if (!name)
-            continue;
-        const full = path.isAbsolute(name) ? name : path.resolve(baseDir, name);
-        if (!resolved.some((seen) => (0, paths_1.canonicalisePath)(seen) === (0, paths_1.canonicalisePath)(full))) {
-            resolved.push(full);
-        }
-    }
-    return resolved;
-}
-/** Keyed by canonical path so two spellings of one file cannot pass as two files. */
-function contractFileHashes(paths) {
-    const hashes = {};
-    for (const p of paths)
-        hashes[(0, paths_1.canonicalisePath)(p)] = sha256File(p);
-    return hashes;
-}
-/**
- * Anything that changed a declared file during a unit invalidates the verdict, whatever the tests
- * then reported. A missing declaration is reported too, because failing closed is the only safe
- * reading of "the architect declared a contract file that is not there".
- */
-function contractViolations(before, after) {
-    const violations = [];
-    for (const [key, beforeHash] of Object.entries(before)) {
-        const afterHash = Object.prototype.hasOwnProperty.call(after, key) ? after[key] : null;
-        if (beforeHash === null) {
-            violations.push(`'${key}' was declared as a contract file but does not exist`);
-        }
-        else if (afterHash === null) {
-            violations.push(`'${key}' was deleted while the unit ran`);
-        }
-        else if (afterHash !== beforeHash) {
-            violations.push(`'${key}' was modified while the unit ran`);
-        }
-    }
-    return violations;
-}
-/**
  * Status precedence, as a pure function so the ordering is testable without a server. Tampering
  * outranks everything: a modified contract voids the run even when verification passed, because
  * what passed was no longer the contract.
@@ -547,8 +492,8 @@ async function delegateWorker(params = {}, tracker) {
         : `Task: ${params.taskName || 'Subtask'}\n${taskText}`;
     const turnId = params.turnId ?? Math.floor(Math.random() * 1000000);
     const timeoutMs = params.timeoutMs ?? 300000;
-    const contractPaths = resolveContractFiles(params.contractFiles, workspaceBase);
-    const contractBefore = contractFileHashes(contractPaths);
+    const contractPaths = (0, contracts_1.resolveContractFiles)(params.contractFiles, workspaceBase);
+    const contractBefore = (0, contracts_1.contractFileHashes)(contractPaths);
     const requestStartedAt = Date.now();
     try {
         const controller = new AbortController();
@@ -622,9 +567,9 @@ async function delegateWorker(params = {}, tracker) {
         const createdPaths = filesWritten.filter((f) => f.mode !== 'patch').map((f) => f.path);
         const patchedPaths = filesWritten.filter((f) => f.mode === 'patch').map((f) => f.path);
         if (createdPaths.length > 0)
-            rememberDelegated(createdPaths, 'created');
+            (0, contracts_1.rememberDelegated)(createdPaths, 'created');
         if (patchedPaths.length > 0)
-            rememberDelegated(patchedPaths, 'patched');
+            (0, contracts_1.rememberDelegated)(patchedPaths, 'patched');
         let testResults = undefined;
         let verificationGate = undefined;
         if (params.runVerification) {
@@ -660,8 +605,8 @@ async function delegateWorker(params = {}, tracker) {
         const unverified = !verificationGate && !params.runVerification && wroteFiles;
         // Re-hash once the worker has finished and verification has run. A violation voids the verdict
         // regardless of what the tests reported, because the tests are no longer the contract.
-        const contractAfter = contractFileHashes(contractPaths);
-        const contractViolationsFound = contractViolations(contractBefore, contractAfter);
+        const contractAfter = (0, contracts_1.contractFileHashes)(contractPaths);
+        const contractViolationsFound = (0, contracts_1.contractViolations)(contractBefore, contractAfter);
         const isSuccess = contractViolationsFound.length === 0 &&
             !verificationGate &&
             !unverified &&
@@ -1169,120 +1114,6 @@ const READ_TOOLS = new Set(['read', 'read_file', 'fs_read', 'view', 'view_file',
  * startup, so the guard's memory outlives the process that formed it. Bounded either way, so a long
  * session cannot grow it forever.
  */
-const delegatedPaths = new Set();
-const DELEGATED_PATH_LIMIT = 500;
-function resolveDelegatedRegistryPath() {
-    return path.join((0, logging_1.resolveDataDir)(), 'delegated-registry.json');
-}
-/**
- * Parse a registry file. Anything unreadable, malformed, or entry-shaped-but-wrong yields no records
- * rather than an exception: a corrupt registry must never be able to stop the plugin loading.
- */
-function parseDelegatedRegistry(text) {
-    if (typeof text !== 'string' || !text.trim())
-        return [];
-    let parsed;
-    try {
-        parsed = JSON.parse(text);
-    }
-    catch (err) {
-        return [];
-    }
-    const raw = parsed && Array.isArray(parsed.records) ? parsed.records : [];
-    const records = [];
-    for (const entry of raw) {
-        if (!entry || typeof entry !== 'object')
-            continue;
-        const entryPath = String(entry.path ?? '').trim();
-        if (!entryPath)
-            continue;
-        records.push({
-            path: entryPath,
-            sha256: typeof entry.sha256 === 'string' && entry.sha256 ? entry.sha256 : null,
-            at: Number.isFinite(Number(entry.at)) ? Number(entry.at) : 0,
-            // Records written before this field existed predate the distinction, and the conservative reading
-            // of an old record is the one that protects more: treat it as created.
-            mode: entry.mode === 'patched' ? 'patched' : 'created',
-        });
-    }
-    return records;
-}
-/**
- * Newest wins per path, and the oldest fall off the end once the limit is reached. The hash is not
- * used to relax anything — a delegated file stays protected however it later changes — it makes the
- * record answerable, and gives the prune below something to reason about.
- */
-function mergeDelegatedRecords(existing, incoming, limit = DELEGATED_PATH_LIMIT) {
-    // Dedup on the canonical form, so two spellings of one file cannot become two records, while the
-    // record itself keeps the path as it was written.
-    const byPath = new Map();
-    for (const entry of [...(existing ?? []), ...(incoming ?? [])]) {
-        if (!entry || !entry.path)
-            continue;
-        const key = (0, paths_1.canonicalisePath)(entry.path);
-        const prior = byPath.get(key);
-        if (!prior || entry.at >= prior.at)
-            byPath.set(key, entry);
-    }
-    return [...byPath.values()].sort((a, b) => b.at - a.at).slice(0, Math.max(1, limit));
-}
-/** A path whose file is gone protects nothing, so it is dropped. */
-function pruneDelegatedRecords(records, exists = (p) => fs.existsSync(p)) {
-    return (records ?? []).filter((r) => r && r.path && exists(r.path));
-}
-/** Best effort by design: failing to persist must not fail a delegation that was already paid for. */
-function saveDelegatedRegistry(records) {
-    const target = resolveDelegatedRegistryPath();
-    try {
-        fs.mkdirSync(path.dirname(target), { recursive: true });
-        const temp = `${target}.tmp`;
-        fs.writeFileSync(temp, JSON.stringify({ version: 1, records }, null, 2), 'utf8');
-        fs.renameSync(temp, target);
-        return true;
-    }
-    catch (err) {
-        console.warn('[LOCAL_GUARD] could not persist the delegated registry:', err?.message || err);
-        return false;
-    }
-}
-/** Load, validate and prune. Called at startup so a restart does not forget what was delegated. */
-function loadDelegatedRegistry() {
-    let text = '';
-    try {
-        text = fs.readFileSync(resolveDelegatedRegistryPath(), 'utf8');
-    }
-    catch (err) {
-        return [];
-    }
-    return pruneDelegatedRecords(parseDelegatedRegistry(text));
-}
-function rememberDelegated(paths, mode = 'created') {
-    const added = [];
-    for (const p of paths) {
-        if (typeof p !== 'string' || !p)
-            continue;
-        // The record keeps the path as it was written, so it stays an honest answer to "where did this
-        // go?". Canonicalisation resolves symlinks — `os.tmpdir()` on Windows is a junction — so it
-        // belongs in the index and the comparisons, not in the record.
-        const resolved = path.resolve(p);
-        added.push({ path: resolved, sha256: sha256File(resolved), at: Date.now(), mode });
-    }
-    if (added.length === 0)
-        return;
-    const merged = mergeDelegatedRecords(loadDelegatedRegistry(), added);
-    saveDelegatedRegistry(merged);
-    // Only whole files the worker produced enter the read guard's index. A patched file is one the
-    // architect was working on and must keep reading; the record still remembers it either way.
-    for (const entry of merged) {
-        if (entry.mode === 'created')
-            delegatedPaths.add((0, paths_1.canonicalisePath)(entry.path));
-    }
-    while (delegatedPaths.size > DELEGATED_PATH_LIMIT) {
-        const oldest = delegatedPaths.values().next().value;
-        if (typeof oldest === 'string')
-            delegatedPaths.delete(oldest);
-    }
-}
 function isDelegatedPath(target, paths) {
     const canonical = (0, paths_1.canonicalisePath)(target);
     for (const p of paths ?? []) {
@@ -1967,9 +1798,9 @@ function apply(ctx, options = {}) {
     // Restore what was delegated before this process started. Without this, a restart silently widened
     // what the architect may read back — the gap a live run found, and the reason this is not merely
     // in-memory state any more.
-    for (const record of loadDelegatedRegistry()) {
+    for (const record of (0, contracts_1.loadDelegatedRegistry)()) {
         if (record.mode === 'created')
-            delegatedPaths.add((0, paths_1.canonicalisePath)(record.path));
+            contracts_1.delegatedPaths.add((0, paths_1.canonicalisePath)(record.path));
     }
     const REGISTERED_KEY = Symbol.for('dsh-plugin-coding-delegate.registered');
     const isTest = process.env.NODE_ENV === 'test';
@@ -2122,7 +1953,7 @@ function apply(ctx, options = {}) {
             try {
                 const verdict = evaluateCodeWriteGuard(exec, {
                     askPaths: options?.guardAskPaths,
-                    delegatedPaths,
+                    delegatedPaths: contracts_1.delegatedPaths,
                     delegateReadPolicy: options?.delegateReadPolicy,
                     contractPaths: options?.contractPaths,
                     contractWriteMode: options?.contractWriteMode,
@@ -2406,15 +2237,15 @@ const pluginExport = {
     extractAndEmitFiles: emission_1.extractAndEmitFiles,
     runSandboxVerification: verification_1.runSandboxVerification,
     parseTestOutput: verification_1.parseTestOutput,
-    sha256File,
+    sha256File: contracts_1.sha256File,
     resolveContextFiles,
     parseSearchReplaceBlocks,
     applySearchReplaceBlocks,
     MIN_SEARCH_CHARS: exports.MIN_SEARCH_CHARS,
     DEFAULT_CONTEXT_MAX_BYTES: exports.DEFAULT_CONTEXT_MAX_BYTES,
-    resolveContractFiles,
-    contractFileHashes,
-    contractViolations,
+    resolveContractFiles: contracts_1.resolveContractFiles,
+    contractFileHashes: contracts_1.contractFileHashes,
+    contractViolations: contracts_1.contractViolations,
     resolveDelegateStatus,
     resolveLeadProviders,
     evaluateDelegatedReadPolicy,
@@ -2426,13 +2257,13 @@ const pluginExport = {
     detectSourceEgress,
     evaluateSourceEgress,
     DEFAULT_SOURCE_EGRESS_MIN_LINES: exports.DEFAULT_SOURCE_EGRESS_MIN_LINES,
-    resolveDelegatedRegistryPath,
-    parseDelegatedRegistry,
-    mergeDelegatedRecords,
-    pruneDelegatedRecords,
-    saveDelegatedRegistry,
-    loadDelegatedRegistry,
-    rememberDelegated,
+    resolveDelegatedRegistryPath: contracts_1.resolveDelegatedRegistryPath,
+    parseDelegatedRegistry: contracts_1.parseDelegatedRegistry,
+    mergeDelegatedRecords: contracts_1.mergeDelegatedRecords,
+    pruneDelegatedRecords: contracts_1.pruneDelegatedRecords,
+    saveDelegatedRegistry: contracts_1.saveDelegatedRegistry,
+    loadDelegatedRegistry: contracts_1.loadDelegatedRegistry,
+    rememberDelegated: contracts_1.rememberDelegated,
     resolveAgentRole,
     applyArchitectConfig,
     applyAgentRole,

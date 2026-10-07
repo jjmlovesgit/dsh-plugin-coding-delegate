@@ -1,0 +1,59 @@
+/**
+ * sha256 of a file, or null when it cannot be read. Callers treat null as a failure rather than as
+ * absence: a contract file that vanished is a violation, not an empty string.
+ */
+export declare function sha256File(filePath: string): string | null;
+/**
+ * Resolve the architect's declared contract paths against the workspace. Names only: the architect
+ * never supplies contents, and the resolved list is what the worker is forbidden to write.
+ */
+export declare function resolveContractFiles(files: string[] | undefined, baseDir: string): string[];
+/** Keyed by canonical path so two spellings of one file cannot pass as two files. */
+export declare function contractFileHashes(paths: Iterable<string>): Record<string, string | null>;
+/**
+ * Anything that changed a declared file during a unit invalidates the verdict, whatever the tests
+ * then reported. A missing declaration is reported too, because failing closed is the only safe
+ * reading of "the architect declared a contract file that is not there".
+ */
+export declare function contractViolations(before: Record<string, string | null>, after: Record<string, string | null>): string[];
+/**
+ * The read guard's memory of what a delegated worker wrote, and its bound.
+ *
+ * It is exported because the guard and the plugin's startup both add to it: a module that owns the
+ * registry cannot own the set as well without an accessor for each caller, and the set is the
+ * registry's state, not the guard's.
+ */
+export declare const delegatedPaths: Set<string>;
+export declare const DELEGATED_PATH_LIMIT = 500;
+/** One delegated file as it is persisted: where it is, and what was written there. */
+export interface DelegatedRecord {
+    path: string;
+    sha256: string | null;
+    at: number;
+    /**
+     * How the worker touched this file. `created` means it produced the whole thing and the architect has
+     * never seen it, so reading it back is the thing rule 3 forbids. `patched` means it changed part of a
+     * file the architect already had -- the architect must stay able to read that, or iterating on an
+     * existing file becomes impossible the moment a patch to it has been delegated once.
+     */
+    mode: 'created' | 'patched';
+}
+export declare function resolveDelegatedRegistryPath(): string;
+/**
+ * Parse a registry file. Anything unreadable, malformed, or entry-shaped-but-wrong yields no records
+ * rather than an exception: a corrupt registry must never be able to stop the plugin loading.
+ */
+export declare function parseDelegatedRegistry(text: string): DelegatedRecord[];
+/**
+ * Newest wins per path, and the oldest fall off the end once the limit is reached. The hash is not
+ * used to relax anything — a delegated file stays protected however it later changes — it makes the
+ * record answerable, and gives the prune below something to reason about.
+ */
+export declare function mergeDelegatedRecords(existing: DelegatedRecord[], incoming: DelegatedRecord[], limit?: number): DelegatedRecord[];
+/** A path whose file is gone protects nothing, so it is dropped. */
+export declare function pruneDelegatedRecords(records: DelegatedRecord[], exists?: (p: string) => boolean): DelegatedRecord[];
+/** Best effort by design: failing to persist must not fail a delegation that was already paid for. */
+export declare function saveDelegatedRegistry(records: DelegatedRecord[]): boolean;
+/** Load, validate and prune. Called at startup so a restart does not forget what was delegated. */
+export declare function loadDelegatedRegistry(): DelegatedRecord[];
+export declare function rememberDelegated(paths: string[], mode?: 'created' | 'patched'): void;
