@@ -1181,7 +1181,9 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
       type === 'compaction/end'
     ) {
       trace('CONTEXT_QUALITY', {
-        session: key.slice(0, 8),
+        // DSH ids are `session-<uuid>`, so the first eight characters are the constant prefix and
+        // identify nothing -- every session logged as "session-". Take the eight AFTER the prefix.
+        session: key.startsWith('session-') ? key.slice(8, 16) : key.slice(0, 8),
         event: type,
         summary: describeContextQuality(next),
       })
