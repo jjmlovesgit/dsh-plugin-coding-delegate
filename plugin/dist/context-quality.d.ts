@@ -44,6 +44,30 @@ export interface ContextQuality {
     failedCompactions: number;
     /** Tokens the host reported as shadowed -- reclaimed -- by summaries and prunes. */
     tokensReclaimed: number;
+    /**
+     * The provider's own input-token count for the most recent model call: the size of the request the
+     * model actually received, which is the window as it stood at that step.
+     *
+     * Not an estimate. `dsh-llm`'s `TokenUsage.inputTokens` is required and `assistant/message` carries
+     * the usage record, so this arrives on the same firehose as everything else here.
+     */
+    lastModelInputTokens: number;
+    /**
+     * The high-water mark of that figure. This, not the last value, is the number that forces a
+     * compaction, and it is the one to compare against a window.
+     */
+    peakModelInputTokens: number;
+    /** The context window the route advertised, when it advertised one. */
+    contextWindow: number | null;
+    /**
+     * The route the session's model calls are going to, as `provider/model`.
+     *
+     * Recorded because the counters above cannot say whether they are the *frontier* figures without it.
+     * With the default two-tier configuration every session call is the architect's, so they are; with a
+     * lead tier configured the session is pinned elsewhere and they are that model's instead. Labelling
+     * them "frontier" without the route would be the kind of claim this project tries not to make.
+     */
+    route: string;
 }
 export declare const EMPTY_CONTEXT_QUALITY: ContextQuality;
 /** Fold one session event into the counters. Pure; returns `state` unchanged when it does not care. */

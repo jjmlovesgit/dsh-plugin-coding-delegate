@@ -91,17 +91,19 @@ Stated plainly, because these limits decide whether it fits your work:
   failure mode of splitting work up, and splitting it here does not remove it.
 
 > The mechanism above is well established — attention dilution and lossy compaction are properties of
-> how these models and harnesses behave. What the plugin measures directly is **tokens**. It also counts
-> the context-quality events the harness itself reports: turns, steps, compactions, model-free prunes,
-> failed compactions, and **tokens reclaimed** — the last read from DSH's own `shadowedTokenCount` on
-> `compaction/summary` and `compaction/prune`, so it is the harness's figure rather than this plugin's
-> estimate. That is reported on a `CONTEXT_QUALITY` trace line.
+> how these models and harnesses behave. What this plugin reports is the **harness's own accounting
+> rather than a proxy**, written to a `CONTEXT_QUALITY` trace line: turns, steps, compactions, model-free
+> prunes, failed compactions, **tokens reclaimed** (DSH's `shadowedTokenCount` on `compaction/summary`
+> and `compaction/prune`), and the **input tokens the model actually received, per call**, with its
+> high-water mark and the route's advertised window (the provider's own `TokenUsage.inputTokens` on
+> `assistant/message`).
 >
-> Two limits worth stating. The counters are **process-scoped, not lifetime-of-session**: DSH does not
-> publish events that entered through replay, fork, or resume, so a resumed session counts from the
-> resume. And **per-turn frontier tokens in the window are still not measured** — that needs the
-> `dsh-token-meter` projection, and until it is wired up the strongest claim here remains the token
-> counts, not a per-turn window figure.
+> Two things worth stating plainly. The counters are **process-scoped, not lifetime-of-session**: DSH
+> does not publish events that entered through replay, fork, or resume, so a resumed session counts from
+> the resume — it under-reports, and that is the honest reading of what the firehose can answer.
+> And the **route travels with the window figures** because "frontier tokens" is only a checkable claim
+> if it says which model produced the number: with the default two-tier configuration every session call
+> is the architect's, and with a lead tier configured it is whichever model the session is pinned to.
 
 ## The policy
 

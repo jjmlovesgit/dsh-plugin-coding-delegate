@@ -40,6 +40,10 @@ exports.EMPTY_CONTEXT_QUALITY = {
     prunes: 0,
     failedCompactions: 0,
     tokensReclaimed: 0,
+    lastModelInputTokens: 0,
+    peakModelInputTokens: 0,
+    contextWindow: null,
+    route: '',
 };
 /**
  * The token figure the host reported for a replaced span, or null when it is missing or unusable.
@@ -52,6 +56,26 @@ exports.EMPTY_CONTEXT_QUALITY = {
 function shadowedTokens(data) {
     const value = data?.shadowedTokenCount;
     if (typeof value !== 'number' || !Number.isFinite(value) || value < 0)
+        return null;
+    return value;
+}
+/**
+ * The provider's input-token figure for one model call, or null when it is missing or unusable.
+ *
+ * Null is load-bearing rather than cosmetic: a model call that did not report usage must leave the last
+ * known figure standing. Treating it as zero would render a full window as an empty one, which is the
+ * wrong direction for a measurement whose whole purpose is to show the window filling up.
+ */
+function modelInputTokens(usage) {
+    const value = usage?.inputTokens;
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0)
+        return null;
+    return value;
+}
+/** The advertised context window, or null when absent or not a positive finite number. */
+function advertisedWindow(data) {
+    const value = data?.contextWindow;
+    if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0)
         return null;
     return value;
 }
@@ -90,6 +114,29 @@ function foldContextQuality(state, event) {
                 return state;
             return { ...state, failedCompactions: state.failedCompactions + 1 };
         }
+        case 'assistant/message': {
+            const tokens = modelInputTokens(data?.usage);
+            // No reported usage means no new information. Returning `state` keeps the last known window size
+            // standing rather than reporting the call as free.
+            if (tokens === null)
+                return state;
+            return {
+                ...state,
+                lastModelInputTokens: tokens,
+                peakModelInputTokens: Math.max(state.peakModelInputTokens, tokens),
+            };
+        }
+        case 'request/context': {
+            const window = advertisedWindow(data);
+            const provider = typeof data?.provider === 'string' ? data.provider : '';
+            const model = typeof data?.model === 'string' ? data.model : '';
+            const route = provider && model ? provider + '/' + model : state.route;
+            // Both figures are optional on this event, and it is only logged when the route or capacity
+            // changes, so a repeat with nothing new must not allocate.
+            if (window === null && route === state.route)
+                return state;
+            return { ...state, contextWindow: window ?? state.contextWindow, route };
+        }
         default:
             return state;
     }
@@ -107,5 +154,15 @@ function describeContextQuality(state) {
         state.failedCompactions +
         ' failed compaction(s), ' +
         state.tokensReclaimed +
-        ' token(s) reclaimed');
+        ' token(s) reclaimed, ' +
+        (state.contextWindow === null
+            ? state.lastModelInputTokens + ' token(s) at the last call'
+            : state.lastModelInputTokens +
+                '/' +
+                state.contextWindow +
+                ' token(s) at the last call') +
+        (state.peakModelInputTokens > state.lastModelInputTokens
+            ? ' (peak ' + state.peakModelInputTokens + ')'
+            : '') +
+        (state.route ? ' on ' + state.route : ''));
 }

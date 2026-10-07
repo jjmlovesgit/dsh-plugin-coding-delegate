@@ -159,3 +159,87 @@ test("the counters render as one line an operator can read", () => {
   assert.match(line, /1500/);
   assert.equal(line.includes("\n"), false, "it is a trace payload, so it must be one line");
 });
+
+// The per-turn window figure. README named "frontier tokens in the window per turn" as the third proxy;
+// reading the installed packages showed it needs to be neither estimated nor fetched from the
+// dsh-token-meter projection, because the provider already reports it:
+//
+//   dsh-llm     TokenUsage has a REQUIRED `inputTokens`
+//   dsh-session `assistant/message` carries `usage?: TokenUsage`
+//
+// So the input-token count of the request the model actually received arrives on the same firehose the
+// rest of these counters fold.
+
+test("the model's reported input tokens are recorded, and the high-water mark is kept", () => {
+  const { EMPTY_CONTEXT_QUALITY, foldContextQuality } = require(DIST);
+  let s = foldContextQuality(
+    EMPTY_CONTEXT_QUALITY,
+    ev("assistant/message", { turn: 1, step: 1, usage: { inputTokens: 9000, outputTokens: 120 } })
+  );
+  assert.equal(s.lastModelInputTokens, 9000);
+  assert.equal(s.peakModelInputTokens, 9000);
+  s = foldContextQuality(
+    s,
+    ev("assistant/message", { turn: 1, step: 2, usage: { inputTokens: 4000, outputTokens: 80 } })
+  );
+  assert.equal(s.lastModelInputTokens, 4000, "the latest call is the current window");
+  assert.equal(s.peakModelInputTokens, 9000, "the high-water mark is the figure that forces a compaction");
+});
+
+test("the advertised context window and the route are recorded", () => {
+  const { EMPTY_CONTEXT_QUALITY, foldContextQuality } = require(DIST);
+  const s = foldContextQuality(
+    EMPTY_CONTEXT_QUALITY,
+    ev("request/context", { provider: "deepseek-official", model: "deepseek-chat", contextWindow: 128000 })
+  );
+  assert.equal(s.contextWindow, 128000);
+  assert.equal(s.route, "deepseek-official/deepseek-chat");
+});
+
+test("a model call with unusable usage does not move the figures", () => {
+  const { EMPTY_CONTEXT_QUALITY, foldContextQuality } = require(DIST);
+  let s = EMPTY_CONTEXT_QUALITY;
+  const bad = [undefined, null, {}, { inputTokens: "many" }, { inputTokens: -1 }, { inputTokens: NaN }, { inputTokens: Infinity }];
+  for (const usage of bad) {
+    assert.doesNotThrow(() => {
+      s = foldContextQuality(s, ev("assistant/message", { turn: 1, step: 1, usage }));
+    }, "usage: " + JSON.stringify(usage));
+  }
+  assert.equal(s.lastModelInputTokens, 0);
+  assert.equal(s.peakModelInputTokens, 0);
+});
+
+test("a missing usage figure is not read as a shrunken window", () => {
+  const { EMPTY_CONTEXT_QUALITY, foldContextQuality } = require(DIST);
+  let s = foldContextQuality(
+    EMPTY_CONTEXT_QUALITY,
+    ev("assistant/message", { turn: 1, step: 1, usage: { inputTokens: 5000, outputTokens: 10 } })
+  );
+  s = foldContextQuality(s, ev("assistant/message", { turn: 1, step: 2 }));
+  assert.equal(s.lastModelInputTokens, 5000, "an unreported figure must leave the last known one standing");
+  assert.equal(s.peakModelInputTokens, 5000);
+});
+
+test("the one-line summary carries the window figures when it has them", () => {
+  const { EMPTY_CONTEXT_QUALITY, foldContextQuality, describeContextQuality } = require(DIST);
+  let s = foldContextQuality(
+    EMPTY_CONTEXT_QUALITY,
+    ev("request/context", { provider: "deepseek-official", model: "deepseek-chat", contextWindow: 1000 })
+  );
+  s = foldContextQuality(
+    s,
+    ev("assistant/message", { turn: 1, step: 1, usage: { inputTokens: 750, outputTokens: 5 } })
+  );
+  const line = describeContextQuality(s);
+  assert.match(line, /750/);
+  assert.match(line, /1000/);
+  assert.equal(line.includes("\n"), false, "still a trace payload");
+});
+
+test("the new counters start at zero too", () => {
+  const { EMPTY_CONTEXT_QUALITY } = require(DIST);
+  assert.equal(EMPTY_CONTEXT_QUALITY.lastModelInputTokens, 0);
+  assert.equal(EMPTY_CONTEXT_QUALITY.peakModelInputTokens, 0);
+  assert.equal(EMPTY_CONTEXT_QUALITY.contextWindow, null);
+  assert.equal(EMPTY_CONTEXT_QUALITY.route, "");
+});

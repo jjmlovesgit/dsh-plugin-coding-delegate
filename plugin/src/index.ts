@@ -1174,6 +1174,8 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
     const type = String(event?.type ?? '')
     if (
       type === 'turn/start' ||
+      type === 'assistant/message' ||
+      type === 'request/context' ||
       type === 'compaction/summary' ||
       type === 'compaction/prune' ||
       type === 'compaction/end'
