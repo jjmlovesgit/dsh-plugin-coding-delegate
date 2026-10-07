@@ -500,9 +500,18 @@ host exposing agent lineage; `allow` is what you use until then, with that cost 
 implied. `deny` is the other end — useful when the architect must never see the code again and a prompt
 would only be a temptation.
 
-The registry is in-memory and process-scoped — it is a workflow guard, not durable state — and it is
-bounded at 500 paths. Only files this plugin wrote are covered; everything else reads freely, and a
-delegated path is only recognised in a shell command when the command names it in full.
+The registry is persisted to `delegated-registry.json` in the plugin data directory — one entry per
+path, recording the path as it was written plus the sha256 of the content — and reloaded at startup, so
+a restart does not silently forget what was delegated. It is bounded at 500 entries, newest first, and
+entries whose file no longer exists are pruned on load. The hash does not relax the gate: a delegated
+file stays protected however it later changes, and the hash exists to make the record answerable.
+
+It used to be in-memory only, and that was documented as deliberate. A live run showed the cost:
+reloading the host emptied it, and the architect could then read previously delegated source without
+being asked at all.
+
+Only files this plugin wrote are covered; everything else reads freely, and a delegated path is only
+recognised in a shell command when the command names it in full.
 
 Paths matching `guardAskPaths` (default `tests/`, `tools/`) are **asked** rather than refused:
 the guard calls `ctx.approval.request(...)` on `@deepseek-ai/dsh-user-approval`, and only an

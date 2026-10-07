@@ -216,14 +216,27 @@ wrote `probe.js`, and a read of that exact path was **refused**:
 So rule 3 holds, the `deny` policy is live, and unit 3's configuration key reaches the plugin. The
 original observation is closed.
 
-### The registry does not survive a reload
+### The registry did not survive a reload — now closed
 
-The invalid test did surface something real, so it was not wasted. `delegatedPaths` is documented as
-in-memory and process-scoped; the consequence is now concrete: **after a restart the plugin forgets every
-file it wrote on a delegation's behalf**, so until a new delegation repopulates the registry, the
-architect can read previously delegated source without being asked. A registry seeded from the session,
-or made durable, would close that. Until then the read guard's coverage is bounded by process lifetime —
-worth knowing before relying on it across a long-running session.
+The invalid test did surface something real, so it was not wasted. `delegatedPaths` was in-memory and
+process-scoped, and the consequence was concrete: **after a restart the plugin forgot every file it had
+written on a delegation's behalf**, so until a new delegation repopulated the registry the architect
+could read previously delegated source without being asked.
+
+That is now fixed. The registry is persisted to `delegated-registry.json` in the plugin data directory,
+each entry recording the path as written plus the sha256 of the content, and reloaded at startup —
+pruned of files that no longer exist and bounded at 500 entries, newest first. The contract is
+`tests/oracles/durable-registry.test.cjs`: 10 assertions, all 10 failing before the implementation.
+
+Two details worth keeping. The hash does **not** relax the gate: a delegated file stays protected
+however it later changes, and the hash exists to make the record answerable and to give pruning
+something to reason about. And the record stores the path **as written** while the in-memory index and
+every comparison use the canonicalised form — canonicalisation resolves symlinks, and `os.tmpdir()` on
+Windows is a junction, so storing the canonical path would have described somewhere other than where the
+file actually is.
+
+Writing the contract also caught an export gap: `rememberDelegated` was reachable only through the
+default export object, so the two assertions that called it were exercising `undefined`.
 
 ### Approval seam: resolved
 

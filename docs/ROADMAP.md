@@ -44,6 +44,7 @@ No host dependency, no decision pending. **This is the actionable track.**
 | A | **Architect-blind context injection** — `contextFiles` names and ranges, contained, DLP-scanned, reported as metadata only | **Built.** `tests/oracles/context-injection.test.cjs`, 10 assertions, failing 10 of 10 before implementation |
 | B | **Search/replace delta emission** — exact-match, no fuzz, all-or-nothing | **Built.** `tests/oracles/delta-emission.test.cjs`, 10 assertions, failing 10 of 10 before implementation |
 | 18 | `Select-String <file>.js` read-detection false positive | **Already fixed — the row was stale.** Fixed by `READ_ONLY_INSPECTORS` + `isReadArgument` and regression-tested at `plugin.test.ts:431`; the wider read/invoke behaviour is now locked by `tests/oracles/read-detection.test.cjs` |
+| D | **Durable delegated-path registry** — the read guard's memory outlives the process, so a restart cannot silently widen what the architect may read | **Built.** `tests/oracles/durable-registry.test.cjs`, 10 assertions, all 10 failing before implementation. Found by a *failed* live test, not by design review |
 
 C shipped first because it is small, independent, and it is the unit that makes a passing verdict mean
 *the architect's tests, unmodified, passed against the worker's code*. A followed, then B. **Track 1 is
@@ -54,6 +55,10 @@ Item 18 turned out to be already fixed and already regression-tested: the row wa
 original checklist and never reconciled against the code. Verifying it with a probe across fourteen read
 forms and four invocation forms found the guard correct in every one, and that evidence is now an oracle
 rather than a throwaway script. **Track 1 is closed.**
+
+D was added after that closure, and not from design review: the live run's *invalid* read-guard test
+exposed it. Reloading to load the test flag also emptied the in-memory registry, which is how the gap
+became visible — the guard had no way to know, after a restart, what it had been protecting.
 
 ## Track 2 — the lead tier
 

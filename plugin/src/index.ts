@@ -2276,22 +2276,131 @@ const READ_TOOLS = new Set(['read', 'read_file', 'fs_read', 'view', 'view_file',
  * context it was kept out of. These paths are the ones the guard can be precise about, since the
  * plugin is the thing that wrote them.
  *
- * In-memory and process-scoped on purpose: this is a workflow guard ("you delegated this; do you
- * need to read it back?"), not durable state. Bounded so a long session cannot grow it forever.
+ * This list used to be in-memory and process-scoped "on purpose". A live run showed the cost of that:
+ * reloading the host emptied it, so after a restart the architect could read previously delegated
+ * source without being asked. It is now persisted to the plugin data directory and reloaded at
+ * startup, so the guard's memory outlives the process that formed it. Bounded either way, so a long
+ * session cannot grow it forever.
  */
 const delegatedPaths = new Set<string>()
 const DELEGATED_PATH_LIMIT = 500
 
-function rememberDelegated(paths: string[]): void {
+/** One delegated file as it is persisted: where it is, and what was written there. */
+export interface DelegatedRecord {
+  path: string
+  sha256: string | null
+  at: number
+}
+
+export function resolveDelegatedRegistryPath(): string {
+  return path.join(resolveDataDir(), 'delegated-registry.json')
+}
+
+/**
+ * Parse a registry file. Anything unreadable, malformed, or entry-shaped-but-wrong yields no records
+ * rather than an exception: a corrupt registry must never be able to stop the plugin loading.
+ */
+export function parseDelegatedRegistry(text: string): DelegatedRecord[] {
+  if (typeof text !== 'string' || !text.trim()) return []
+
+  let parsed: any
+  try {
+    parsed = JSON.parse(text)
+  } catch (err) {
+    return []
+  }
+
+  const raw = parsed && Array.isArray(parsed.records) ? parsed.records : []
+  const records: DelegatedRecord[] = []
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue
+    const entryPath = String(entry.path ?? '').trim()
+    if (!entryPath) continue
+    records.push({
+      path: entryPath,
+      sha256: typeof entry.sha256 === 'string' && entry.sha256 ? entry.sha256 : null,
+      at: Number.isFinite(Number(entry.at)) ? Number(entry.at) : 0,
+    })
+  }
+  return records
+}
+
+/**
+ * Newest wins per path, and the oldest fall off the end once the limit is reached. The hash is not
+ * used to relax anything — a delegated file stays protected however it later changes — it makes the
+ * record answerable, and gives the prune below something to reason about.
+ */
+export function mergeDelegatedRecords(
+  existing: DelegatedRecord[],
+  incoming: DelegatedRecord[],
+  limit: number = DELEGATED_PATH_LIMIT
+): DelegatedRecord[] {
+  // Dedup on the canonical form, so two spellings of one file cannot become two records, while the
+  // record itself keeps the path as it was written.
+  const byPath = new Map<string, DelegatedRecord>()
+  for (const entry of [...(existing ?? []), ...(incoming ?? [])]) {
+    if (!entry || !entry.path) continue
+    const key = canonicalisePath(entry.path)
+    const prior = byPath.get(key)
+    if (!prior || entry.at >= prior.at) byPath.set(key, entry)
+  }
+  return [...byPath.values()].sort((a, b) => b.at - a.at).slice(0, Math.max(1, limit))
+}
+
+/** A path whose file is gone protects nothing, so it is dropped. */
+export function pruneDelegatedRecords(
+  records: DelegatedRecord[],
+  exists: (p: string) => boolean = (p) => fs.existsSync(p)
+): DelegatedRecord[] {
+  return (records ?? []).filter((r) => r && r.path && exists(r.path))
+}
+
+/** Best effort by design: failing to persist must not fail a delegation that was already paid for. */
+export function saveDelegatedRegistry(records: DelegatedRecord[]): boolean {
+  const target = resolveDelegatedRegistryPath()
+  try {
+    fs.mkdirSync(path.dirname(target), { recursive: true })
+    const temp = `${target}.tmp`
+    fs.writeFileSync(temp, JSON.stringify({ version: 1, records }, null, 2), 'utf8')
+    fs.renameSync(temp, target)
+    return true
+  } catch (err: any) {
+    console.warn('[LOCAL_GUARD] could not persist the delegated registry:', err?.message || err)
+    return false
+  }
+}
+
+/** Load, validate and prune. Called at startup so a restart does not forget what was delegated. */
+export function loadDelegatedRegistry(): DelegatedRecord[] {
+  let text = ''
+  try {
+    text = fs.readFileSync(resolveDelegatedRegistryPath(), 'utf8')
+  } catch (err) {
+    return []
+  }
+  return pruneDelegatedRecords(parseDelegatedRegistry(text))
+}
+
+export function rememberDelegated(paths: string[]): void {
+  const added: DelegatedRecord[] = []
   for (const p of paths) {
     if (typeof p !== 'string' || !p) continue
-    const canonical = canonicalisePath(p)
-    if (delegatedPaths.has(canonical)) continue
-    delegatedPaths.add(canonical)
-    if (delegatedPaths.size > DELEGATED_PATH_LIMIT) {
-      const oldest = delegatedPaths.values().next().value
-      if (typeof oldest === 'string') delegatedPaths.delete(oldest)
-    }
+    // The record keeps the path as it was written, so it stays an honest answer to "where did this
+    // go?". Canonicalisation resolves symlinks — `os.tmpdir()` on Windows is a junction — so it
+    // belongs in the index and the comparisons, not in the record.
+    const resolved = path.resolve(p)
+    added.push({ path: resolved, sha256: sha256File(resolved), at: Date.now() })
+  }
+  if (added.length === 0) return
+
+  const merged = mergeDelegatedRecords(loadDelegatedRegistry(), added)
+  saveDelegatedRegistry(merged)
+
+  // The in-memory index mirrors what was persisted, so the two cannot drift apart.
+  for (const entry of merged) delegatedPaths.add(canonicalisePath(entry.path))
+  while (delegatedPaths.size > DELEGATED_PATH_LIMIT) {
+    const oldest = delegatedPaths.values().next().value
+    if (typeof oldest === 'string') delegatedPaths.delete(oldest)
   }
 }
 
@@ -3019,6 +3128,10 @@ export function applyAgentRole(
 }
 
 export function apply(ctx: Context, options: PluginConfig = {}) {
+  // Restore what was delegated before this process started. Without this, a restart silently widened
+  // what the architect may read back — the gap a live run found, and the reason this is not merely
+  // in-memory state any more.
+  for (const record of loadDelegatedRegistry()) delegatedPaths.add(canonicalisePath(record.path))
   const REGISTERED_KEY = Symbol.for('dsh-plugin-coding-delegate.registered')
   const isTest = process.env.NODE_ENV === 'test'
 
@@ -3508,6 +3621,13 @@ const pluginExport = {
   detectSourceEgress,
   evaluateSourceEgress,
   DEFAULT_SOURCE_EGRESS_MIN_LINES,
+  resolveDelegatedRegistryPath,
+  parseDelegatedRegistry,
+  mergeDelegatedRecords,
+  pruneDelegatedRecords,
+  saveDelegatedRegistry,
+  loadDelegatedRegistry,
+  rememberDelegated,
   resolveAgentRole,
   applyArchitectConfig,
   applyAgentRole,

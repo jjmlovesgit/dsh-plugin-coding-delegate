@@ -565,6 +565,31 @@ export declare class LocalRouter {
     handleBeforeRequest(session: LLMSession): Promise<LLMSession>;
     handleError(session: LLMSession, error: any): Promise<LLMSession>;
 }
+/** One delegated file as it is persisted: where it is, and what was written there. */
+export interface DelegatedRecord {
+    path: string;
+    sha256: string | null;
+    at: number;
+}
+export declare function resolveDelegatedRegistryPath(): string;
+/**
+ * Parse a registry file. Anything unreadable, malformed, or entry-shaped-but-wrong yields no records
+ * rather than an exception: a corrupt registry must never be able to stop the plugin loading.
+ */
+export declare function parseDelegatedRegistry(text: string): DelegatedRecord[];
+/**
+ * Newest wins per path, and the oldest fall off the end once the limit is reached. The hash is not
+ * used to relax anything — a delegated file stays protected however it later changes — it makes the
+ * record answerable, and gives the prune below something to reason about.
+ */
+export declare function mergeDelegatedRecords(existing: DelegatedRecord[], incoming: DelegatedRecord[], limit?: number): DelegatedRecord[];
+/** A path whose file is gone protects nothing, so it is dropped. */
+export declare function pruneDelegatedRecords(records: DelegatedRecord[], exists?: (p: string) => boolean): DelegatedRecord[];
+/** Best effort by design: failing to persist must not fail a delegation that was already paid for. */
+export declare function saveDelegatedRegistry(records: DelegatedRecord[]): boolean;
+/** Load, validate and prune. Called at startup so a restart does not forget what was delegated. */
+export declare function loadDelegatedRegistry(): DelegatedRecord[];
+export declare function rememberDelegated(paths: string[]): void;
 export interface GuardVerdict {
     kind: 'deny' | 'ask';
     target: string;
@@ -743,6 +768,13 @@ declare const pluginExport: {
     detectSourceEgress: typeof detectSourceEgress;
     evaluateSourceEgress: typeof evaluateSourceEgress;
     DEFAULT_SOURCE_EGRESS_MIN_LINES: number;
+    resolveDelegatedRegistryPath: typeof resolveDelegatedRegistryPath;
+    parseDelegatedRegistry: typeof parseDelegatedRegistry;
+    mergeDelegatedRecords: typeof mergeDelegatedRecords;
+    pruneDelegatedRecords: typeof pruneDelegatedRecords;
+    saveDelegatedRegistry: typeof saveDelegatedRegistry;
+    loadDelegatedRegistry: typeof loadDelegatedRegistry;
+    rememberDelegated: typeof rememberDelegated;
     resolveAgentRole: typeof resolveAgentRole;
     applyArchitectConfig: typeof applyArchitectConfig;
     applyAgentRole: typeof applyAgentRole;
