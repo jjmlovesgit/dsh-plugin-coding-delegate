@@ -16,9 +16,9 @@ jobs:
         working-directory: plugin
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: '22'
           cache: npm
@@ -30,8 +30,8 @@ jobs:
         run: npm run build
 
       - name: Committed dist matches a clean build
-        # DSH loads dist/index.js, so a stale dist ships stale behaviour -- which has already
-        # caused confusion in development. tsc is deterministic for a pinned version.
+        # DSH loads dist/index.js, so a stale dist ships stale behaviour -- which caused real
+        # confusion during development. tsc is deterministic for a pinned version.
         run: git diff --exit-code -- dist
 
       - name: Unit tests
