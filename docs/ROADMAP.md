@@ -60,6 +60,29 @@ D was added after that closure, and not from design review: the live run's *inva
 exposed it. Reloading to load the test flag also emptied the in-memory registry, which is how the gap
 became visible — the guard had no way to know, after a restart, what it had been protecting.
 
+## Track 1b — cross-unit coherence: **scoped, not started**
+
+The one thing README lists as not closed, and the only substantive item left on the whole roadmap.
+Everything Track 1 built is *per unit*: the contract judges one unit, verification runs one command, and
+`UNVERIFIED` is about one unit's evidence. Nothing ever asks whether the tree still works.
+
+The decision material is [`cross-unit-coherence.md`](cross-unit-coherence.md), written from the code
+rather than from memory. It separates the two problems hiding behind the phrase — *which files does a
+unit need* and *do two units agree* — and finds a measured gap underneath both: **`targetFiles` is a hint,
+not a boundary.** It is read as prompt text and as a fallback path-chooser, so a unit told to change
+`parser.ts` can rewrite `types.ts` and nothing refuses, reports, or notices. That is how units drift
+apart, and it happens before any coherence check could run.
+
+Recommended order: a **project-level verification gate** (B1 — a second declared command, with `INCOHERENT`
+as its own status, since "your unit passed, the project did not" is a different instruction to the
+architect than "your unit failed"), then **declared targets as a boundary** (A1), then **feeding a
+failure's `file:line` back into the next attempt's context** (A2). B1 reuses the whole existing
+verification path; B2 is subsumed by it; B3 is diagnostics rather than a gate; and B4's interface diffing
+is largely what `tsc` already does exactly, so it is not worth a parser dependency.
+
+Item 15 below — "plus checks from outside the contract" — is this item's nearest relative, and was the
+first statement of it.
+
 ## Track 2 — the lead tier: **retired**
 
 Kept as a record, not a plan. The tier was built — `leadTier`, the role decision, the `LEAD` profile, a
