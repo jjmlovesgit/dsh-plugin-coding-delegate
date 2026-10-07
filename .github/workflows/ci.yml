@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    # Windows, not Linux: the plugin is built for a Windows host with LM Studio, and its
+    # guard branches on process.platform for path containment.
+    runs-on: windows-latest
+
+    defaults:
+      run:
+        working-directory: plugin
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: plugin/package-lock.json
+
+      - run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Committed dist matches a clean build
+        # DSH loads dist/index.js, so a stale dist ships stale behaviour -- which has already
+        # caused confusion in development. tsc is deterministic for a pinned version.
+        run: git diff --exit-code -- dist
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Regression oracles
+        # Exercises the guard, DLP gate, redaction, containment and verification paths against
+        # the built artefact.
+        run: npm run test:oracles

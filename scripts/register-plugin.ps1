@@ -1,3 +1,11 @@
+[CmdletBinding()]
+param(
+    # Which DSH profile to register into. `web` is the CLI profile; the desktop app boots
+    # `tauri` instead, and any other profile name works the same way:
+    #   .\scripts\register-plugin.ps1 -Profile tauri
+    [string]$Profile = "web"
+)
+
 # BOM-less UTF-8 writer. PowerShell 5.1's `Set-Content -Encoding UTF8` writes a BOM,
 # and JSON.parse rejects a BOM outright (it broke `dsh web` profile loading).
 function Write-Utf8NoBom([string]$Path, [string]$Content) {
@@ -42,25 +50,28 @@ $dshCli = Get-Command "dsh" -ErrorAction SilentlyContinue
 if ($dshCli) {
     Write-Host "[1/3] Registering plugin via DSH CLI..." -ForegroundColor Yellow
     try {
-        & dsh plugin --profile web add $PluginDir
+        & dsh plugin --profile $Profile add $PluginDir
     } catch {
         Write-Host "CLI plugin registration step completed." -ForegroundColor Yellow
     }
 }
 
-# Ensure the web profile package.json lists the plugin in dsh.profile.bundles
-$WebProfileDir = Join-Path $UserDshDir "profiles\web"
-if (Test-Path $WebProfileDir) {
-    $WebPkgFile = Join-Path $WebProfileDir "package.json"
-    if (Test-Path $WebPkgFile) {
+# Ensure the target profile's package.json lists the plugin in dsh.profile.bundles
+$ProfileDir = Join-Path $UserDshDir "profiles\$Profile"
+if (-not (Test-Path $ProfileDir)) {
+    Write-Host "Profile '$Profile' not found at $ProfileDir - has it been booted at least once?" -ForegroundColor Yellow
+}
+if (Test-Path $ProfileDir) {
+    $ProfilePkgFile = Join-Path $ProfileDir "package.json"
+    if (Test-Path $ProfilePkgFile) {
         try {
-            $webPkg = Get-Content $WebPkgFile -Raw | ConvertFrom-Json
-            if ($webPkg.dsh -and $webPkg.dsh.profile -and $webPkg.dsh.profile.bundles) {
-                $bundles = @($webPkg.dsh.profile.bundles)
+            $profilePkg = Get-Content $ProfilePkgFile -Raw | ConvertFrom-Json
+            if ($profilePkg.dsh -and $profilePkg.dsh.profile -and $profilePkg.dsh.profile.bundles) {
+                $bundles = @($profilePkg.dsh.profile.bundles)
                 if ($bundles -notcontains $PluginName) {
                     $bundles += $PluginName
-                    $webPkg.dsh.profile.bundles = $bundles
-                    Write-Utf8NoBom $WebPkgFile ($webPkg | ConvertTo-Json -Depth 5)
+                    $profilePkg.dsh.profile.bundles = $bundles
+                    Write-Utf8NoBom $ProfilePkgFile ($profilePkg | ConvertTo-Json -Depth 5)
                     Write-Host "Added $PluginName to dsh.profile.bundles" -ForegroundColor Green
                 }
             }
@@ -154,8 +165,8 @@ llm-pi-ai:
 }
 
 # Profile cordis.patch.yml -- migrate a legacy entry, otherwise append, never clobber
-if (Test-Path $WebProfileDir) {
-    $PatchFile = Join-Path $WebProfileDir "cordis.patch.yml"
+if (Test-Path $ProfileDir) {
+    $PatchFile = Join-Path $ProfileDir "cordis.patch.yml"
     $patchEntry = @"
 - id: $PluginName
   config:
