@@ -189,7 +189,7 @@ export const DELEGATE_WORKER_OPENAI_SCHEMA = {
   function: {
     name: 'delegate_worker',
     description:
-      'Dispatches a discrete implementation, testing, or code-generation task to the configured local execution worker -- any OpenAI-compatible server (LM Studio, Ollama, vLLM, llama.cpp) -- with an isolated context window. The worker has no repository read: supply everything it needs in the instruction.',
+      'Dispatches a discrete implementation, testing, or code-generation task to the configured local execution worker -- any OpenAI-compatible server (LM Studio, Ollama, vLLM, llama.cpp) -- with an isolated context window. The worker has no repository read: declare contextFiles for the code it must see, since it cannot discover anything itself.',
     parameters: {
       type: 'object',
       properties: {
@@ -216,6 +216,20 @@ export const DELEGATE_WORKER_OPENAI_SCHEMA = {
           items: { type: 'string' },
           description:
             'Paths to the tests that constitute this unit contract. They are hashed before the worker runs, the worker is forbidden to write them, and they are re-hashed afterwards: any change voids the verdict. The architect owns these files.',
+        },
+        contextFiles: {
+          type: 'array',
+          description:
+            'Existing files the worker needs to see, as { path, startLine?, endLine? }. The plugin reads them into the worker prompt; you receive a record of what was injected and never the contents. Paths outside the workspace are refused, and context carrying a credential is refused rather than transmitted.',
+          items: {
+            type: 'object',
+            properties: {
+              path: { type: 'string' },
+              startLine: { type: 'number' },
+              endLine: { type: 'number' },
+            },
+            required: ['path'],
+          },
         },
         workspaceDir: {
           type: 'string',
@@ -1038,6 +1052,13 @@ export interface DelegateWorkerParams {
    * unit from certifying itself.
    */
   contractFiles?: string[]
+  /**
+   * Existing files the worker needs to see, named by path with optional 1-based line ranges. The
+   * plugin reads them and puts them in the worker's prompt; the architect never receives contents,
+   * only a record of what was injected. This is the transport that lets a unit close on existing
+   * code without the code entering the architect's context.
+   */
+  contextFiles?: ContextRequest[]
   /** Set false to return raw verification output. Raw output can carry source. */
   redactVerification?: boolean
   /** Policy for the model-supplied `runVerification` command. */
@@ -1063,6 +1084,134 @@ export function resolveChatCompletionsUrl(base: string): string {
   const trimmed = String(base || '').trim().replace(/\/+$/, '')
   if (!trimmed) return `${DEFAULT_LOCAL_ENDPOINT}/chat/completions`
   return /\/chat\/completions$/i.test(trimmed) ? trimmed : `${trimmed}/chat/completions`
+}
+
+/** One file the architect wants the worker to see. Names and ranges only, never contents. */
+export interface ContextRequest {
+  path: string
+  startLine?: number
+  endLine?: number
+}
+
+/**
+ * What the architect is told about an injection. Deliberately has no `content` field — the whole
+ * point is that the code travels to the worker and does not travel back.
+ */
+export interface ContextInjection {
+  path: string
+  relativeName: string
+  lineRange: { start: number; end: number } | null
+  lines: number
+  bytes: number
+  sha256: string
+}
+
+export interface ContextResolution {
+  injected: ContextInjection[]
+  text: string
+  errors: string[]
+}
+
+/**
+ * Injected context competes with the instruction for the worker's input window, so the budget is a
+ * safety bound rather than a caller preference. Over budget refuses; it never truncates quietly,
+ * because a worker given half a file answers confidently about a file it only half saw.
+ */
+export const DEFAULT_CONTEXT_MAX_BYTES = 32768
+
+/**
+ * Read the files the architect named and render them for the worker's prompt. Containment matches
+ * emission exactly: the same resolution, and the same refusal of escapes and absolute paths outside
+ * the root, because reading a file in order to transmit it is an egress route and deserves the same
+ * scepticism as writing one.
+ */
+export function resolveContextFiles(
+  requests: ContextRequest[] | undefined,
+  baseDir: string,
+  allowedRoots: string[] = [],
+  maxBytes: number = DEFAULT_CONTEXT_MAX_BYTES
+): ContextResolution {
+  const injected: ContextInjection[] = []
+  const errors: string[] = []
+  const sections: string[] = []
+  let totalBytes = 0
+
+  for (const request of requests ?? []) {
+    const declared = String(request?.path || '').trim()
+    if (!declared) {
+      errors.push('a contextFiles entry had no path')
+      continue
+    }
+    const resolvedPath = path.isAbsolute(declared) ? declared : path.resolve(baseDir, declared)
+
+    const containment = evaluateEmissionPath(resolvedPath, baseDir, allowedRoots)
+    if (!containment.allowed) {
+      errors.push(`context file '${declared}' was refused: ${containment.reason}`)
+      continue
+    }
+
+    let raw: string
+    try {
+      raw = fs.readFileSync(resolvedPath, 'utf8')
+    } catch (err: any) {
+      errors.push(`context file '${declared}' could not be read: ${err?.message || String(err)}`)
+      continue
+    }
+
+    const allLines = raw.split('\n')
+    let lineRange: { start: number; end: number } | null = null
+    let body = raw
+
+    if (request.startLine !== undefined || request.endLine !== undefined) {
+      const start = Number(request.startLine ?? 1)
+      const end = Number(request.endLine ?? allLines.length)
+      if (!Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end < start) {
+        errors.push(
+          `context file '${declared}' had an invalid line range (${request.startLine}-${request.endLine})`
+        )
+        continue
+      }
+      if (start > allLines.length) {
+        errors.push(
+          `context file '${declared}' has ${allLines.length} line(s), so a range starting at ${start} does not exist`
+        )
+        continue
+      }
+      // An over-long end is clamped rather than refused, and the clamp is reported in the record.
+      const clampedEnd = Math.min(end, allLines.length)
+      lineRange = { start, end: clampedEnd }
+      body = allLines.slice(start - 1, clampedEnd).join('\n')
+    }
+
+    const bytes = Buffer.byteLength(body, 'utf8')
+    if (totalBytes + bytes > maxBytes) {
+      errors.push(
+        `context injection would exceed its ${maxBytes}-byte budget (${totalBytes + bytes} bytes declared). ` +
+          `Narrow the line ranges or declare fewer files.`
+      )
+      continue
+    }
+
+    totalBytes += bytes
+    const relativeName = path.relative(baseDir, resolvedPath) || declared
+    injected.push({
+      path: resolvedPath,
+      relativeName,
+      lineRange,
+      lines: body.split('\n').length,
+      bytes,
+      sha256: crypto.createHash('sha256').update(body, 'utf8').digest('hex'),
+    })
+    sections.push(
+      `--- ${relativeName}${lineRange ? ` (lines ${lineRange.start}-${lineRange.end})` : ''} ---\n${body}`
+    )
+  }
+
+  // Any error refuses the whole injection, and the caller refuses the delegation. A partial view is
+  // worse than none: the worker would be asked to edit a file it had only partly been shown.
+  if (errors.length > 0) return { injected: [], text: '', errors }
+  const text = sections.length > 0 ? `Declared Context:\n${sections.join('\n\n')}` : ''
+  return { injected, text, errors }
 }
 
 /**
@@ -1156,6 +1305,46 @@ export async function delegateWorker(
 
   const taskText = params.instruction || params.taskPrompt || params.prompt || ''
 
+  // Resolved before the worker runs: the contract hashes have to describe the tree as it was handed
+  // over, and context has to be read while the architect is still blind to it.
+  const workspaceBase = params.workspaceDir || process.cwd()
+
+  const context = resolveContextFiles(params.contextFiles, workspaceBase)
+  if (params.contextFiles && params.contextFiles.length > 0) {
+    if (context.errors.length > 0) {
+      return {
+        success: false,
+        status: 'CONTEXT_REFUSED',
+        message: `Context injection refused:\n${context.errors.map((e) => `  - ${e}`).join('\n')}`,
+        contextErrors: context.errors,
+        resolvedWorkspace: workspaceBase,
+        filesWritten: [],
+        testResults: { passed: 0, failed: 0, output: 'The worker was not called.' },
+        tokens: { prompt: 0, completion: 0 },
+      }
+    }
+
+    // The declared context is about to travel to `endpoint`, which may be a vLLM port on another
+    // machine rather than this one. A "local" endpoint that is remote is a cloud, so a credential in
+    // the context is refused rather than transmitted: rule 1 does not care which port it is.
+    const contextDlp = scanDLP(context.text)
+    if (contextDlp.hasSensitiveData && contextDlp.highConfidence) {
+      const refusal =
+        `declared context carries a credential (${contextDlp.violations.join(', ')}), so it will not ` +
+        `be sent to the worker endpoint. Narrow the range to exclude it, or remove it from the file.`
+      return {
+        success: false,
+        status: 'CONTEXT_REFUSED',
+        message: `Context injection refused:\n  - ${refusal}`,
+        contextErrors: [refusal],
+        resolvedWorkspace: workspaceBase,
+        filesWritten: [],
+        testResults: { passed: 0, failed: 0, output: 'The worker was not called.' },
+        tokens: { prompt: 0, completion: 0 },
+      }
+    }
+  }
+
   let fileContextText = ''
   if (Array.isArray(params.targetFiles)) {
     fileContextText = `Target Files:\n${params.targetFiles.join('\n')}`
@@ -1163,6 +1352,12 @@ export async function delegateWorker(
     fileContextText = `Target Files:\n${params.targetFiles}`
   } else if (typeof params.fileContext === 'string') {
     fileContextText = params.fileContext
+  }
+
+  // Appended rather than chosen by an else-if. A unit normally has both targetFiles and context, and
+  // the earlier shape meant a declared context was silently dropped whenever targetFiles was present.
+  if (context.text) {
+    fileContextText += `${fileContextText ? '\n\n' : ''}${context.text}`
   }
 
   if (params.runVerification) {
@@ -1176,9 +1371,6 @@ export async function delegateWorker(
   const turnId = params.turnId ?? Math.floor(Math.random() * 1000000)
   const timeoutMs = params.timeoutMs ?? 300000
 
-  // Resolved before the worker runs, not after: the contract hashes have to describe the tree as it
-  // was handed over, or they prove nothing about what the worker did to it.
-  const workspaceBase = params.workspaceDir || process.cwd()
   const contractPaths = resolveContractFiles(params.contractFiles, workspaceBase)
   const contractBefore = contractFileHashes(contractPaths)
 
@@ -1366,6 +1558,19 @@ export async function delegateWorker(
             : 'No verification requested.',
         },
       ...(verificationGate ? { verificationSkipped: verificationGate } : {}),
+      // Metadata only. The architect learns what the worker was shown, never what it says.
+      ...(context.injected.length > 0
+        ? {
+            contextInjected: context.injected.map((c) => ({
+              path: c.path,
+              relativeName: c.relativeName,
+              lineRange: c.lineRange,
+              lines: c.lines,
+              bytes: c.bytes,
+              sha256: c.sha256,
+            })),
+          }
+        : {}),
       // Metadata only. The architect learns what the contract did, never what the code says.
       ...(contractPaths.length > 0
         ? {
@@ -2365,7 +2570,7 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
       const dshToolDef = {
         name: 'delegate_worker',
         description:
-          'Dispatches a discrete implementation, testing, or code-generation task to the configured local execution worker -- any OpenAI-compatible server (LM Studio, Ollama, vLLM, llama.cpp) -- with an isolated context window. The worker has no repository read: supply everything it needs in the instruction.',
+          'Dispatches a discrete implementation, testing, or code-generation task to the configured local execution worker -- any OpenAI-compatible server (LM Studio, Ollama, vLLM, llama.cpp) -- with an isolated context window. The worker has no repository read: declare contextFiles for the code it must see, since it cannot discover anything itself.',
         parameters: {
           type: 'object',
           properties: {
@@ -2392,6 +2597,20 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
               items: { type: 'string' },
               description:
                 'Paths to the tests that constitute this unit contract. They are hashed before the worker runs, the worker is forbidden to write them, and they are re-hashed afterwards: any change voids the verdict. The architect owns these files.',
+            },
+            contextFiles: {
+              type: 'array',
+              description:
+                'Existing files the worker needs to see, as { path, startLine?, endLine? }. The plugin reads them into the worker prompt; you receive a record of what was injected and never the contents. Paths outside the workspace are refused, and context carrying a credential is refused rather than transmitted.',
+              items: {
+                type: 'object',
+                properties: {
+                  path: { type: 'string' },
+                  startLine: { type: 'number' },
+                  endLine: { type: 'number' },
+                },
+                required: ['path'],
+              },
             },
             workspaceDir: {
               type: 'string',
@@ -2755,6 +2974,8 @@ const pluginExport = {
   runSandboxVerification,
   parseTestOutput,
   sha256File,
+  resolveContextFiles,
+  DEFAULT_CONTEXT_MAX_BYTES,
   resolveContractFiles,
   contractFileHashes,
   contractViolations,

@@ -268,10 +268,12 @@ receipt: `{ success, status, filesWritten, filesWrittenRelative, resolvedWorkspa
 workspaceSource, testResults, tokens, summary }`, plus `contractFiles` and `contractViolations`
 when the unit declared a contract.
 
-The worker receives the `instruction`, the `targetFiles` **paths**, and the verification command —
-and nothing else. It has no repository read and is never handed file contents, so it cannot modify
-code it has not been shown: a delegated unit has to be self-contained. That is what makes creating new
-files the case this closes cleanly today, and editing an existing file a problem it does not solve.
+The worker receives the `instruction`, the `targetFiles` **paths**, the verification command, and any
+`contextFiles` the architect declared — and nothing else. It has no repository read, so it cannot
+discover anything; it only ever sees what it was shown. Declaring `contextFiles` is how a unit closes
+on existing code without that code entering the architect's context. What remains unsolved is the
+emission side: the worker returns whole files bounded by its output budget, so it cannot return a large
+existing file in one piece.
 
 - **File emission** is driven by fenced code blocks whose header names the target, e.g.
   ```` ```ts file="src/thing.ts" ```` or a `// FILE: src/thing.ts` first line.
@@ -282,6 +284,13 @@ files the case this closes cleanly today, and editing an existing file a problem
   cannot see the DSH session workspace (the Cordis `Agent` exposes only an id, and the path
   lives in session metadata behind a store the plugin cannot reach), so omitting it resolves
   to the server's working directory and says so in `summary`.
+- **`contextFiles` shows the worker the code it must change, without showing it to you.** Entries are
+  `{ path, startLine?, endLine? }` with 1-based inclusive ranges. The plugin reads them into the worker
+  prompt and returns a record of what it injected — path, range, lines, bytes, sha256 — and never the
+  contents. Containment matches emission, so paths outside the workspace are refused, and an injection
+  that would exceed its byte budget is refused rather than quietly truncated. A credential found in the
+  declared context refuses the delegation rather than transmitting it: the endpoint may be a vLLM port
+  on another machine, and a "local" endpoint that is remote is a cloud.
 - **`contractFiles` declares the contract's tests, and the architect owns them.** Each is hashed
   before the worker runs, refused as a worker emission target, and re-hashed afterwards. Any change
   voids the verdict and reports `status: 'CONTRACT_MODIFIED'`, which outranks even a passing

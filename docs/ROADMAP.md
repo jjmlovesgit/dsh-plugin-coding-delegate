@@ -41,13 +41,14 @@ No host dependency, no decision pending. **This is the actionable track.**
 | # | Unit | Status |
 | --- | --- | --- |
 | C | **Contract-path integrity** — declare the contract's test files, hash them before the worker runs, refuse worker emissions targeting them, re-hash after verification and fail the verdict if they changed | **Built.** `tests/oracles/contract-integrity.test.cjs`, 9 assertions, failing 8 of 9 before implementation |
-| A | **Architect-blind context injection** — `contextFiles` names and ranges, contained, DLP-scanned, reported as metadata only | Designed, not built |
+| A | **Architect-blind context injection** — `contextFiles` names and ranges, contained, DLP-scanned, reported as metadata only | **Built.** `tests/oracles/context-injection.test.cjs`, 10 assertions, failing 10 of 10 before implementation |
 | B | **Search/replace delta emission** — exact-match, no fuzz, all-or-nothing | Designed, not built; depends on A |
 | 18 | `Select-String <file>.js` read-detection false positive | Not started |
 
 C shipped first because it is small, independent, and it is the unit that makes a passing verdict mean
-*the architect's tests, unmodified, passed against the worker's code*. **A is next**: the worker is
-still blind, so the loop still closes only on new files.
+*the architect's tests, unmodified, passed against the worker's code*. A followed it, so the worker can
+now be shown existing code without the architect seeing it either. **B is next**: the worker still
+returns whole files bounded by its output budget, so it cannot hand back a large file in one piece.
 
 ## Track 2 — the lead tier
 
@@ -73,8 +74,8 @@ which files a unit needs, and how units stay coherent with each other — which 
 
 | # | Item | Status |
 | --- | --- | --- |
-| 17 | npm publication, or GitHub-only | **Needs a decision** |
-| — | `package.json` has no `repository`, `homepage`/`bugs`, or `engines` | Found, not fixed |
+| 17 | npm publication, or GitHub-only | **Decided: GitHub-only.** No publish step. Install stays clone-and-register, which the README already documents; nothing npm-specific is required |
+| — | `package.json` has no `repository`, `homepage`/`bugs`, or `engines` | Found. Lower priority now that publication is GitHub-only; `repository` is still worth adding so the package points at its own source |
 | — | No root `LICENSE` (only `plugin/LICENSE`), which is what GitHub's licence detection reads | Found, not fixed |
 | 19 | Reload the desktop app, which is still serving the pre-rename module | Not started |
 | 16 | Live-verify `UNVERIFIED` and the delegated-read prompt after a reload | Not started |
@@ -89,7 +90,9 @@ Also deliberate and unresolved: the plugin entry id is `local-router` while the 
 
 1. **Lead model** (item 2) — or defer the lead tier and finish Track 1 first.
 2. **Delivery** (item 4) — subagent preset or plugin support.
-3. **npm or GitHub-only** (item 17) — it changes what Track 3 contains.
+
+Item 17 is settled: **GitHub-only**, so there is no publish step and Track 3 is about the repository
+rather than a registry.
 
 ## Method note: how the guard was bypassed
 

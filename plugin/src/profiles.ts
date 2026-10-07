@@ -30,9 +30,10 @@ export const PROFILES: Profiles = {
       'the `delegate_worker` tool to delegate execution to the local worker rather than outputting code ' +
       'in chat markdown. Do not read implementation files into this conversation: your context is ' +
       'reserved for design, contracts and verdicts, and anything read into it is re-sent on every later ' +
-      'turn. The local worker has no repository read either, so a unit you delegate must be ' +
-      'self-contained: state the interfaces, types and behaviour it needs, and never assume it can ' +
-      'discover them from the codebase.',
+      'turn. The local worker has no repository read either: it can never find the code it needs, so ' +
+      'declare contextFiles for the files it must see, and state the interfaces, types and behaviour it ' +
+      'needs. Use contractFiles for the tests that decide the unit. Never assume the worker can ' +
+      'discover anything from the codebase, and never assume it can return a large file in one piece.',
   },
   WORKER: {
     name: 'WORKER_LOCAL',

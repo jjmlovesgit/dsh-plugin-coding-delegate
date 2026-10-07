@@ -62,9 +62,10 @@ whether a verdict means done. That is a **capacity** claim, not a cost one — s
 
 Stated plainly, because these limits decide whether it fits your work:
 
-- **The worker is blind.** It receives file *paths*, never contents, and it has no repository read. It
-  cannot modify code it has not seen, so today the loop closes cleanly on **new** files — modules,
-  tests, scripts — and modifying existing code needs a delta path the plugin does not have yet.
+- **The worker cannot discover, but it can be shown.** It has no repository read, so it will never find
+  the file it needs. Declare `contextFiles` and the plugin reads them into its prompt — so the architect
+  supplies code it never sees. What is still missing is the **emission** side: the worker returns whole
+  files, bounded by its output budget, so it cannot hand back a large existing file in one piece.
 - **The architect is blind by policy**, deliberately: reading the code back is what the delegation
   exists to prevent. That leaves nobody holding the code and the design at the same time. Supplying
   that role is the plugin's next piece of work, not something it does today.
@@ -203,9 +204,10 @@ npm run test:all       # both
 
 ## What this does not claim
 
-- **It cannot modify code it cannot show the worker.** The worker is handed target paths rather than
-  contents and has no repository read, so a unit must carry what it needs in its instruction. Creating
-  new files is the case that closes cleanly today; editing existing ones is not solved yet.
+- **It cannot rewrite a file the worker cannot re-emit.** The architect can show the worker code with
+  `contextFiles` and still never see it. But the worker returns *whole files*, bounded by its own output
+  budget, so a large existing file cannot come back in one piece. Creating new files, and editing small
+  ones, close cleanly today; editing large ones does not.
 - The guard sees tool calls and shell text, not intent. Runtime-computed paths and library-mediated
   writes are invisible to it; configuration files are out of scope.
 - The DLP gate scans the user messages the plugin has seen — not assistant output or tool results —

@@ -153,6 +153,25 @@ export declare const DELEGATE_WORKER_OPENAI_SCHEMA: {
                     };
                     description: string;
                 };
+                contextFiles: {
+                    type: string;
+                    description: string;
+                    items: {
+                        type: string;
+                        properties: {
+                            path: {
+                                type: string;
+                            };
+                            startLine: {
+                                type: string;
+                            };
+                            endLine: {
+                                type: string;
+                            };
+                        };
+                        required: string[];
+                    };
+                };
                 workspaceDir: {
                     type: string;
                     description: string;
@@ -195,6 +214,25 @@ export declare const DELEGATE_WORKER_SCHEMA: {
                         type: string;
                     };
                     description: string;
+                };
+                contextFiles: {
+                    type: string;
+                    description: string;
+                    items: {
+                        type: string;
+                        properties: {
+                            path: {
+                                type: string;
+                            };
+                            startLine: {
+                                type: string;
+                            };
+                            endLine: {
+                                type: string;
+                            };
+                        };
+                        required: string[];
+                    };
                 };
                 workspaceDir: {
                     type: string;
@@ -323,6 +361,13 @@ export interface DelegateWorkerParams {
      * unit from certifying itself.
      */
     contractFiles?: string[];
+    /**
+     * Existing files the worker needs to see, named by path with optional 1-based line ranges. The
+     * plugin reads them and puts them in the worker's prompt; the architect never receives contents,
+     * only a record of what was injected. This is the transport that lets a unit close on existing
+     * code without the code entering the architect's context.
+     */
+    contextFiles?: ContextRequest[];
     /** Set false to return raw verification output. Raw output can carry source. */
     redactVerification?: boolean;
     /** Policy for the model-supplied `runVerification` command. */
@@ -343,6 +388,45 @@ export declare const DEFAULT_LOCAL_ENDPOINT = "http://127.0.0.1:1234/v1";
  * written without the operator having to know this plugin appends the path.
  */
 export declare function resolveChatCompletionsUrl(base: string): string;
+/** One file the architect wants the worker to see. Names and ranges only, never contents. */
+export interface ContextRequest {
+    path: string;
+    startLine?: number;
+    endLine?: number;
+}
+/**
+ * What the architect is told about an injection. Deliberately has no `content` field — the whole
+ * point is that the code travels to the worker and does not travel back.
+ */
+export interface ContextInjection {
+    path: string;
+    relativeName: string;
+    lineRange: {
+        start: number;
+        end: number;
+    } | null;
+    lines: number;
+    bytes: number;
+    sha256: string;
+}
+export interface ContextResolution {
+    injected: ContextInjection[];
+    text: string;
+    errors: string[];
+}
+/**
+ * Injected context competes with the instruction for the worker's input window, so the budget is a
+ * safety bound rather than a caller preference. Over budget refuses; it never truncates quietly,
+ * because a worker given half a file answers confidently about a file it only half saw.
+ */
+export declare const DEFAULT_CONTEXT_MAX_BYTES = 32768;
+/**
+ * Read the files the architect named and render them for the worker's prompt. Containment matches
+ * emission exactly: the same resolution, and the same refusal of escapes and absolute paths outside
+ * the root, because reading a file in order to transmit it is an egress route and deserves the same
+ * scepticism as writing one.
+ */
+export declare function resolveContextFiles(requests: ContextRequest[] | undefined, baseDir: string, allowedRoots?: string[], maxBytes?: number): ContextResolution;
 /**
  * sha256 of a file, or null when it cannot be read. Callers treat null as a failure rather than as
  * absence: a contract file that vanished is a violation, not an empty string.
@@ -471,6 +555,8 @@ declare const pluginExport: {
     runSandboxVerification: typeof runSandboxVerification;
     parseTestOutput: typeof parseTestOutput;
     sha256File: typeof sha256File;
+    resolveContextFiles: typeof resolveContextFiles;
+    DEFAULT_CONTEXT_MAX_BYTES: number;
     resolveContractFiles: typeof resolveContractFiles;
     contractFileHashes: typeof contractFileHashes;
     contractViolations: typeof contractViolations;
@@ -508,6 +594,25 @@ declare const pluginExport: {
                             type: string;
                         };
                         description: string;
+                    };
+                    contextFiles: {
+                        type: string;
+                        description: string;
+                        items: {
+                            type: string;
+                            properties: {
+                                path: {
+                                    type: string;
+                                };
+                                startLine: {
+                                    type: string;
+                                };
+                                endLine: {
+                                    type: string;
+                                };
+                            };
+                            required: string[];
+                        };
                     };
                     workspaceDir: {
                         type: string;
@@ -551,6 +656,25 @@ declare const pluginExport: {
                             type: string;
                         };
                         description: string;
+                    };
+                    contextFiles: {
+                        type: string;
+                        description: string;
+                        items: {
+                            type: string;
+                            properties: {
+                                path: {
+                                    type: string;
+                                };
+                                startLine: {
+                                    type: string;
+                                };
+                                endLine: {
+                                    type: string;
+                                };
+                            };
+                            required: string[];
+                        };
                     };
                     workspaceDir: {
                         type: string;
