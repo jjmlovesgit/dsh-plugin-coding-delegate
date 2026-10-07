@@ -74,6 +74,6 @@ export interface ContextQuality {
 }
 export declare const EMPTY_CONTEXT_QUALITY: ContextQuality;
 /** Fold one session event into the counters. Pure; returns `state` unchanged when it does not care. */
-export declare function foldContextQuality(state: ContextQuality, event: any): ContextQuality;
+export declare function foldContextQuality(state: ContextQuality, event: unknown): ContextQuality;
 /** One line, for a `CONTEXT_QUALITY` trace entry. Never multi-line: it is a trace payload. */
 export declare function describeContextQuality(state: ContextQuality): string;

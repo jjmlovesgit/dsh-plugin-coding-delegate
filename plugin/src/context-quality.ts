@@ -29,6 +29,8 @@
  * `docs/findings.md` rather than glossed.
  */
 
+import type { ObservedSessionEvent } from './session-events'
+
 export interface ContextQuality {
   /** Turns opened in this process. */
   turns: number
@@ -95,7 +97,9 @@ export const EMPTY_CONTEXT_QUALITY: ContextQuality = {
  * refuses to count it -- a completion is only counted with its receipt, so the compaction count and the
  * reclaimed-token count can never disagree about whether something happened.
  */
-function shadowedTokens(data: any): number | null {
+function shadowedTokens(
+  data: Extract<ObservedSessionEvent, { type: 'compaction/summary' | 'compaction/prune' }>['data']
+): number | null {
   const value = data?.shadowedTokenCount
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return null
   return value
@@ -114,7 +118,9 @@ function shadowedTokens(data: any): number | null {
  * figure standing. Treating it as zero would render a full window as an empty one, which is the wrong
  * direction for a measurement whose whole purpose is to show the window filling up.
  */
-function promptTokens(usage: any): number | null {
+function promptTokens(
+  usage: Extract<ObservedSessionEvent, { type: 'assistant/message' }>['data']['usage']
+): number | null {
   const fresh = usage?.inputTokens
   if (typeof fresh !== 'number' || !Number.isFinite(fresh) || fresh < 0) return null
   const cached = usage?.cacheReadTokens
@@ -123,18 +129,24 @@ function promptTokens(usage: any): number | null {
 }
 
 /** The advertised context window, or null when absent or not a positive finite number. */
-function advertisedWindow(data: any): number | null {
+function advertisedWindow(
+  data: Extract<ObservedSessionEvent, { type: 'request/context' }>['data']
+): number | null {
   const value = data?.contextWindow
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return null
   return value
 }
 
 /** Fold one session event into the counters. Pure; returns `state` unchanged when it does not care. */
-export function foldContextQuality(state: ContextQuality, event: any): ContextQuality {
-  const type = typeof event?.type === 'string' ? event.type : ''
-  const data = event?.data
+export function foldContextQuality(state: ContextQuality, event: unknown): ContextQuality {
+  // The event arrives from a firehose typed `any`, so this cast is a claim rather than a guarantee, and
+  // the guards inside the readers below are what keep it safe at runtime. Its value is at COMPILE time:
+  // the cases and their payloads now come from the host's own `SessionEventMap`, so a renamed event or a
+  // moved field fails the build instead of quietly zeroing a counter.
+  if (!event || typeof event !== 'object') return state
+  const candidate = event as ObservedSessionEvent
 
-  switch (type) {
+  switch (candidate.type) {
     case 'turn/start':
       return { ...state, turns: state.turns + 1 }
 
@@ -142,7 +154,7 @@ export function foldContextQuality(state: ContextQuality, event: any): ContextQu
       return { ...state, steps: state.steps + 1 }
 
     case 'compaction/summary': {
-      const tokens = shadowedTokens(data)
+      const tokens = shadowedTokens(candidate.data)
       if (tokens === null) return state
       return {
         ...state,
@@ -152,7 +164,7 @@ export function foldContextQuality(state: ContextQuality, event: any): ContextQu
     }
 
     case 'compaction/prune': {
-      const tokens = shadowedTokens(data)
+      const tokens = shadowedTokens(candidate.data)
       if (tokens === null) return state
       return {
         ...state,
@@ -163,12 +175,12 @@ export function foldContextQuality(state: ContextQuality, event: any): ContextQu
 
     case 'compaction/end': {
       // `error` is present only on an unsuccessful attempt, which is the one worth counting here.
-      if (typeof data?.error !== 'string' || !data.error) return state
+      if (typeof candidate.data?.error !== 'string' || !candidate.data.error) return state
       return { ...state, failedCompactions: state.failedCompactions + 1 }
     }
 
     case 'assistant/message': {
-      const tokens = promptTokens(data?.usage)
+      const tokens = promptTokens(candidate.data?.usage)
       // No reported usage means no new information. Returning `state` keeps the last known window size
       // standing rather than reporting the call as free.
       if (tokens === null) return state
@@ -180,9 +192,9 @@ export function foldContextQuality(state: ContextQuality, event: any): ContextQu
     }
 
     case 'request/context': {
-      const window = advertisedWindow(data)
-      const provider = typeof data?.provider === 'string' ? data.provider : ''
-      const model = typeof data?.model === 'string' ? data.model : ''
+      const window = advertisedWindow(candidate.data)
+      const provider = typeof candidate.data?.provider === 'string' ? candidate.data.provider : ''
+      const model = typeof candidate.data?.model === 'string' ? candidate.data.model : ''
       const route = provider && model ? provider + '/' + model : state.route
       // Both figures are optional on this event, and it is only logged when the route or capacity
       // changes, so a repeat with nothing new must not allocate.

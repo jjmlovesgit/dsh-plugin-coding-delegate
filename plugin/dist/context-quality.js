@@ -89,15 +89,20 @@ function advertisedWindow(data) {
 }
 /** Fold one session event into the counters. Pure; returns `state` unchanged when it does not care. */
 function foldContextQuality(state, event) {
-    const type = typeof event?.type === 'string' ? event.type : '';
-    const data = event?.data;
-    switch (type) {
+    // The event arrives from a firehose typed `any`, so this cast is a claim rather than a guarantee, and
+    // the guards inside the readers below are what keep it safe at runtime. Its value is at COMPILE time:
+    // the cases and their payloads now come from the host's own `SessionEventMap`, so a renamed event or a
+    // moved field fails the build instead of quietly zeroing a counter.
+    if (!event || typeof event !== 'object')
+        return state;
+    const candidate = event;
+    switch (candidate.type) {
         case 'turn/start':
             return { ...state, turns: state.turns + 1 };
         case 'step/start':
             return { ...state, steps: state.steps + 1 };
         case 'compaction/summary': {
-            const tokens = shadowedTokens(data);
+            const tokens = shadowedTokens(candidate.data);
             if (tokens === null)
                 return state;
             return {
@@ -107,7 +112,7 @@ function foldContextQuality(state, event) {
             };
         }
         case 'compaction/prune': {
-            const tokens = shadowedTokens(data);
+            const tokens = shadowedTokens(candidate.data);
             if (tokens === null)
                 return state;
             return {
@@ -118,12 +123,12 @@ function foldContextQuality(state, event) {
         }
         case 'compaction/end': {
             // `error` is present only on an unsuccessful attempt, which is the one worth counting here.
-            if (typeof data?.error !== 'string' || !data.error)
+            if (typeof candidate.data?.error !== 'string' || !candidate.data.error)
                 return state;
             return { ...state, failedCompactions: state.failedCompactions + 1 };
         }
         case 'assistant/message': {
-            const tokens = promptTokens(data?.usage);
+            const tokens = promptTokens(candidate.data?.usage);
             // No reported usage means no new information. Returning `state` keeps the last known window size
             // standing rather than reporting the call as free.
             if (tokens === null)
@@ -135,9 +140,9 @@ function foldContextQuality(state, event) {
             };
         }
         case 'request/context': {
-            const window = advertisedWindow(data);
-            const provider = typeof data?.provider === 'string' ? data.provider : '';
-            const model = typeof data?.model === 'string' ? data.model : '';
+            const window = advertisedWindow(candidate.data);
+            const provider = typeof candidate.data?.provider === 'string' ? candidate.data.provider : '';
+            const model = typeof candidate.data?.model === 'string' ? candidate.data.model : '';
             const route = provider && model ? provider + '/' + model : state.route;
             // Both figures are optional on this event, and it is only logged when the route or capacity
             // changes, so a repeat with nothing new must not allocate.

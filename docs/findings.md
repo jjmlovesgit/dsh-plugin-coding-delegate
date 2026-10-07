@@ -301,3 +301,45 @@ current log, which is why `live-verification.md` now says where to look. Splitti
 itself a small loss, and it was the cheaper of the two options only because the alternative was an
 instrument that could not be trusted at all.
 
+## A compile-time contract can be silently vacuous, and `skipLibCheck` hides why
+
+Building the host contract (ROADMAP 21) turned up a failure mode worth its own entry, because the
+symptom is indistinguishable from success.
+
+The goal was simple: check this plugin's session-event vocabulary against the host's own
+`SessionEventMap`, so that a DSH rename fails `npm run build`. The mechanism is
+`as const satisfies readonly SessionEventType[]` in `plugin/src/session-events.ts`.
+
+Three things had to be true for that to mean anything, and **none of them announces itself when false**:
+
+1. `@deepseek-ai/dsh-session` must resolve its types under this plugin's `moduleResolution: "node"`. It
+   does, via a top-level `types` field — but that setting ignores `exports` maps, so a package shipping
+   only an `exports` map would have resolved to nothing.
+2. The `compaction/*` events are not in `dsh-session` at all. `dsh-compaction` declaration-merges them
+   from `declare module '@deepseek-ai/dsh-session/types'` — a **subpath**, and there is no physical
+   `.../dsh-session/types` on disk. Under `moduleResolution: "node"` that specifier cannot resolve, so
+   the augmentation would target a *different* interface rather than merging. Fixed with one explicit
+   `paths` entry pointing at the real `types.d.ts`.
+3. If any of this failed, `SessionEventMap` could resolve to `any`. `keyof any` is `string | number |
+   symbol`, so `satisfies readonly SessionEventType[]` would accept **every** string — including a typo.
+
+And the reason all three fail silently: `skipLibCheck: true` suppresses errors *inside* `.d.ts` files, so
+"invalid module name in augmentation" never surfaces. A vacuous assertion and a satisfied one produce
+identical output: a clean build.
+
+**So the assertion was tested by breaking it.** Renaming `turn/start` to `turn/started` produced
+
+```
+TS2820: Type '"turn/started"' is not assignable to type 'keyof SessionEventMap'.
+        Did you mean '"turn/start"'?
+```
+
+which proves `SessionEventMap` resolved to the genuine map and that a host rename lands as a build
+failure naming the literal. Without that break test, the green build was not evidence of anything — and
+it would have gone into the README as though it were.
+
+**The general rule this is an instance of.** When a check's failure mode is *silence* rather than an
+error, a passing run tells you nothing until you have watched it fail. This project has now hit that
+shape three times: the fence scanner that truncated a body containing a fence, `isSuccess` conflating the
+unit and project verdicts, and this. Each was found by disbelieving a green result.
+

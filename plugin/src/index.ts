@@ -91,6 +91,7 @@ import {
   describeContextQuality,
   foldContextQuality,
 } from './context-quality'
+import { TRACED_EVENTS } from './session-events'
 
 export { PROFILES, ProfileConfig, SavingsTracker, RouteType, StepUsage }
 export { resolveDataDir, trace } from './logging'
@@ -1229,14 +1230,10 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
     contextQuality.set(key, next)
 
     const type = String(event?.type ?? '')
-    if (
-      type === 'turn/start' ||
-      type === 'assistant/message' ||
-      type === 'request/context' ||
-      type === 'compaction/summary' ||
-      type === 'compaction/prune' ||
-      type === 'compaction/end'
-    ) {
+    // The traced subset lives in `session-events.ts` beside the folded vocabulary, where both lists are
+    // checked against the host's own `SessionEventMap`. Two hand-written copies of these names used to sit
+    // in this plugin, and only one of them was ever going to get updated.
+    if (TRACED_EVENTS.has(type)) {
       trace('CONTEXT_QUALITY', {
         // DSH ids are `session-<uuid>`, so the first eight characters are the constant prefix and
         // identify nothing -- every session logged as "session-". Take the eight AFTER the prefix.

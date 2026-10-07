@@ -56,6 +56,7 @@ const roles_1 = require("./roles");
 const delegation_1 = require("./delegation");
 const contracts_1 = require("./contracts");
 const context_quality_1 = require("./context-quality");
+const session_events_1 = require("./session-events");
 var logging_2 = require("./logging");
 Object.defineProperty(exports, "resolveDataDir", { enumerable: true, get: function () { return logging_2.resolveDataDir; } });
 Object.defineProperty(exports, "trace", { enumerable: true, get: function () { return logging_2.trace; } });
@@ -822,12 +823,10 @@ function apply(ctx, options = {}) {
             return;
         contextQuality.set(key, next);
         const type = String(event?.type ?? '');
-        if (type === 'turn/start' ||
-            type === 'assistant/message' ||
-            type === 'request/context' ||
-            type === 'compaction/summary' ||
-            type === 'compaction/prune' ||
-            type === 'compaction/end') {
+        // The traced subset lives in `session-events.ts` beside the folded vocabulary, where both lists are
+        // checked against the host's own `SessionEventMap`. Two hand-written copies of these names used to sit
+        // in this plugin, and only one of them was ever going to get updated.
+        if (session_events_1.TRACED_EVENTS.has(type)) {
             (0, logging_1.trace)('CONTEXT_QUALITY', {
                 // DSH ids are `session-<uuid>`, so the first eight characters are the constant prefix and
                 // identify nothing -- every session logged as "session-". Take the eight AFTER the prefix.

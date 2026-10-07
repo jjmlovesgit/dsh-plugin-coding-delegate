@@ -236,6 +236,40 @@ preload that redirects the plugin's data directory to a temp home: `vitest.confi
 but `node --test` never loads it, so a bare invocation writes test fixtures into your live
 `~/.dsh/local-router/router-debug.log`. `scripts/check-oracle-isolation.cjs` is the contract check for it.
 
+### The host contract
+
+`plugin/src/session-events.ts` holds every DSH session event this plugin reads, checked at compile time
+against the host's own `SessionEventMap`:
+
+```ts
+] as const satisfies readonly SessionEventType[]
+```
+
+So a DSH release that renames an event fails `npm run build` and names the offending literal, instead of
+the plugin quietly ceasing to count. The payload fields each counter reads are typed from the same map, so
+a moved *field* fails the build too.
+
+That is worth exactly as much as the pinned types are accurate, so two devDependencies are pinned
+**exactly** — `@deepseek-ai/dsh-session` and `@deepseek-ai/dsh-compaction`, no caret — and
+`scripts/check-host-types-pin.cjs` fails when they stop matching the core that is actually running. It
+resolves the host through `%APPDATA%/dsh-tauri/dependencies.json`, the same way the Desktop does, because
+`dsh` on `PATH` may be a different installation entirely.
+
+Both packages are `devDependencies`: nothing they provide survives into `dist`, and the plugin has no
+runtime dependency on the harness. When you move DSH, re-pin and rebuild:
+
+```bash
+cd plugin
+npm install --save-dev --save-exact @deepseek-ai/dsh-session@<host version>
+npm install --save-dev --save-exact @deepseek-ai/dsh-compaction@<host version>
+npm run build && npm run test:oracles
+```
+
+Still untyped, and honestly so: the hooks registered with `ctx.on` — `agent/request`, `tools/pre-execute`,
+`tool/call`, `session/event` and the rest — are cast through `any` at the registration site, because the
+host's Cordis `Events` interface is not part of the pinned packages yet. Event *payloads* on the session
+log are checked; hook payloads are not.
+
 ## What this does not claim
 
 - **A patch must match exactly, and a stale one fails.** The worker returns either a whole file or a
