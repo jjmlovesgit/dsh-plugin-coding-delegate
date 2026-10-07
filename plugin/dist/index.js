@@ -33,10 +33,8 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.AGENT_ROLE_LIMIT = exports.DEFAULT_SOURCE_EGRESS_MIN_LINES = exports.DELETE_PRIMITIVES = exports.LocalRouter = exports.DEFAULT_CONTEXT_MAX_BYTES = exports.MIN_SEARCH_CHARS = exports.DEFAULT_LOCAL_ENDPOINT = exports.DEFAULT_VERIFICATION_POLICY = exports.DELEGATE_WORKER_SCHEMA = exports.DELEGATE_WORKER_OPENAI_SCHEMA = exports.name = exports.using = exports.inject = exports.isPathWithin = exports.trace = exports.resolveDataDir = exports.SavingsTracker = exports.PROFILES = void 0;
+exports.AGENT_ROLE_LIMIT = exports.DEFAULT_SOURCE_EGRESS_MIN_LINES = exports.DELETE_PRIMITIVES = exports.LocalRouter = exports.DEFAULT_CONTEXT_MAX_BYTES = exports.MIN_SEARCH_CHARS = exports.DEFAULT_LOCAL_ENDPOINT = exports.DEFAULT_VERIFICATION_POLICY = exports.DELEGATE_WORKER_SCHEMA = exports.DELEGATE_WORKER_OPENAI_SCHEMA = exports.name = exports.using = exports.inject = exports.extractAndEmitFiles = exports.evaluateEmissionPath = exports.isPathWithin = exports.trace = exports.resolveDataDir = exports.SavingsTracker = exports.PROFILES = void 0;
 exports.scanDLP = scanDLP;
-exports.evaluateEmissionPath = evaluateEmissionPath;
-exports.extractAndEmitFiles = extractAndEmitFiles;
 exports.redactVerificationOutput = redactVerificationOutput;
 exports.describeFailures = describeFailures;
 exports.parseTestOutput = parseTestOutput;
@@ -92,11 +90,15 @@ Object.defineProperty(exports, "PROFILES", { enumerable: true, get: function () 
 const local_classifier_1 = require("./local-classifier");
 const logging_1 = require("./logging");
 const paths_1 = require("./paths");
+const emission_1 = require("./emission");
 var logging_2 = require("./logging");
 Object.defineProperty(exports, "resolveDataDir", { enumerable: true, get: function () { return logging_2.resolveDataDir; } });
 Object.defineProperty(exports, "trace", { enumerable: true, get: function () { return logging_2.trace; } });
 var paths_2 = require("./paths");
 Object.defineProperty(exports, "isPathWithin", { enumerable: true, get: function () { return paths_2.isPathWithin; } });
+var emission_2 = require("./emission");
+Object.defineProperty(exports, "evaluateEmissionPath", { enumerable: true, get: function () { return emission_2.evaluateEmissionPath; } });
+Object.defineProperty(exports, "extractAndEmitFiles", { enumerable: true, get: function () { return emission_2.extractAndEmitFiles; } });
 exports.inject = ['tools'];
 exports.using = ['tools'];
 /**
@@ -214,175 +216,6 @@ function scanDLP(text, options = {}) {
             violations.push('High-entropy string');
     }
     return { hasSensitiveData: violations.length > 0, violations, highConfidence };
-}
-// canonicalisePath and isPathWithin moved to ./paths.ts and are imported above. isPathWithin is
-// re-exported beside the other module re-exports because it is on the public surface.
-/**
- * The containment decision for one delegated write. `baseDir` is the session workspace
- * and `allowedRoots` is the operator's explicit extension list. Both sides are
- * canonicalised, so a symlink inside the workspace cannot be used to escape it.
- */
-function evaluateEmissionPath(resolvedPath, baseDir, allowedRoots = []) {
-    const canonical = (0, paths_1.canonicalisePath)(resolvedPath);
-    const roots = [baseDir, ...allowedRoots].filter((root) => typeof root === 'string' && root.trim().length > 0);
-    for (const root of roots) {
-        if ((0, paths_1.isPathWithin)((0, paths_1.canonicalisePath)(root), canonical))
-            return { allowed: true };
-    }
-    return {
-        allowed: false,
-        reason: `Refused to write '${resolvedPath}': it resolves to '${canonical}', which is outside the session ` +
-            `workspace '${path.resolve(baseDir)}'` +
-            (allowedRoots.length > 0 ? ` and every configured emitAllowlist root` : '') +
-            `. A delegated worker may only write inside its workspace; add the directory to emitAllowlist to permit it.`,
-    };
-}
-function extractAndEmitFiles(content, targetFilesHint, baseDir = process.cwd(), allowedRoots = [], protectedPaths = []) {
-    if (!content)
-        return { filesWritten: [], errors: [], cleanContent: '' };
-    const filesWritten = [];
-    const emissionErrors = [];
-    const seenPaths = new Set();
-    function emitFile(filePath, fileCode) {
-        if (!filePath || !fileCode)
-            return;
-        const cleanPath = filePath.trim().replace(/^["']|["']$/g, '');
-        const resolvedPath = path.isAbsolute(cleanPath) ? cleanPath : path.resolve(baseDir, cleanPath);
-        // Containment first: the worker's fence header and the caller's targetFiles hints
-        // both choose this path, so it is untrusted input. Absolute paths and `..` segments
-        // used to escape the workspace silently; they are now refused and reported.
-        const containment = evaluateEmissionPath(resolvedPath, baseDir, allowedRoots);
-        if (!containment.allowed) {
-            emissionErrors.push(String(containment.reason));
-            console.warn(`[EMIT_FILE_BLOCKED] ${containment.reason}`);
-            return;
-        }
-        // Contract files belong to the architect. This is checked before anything is written, and it
-        // covers every emission route -- the fenced header, the `// FILE:` marker, and the fallback --
-        // because they all funnel through here.
-        const protectedHit = protectedPaths.find((p) => (0, paths_1.canonicalisePath)(String(p)) === (0, paths_1.canonicalisePath)(resolvedPath));
-        if (protectedHit) {
-            emissionErrors.push(`Refused to write ${resolvedPath}: it is a contract file declared by the architect, and the ` +
-                `executor may not modify the test that judges it.`);
-            console.warn(`[EMIT_FILE_BLOCKED] contract file: ${resolvedPath}`);
-            return;
-        }
-        if (seenPaths.has(resolvedPath))
-            return;
-        seenPaths.add(resolvedPath);
-        // A search/replace body is a delta against an existing file rather than a replacement for it. The
-        // header syntax is shared, so the body decides the mode. An empty list means the body started a
-        // patch and never finished it, which is refused rather than written over a real file.
-        const patchBlocks = parseSearchReplaceBlocks(fileCode);
-        if (patchBlocks) {
-            if (!fs.existsSync(resolvedPath)) {
-                emissionErrors.push(`Refused to patch ${resolvedPath}: it does not exist, and a search/replace block edits a ` +
-                    `file rather than creating one.`);
-                return;
-            }
-            let original;
-            try {
-                original = fs.readFileSync(resolvedPath, 'utf8');
-            }
-            catch (err) {
-                emissionErrors.push(`Failed to read ${resolvedPath} for patching: ${err?.message || String(err)}`);
-                return;
-            }
-            const applied = applySearchReplaceBlocks(original, patchBlocks);
-            if (!applied.ok) {
-                emissionErrors.push(`Refused to patch ${resolvedPath}: ${applied.reason}`);
-                console.warn(`[EMIT_PATCH_BLOCKED] ${resolvedPath}: ${applied.reason}`);
-                return;
-            }
-            fileCode = applied.content;
-        }
-        try {
-            // Guard against clobbering: a model that cannot see the target file may return
-            // a stub, and a wholesale rewrite far smaller than what is already there is
-            // almost always damage rather than an edit.
-            //
-            // Deliberately skipped for a patch. The guard exists to catch output that is not really an
-            // edit, and a patch has already been matched byte-for-byte against the file it changes, so the
-            // failure it protects against cannot occur -- and a patch may legitimately shrink a file.
-            if (!patchBlocks && fs.existsSync(resolvedPath)) {
-                const previousBytes = fs.statSync(resolvedPath).size;
-                const nextBytes = Buffer.byteLength(fileCode, 'utf8');
-                if (previousBytes > 200 && nextBytes < previousBytes * 0.5) {
-                    emissionErrors.push(`Refused to overwrite ${resolvedPath}: new content is ${nextBytes}B but the existing file is ${previousBytes}B ` +
-                        `(more than 50% smaller). Delete the target explicitly or fix the worker output first.`);
-                    return;
-                }
-            }
-            const parentDir = path.dirname(resolvedPath);
-            fs.mkdirSync(parentDir, { recursive: true });
-            fs.writeFileSync(resolvedPath, fileCode, 'utf8');
-            const lines = fileCode.split('\n').length;
-            const bytes = Buffer.byteLength(fileCode, 'utf8');
-            const relativeName = path.relative(baseDir, resolvedPath) || cleanPath;
-            filesWritten.push({
-                path: resolvedPath,
-                relativeName,
-                lines,
-                bytes,
-                mode: patchBlocks ? 'patch' : 'write',
-                ...(patchBlocks ? { hunks: patchBlocks.length } : {}),
-            });
-        }
-        catch (err) {
-            const message = `Failed to write ${resolvedPath}: ${err?.message || String(err)}`;
-            emissionErrors.push(message);
-            console.warn(`[EMIT_FILE_ERROR] ${message}`);
-        }
-    }
-    const fileAttrRegex = /```[a-zA-Z0-9_-]*\s+(?:file|filename)=["']?([^"'\s\n>]+)["']?\s*\n([\s\S]*?)```/gi;
-    let match;
-    while ((match = fileAttrRegex.exec(content)) !== null) {
-        emitFile(match[1], match[2]);
-    }
-    const fileMarkerRegex = /```[a-zA-Z0-9_-]*\n(?:\/\/\s*FILE:\s*|#\s*FILE:\s*|\/\*\s*FILE:\s*|\[FILE:\s*)([^\s\n\*\]]+)(?:\s*\*\/|\])?\n([\s\S]*?)```/gi;
-    while ((match = fileMarkerRegex.exec(content)) !== null) {
-        emitFile(match[1], match[2]);
-    }
-    if (filesWritten.length === 0 && targetFilesHint) {
-        const hints = Array.isArray(targetFilesHint)
-            ? targetFilesHint
-            : typeof targetFilesHint === 'string'
-                ? [targetFilesHint]
-                : [];
-        const allCodeBlocks = [];
-        const genericCodeBlockRegex = /```[a-zA-Z0-9_-]*\n([\s\S]*?)```/gi;
-        let cbMatch;
-        while ((cbMatch = genericCodeBlockRegex.exec(content)) !== null) {
-            if (cbMatch[1].trim()) {
-                allCodeBlocks.push(cbMatch[1]);
-            }
-        }
-        if (allCodeBlocks.length > 0) {
-            for (let i = 0; i < hints.length; i++) {
-                const hintPath = hints[i];
-                const code = allCodeBlocks[i] || allCodeBlocks[0];
-                if (hintPath && code) {
-                    emitFile(hintPath, code);
-                }
-            }
-        }
-        else if (content.trim() && hints.length > 0) {
-            // Only write unreferenced output when it actually looks like source code.
-            // A worker that cannot read the target file may answer with prose or a
-            // tool-call transcript; writing that over a real file destroys it.
-            const body = content.trim();
-            const looksLikeProse = /<tool_call|<function=|<\/tool_call>/i.test(body) ||
-                /^\s*(?:I'll|I will|I've|Here(?:'s| is)|Sure|Certainly|Let me|First,|To do this)/im.test(body);
-            const looksLikeCode = /^(?:\/\/|#|<!--|\/\*|import\s|export\s|const\s|let\s|var\s|function\s|class\s|interface\s|type\s|def\s|package\s|using\s|public\s|private\s|<!DOCTYPE|<[a-zA-Z])/m.test(body);
-            if (looksLikeProse || !looksLikeCode) {
-                emissionErrors.push(`Refused to write ${hints[0]}: worker output has no fenced code block and does not look like source code.`);
-            }
-            else {
-                emitFile(hints[0], body);
-            }
-        }
-    }
-    return { filesWritten, errors: emissionErrors, cleanContent: content };
 }
 /**
  * Does this text look like source rather than a label? Assertion messages should be
@@ -980,7 +813,7 @@ function resolveContextFiles(requests, baseDir, allowedRoots = [], maxBytes = ex
             continue;
         }
         const resolvedPath = path.isAbsolute(declared) ? declared : path.resolve(baseDir, declared);
-        const containment = evaluateEmissionPath(resolvedPath, baseDir, allowedRoots);
+        const containment = (0, emission_1.evaluateEmissionPath)(resolvedPath, baseDir, allowedRoots);
         if (!containment.allowed) {
             errors.push(`context file '${declared}' was refused: ${containment.reason}`);
             continue;
@@ -1244,7 +1077,7 @@ async function delegateWorker(params = {}, tracker) {
                 };
             }
         }
-        const emission = extractAndEmitFiles(content, params.targetFiles, workspaceBase, params.emitAllowlist ?? [], contractPaths);
+        const emission = (0, emission_1.extractAndEmitFiles)(content, params.targetFiles, workspaceBase, params.emitAllowlist ?? [], contractPaths);
         const filesWritten = emission.filesWritten;
         // Remember what we wrote on the architect's behalf, so reading it back can be gated -- distinguishing
         // files the worker created, which the architect never saw, from files it patched, which it did.
@@ -3017,6 +2850,12 @@ function apply(ctx, options = {}) {
         }
     });
 }
+// The delta machinery still lives in this file (it moves to ./delegation.ts later), and ./emission.ts
+// must not import this module back, so the two halves are joined here, at the composition root.
+(0, emission_1.configurePatchEngine)({
+    parse: parseSearchReplaceBlocks,
+    apply: applySearchReplaceBlocks,
+});
 const pluginExport = {
     name: exports.name,
     inject: exports.inject,
@@ -3026,7 +2865,7 @@ const pluginExport = {
     SavingsTracker: savings_tracker_1.SavingsTracker,
     scanDLP,
     delegateWorker,
-    extractAndEmitFiles,
+    extractAndEmitFiles: emission_1.extractAndEmitFiles,
     runSandboxVerification,
     parseTestOutput,
     sha256File,

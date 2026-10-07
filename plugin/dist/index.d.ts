@@ -1,9 +1,11 @@
 import { Context } from 'cordis';
 import { SavingsTracker, RouteType, StepUsage } from './savings-tracker';
 import { PROFILES, ProfileConfig } from './profiles';
+import { extractAndEmitFiles } from './emission';
 export { PROFILES, ProfileConfig, SavingsTracker, RouteType, StepUsage };
 export { resolveDataDir, trace } from './logging';
 export { isPathWithin } from './paths';
+export { evaluateEmissionPath, extractAndEmitFiles } from './emission';
 export declare const inject: string[];
 export declare const using: readonly ["tools"];
 export interface PluginConfig {
@@ -300,30 +302,6 @@ export declare function scanDLP(text: string, options?: {
     hasSensitiveData: boolean;
     violations: string[];
     highConfidence: boolean;
-};
-export interface FileEmissionResult {
-    path: string;
-    relativeName: string;
-    lines: number;
-    bytes: number;
-    /** How the change arrived: a whole file, or a delta against the file already there. */
-    mode?: 'write' | 'patch';
-    /** Search/replace blocks applied, when the emission was a patch. */
-    hunks?: number;
-}
-/**
- * The containment decision for one delegated write. `baseDir` is the session workspace
- * and `allowedRoots` is the operator's explicit extension list. Both sides are
- * canonicalised, so a symlink inside the workspace cannot be used to escape it.
- */
-export declare function evaluateEmissionPath(resolvedPath: string, baseDir: string, allowedRoots?: string[]): {
-    allowed: boolean;
-    reason?: string;
-};
-export declare function extractAndEmitFiles(content: string, targetFilesHint?: string[] | string, baseDir?: string, allowedRoots?: string[], protectedPaths?: string[]): {
-    filesWritten: FileEmissionResult[];
-    errors: string[];
-    cleanContent: string;
 };
 /** A failure described without source: enough to diagnose, not enough to leak code. */
 export interface RedactedFailure {
