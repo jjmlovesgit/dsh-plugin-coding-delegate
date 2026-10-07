@@ -59,6 +59,18 @@ An eighth pass may be needed for `LocalRouter` / routing, and for the DLP rules 
 
 ## Rules that are not negotiable
 
+- **Reading is gated too, and it breaks the method unless it is handled.** A delegated *patch* puts the
+  file in the delegated registry, so `delegateReadPolicy` decides whether the next round can read the
+  block it must quote. With the default `'ask'` in a session that cannot raise approvals, that is a
+  refusal — and the refactor stops at step 1. The live profile sets `delegateReadPolicy: 'allow'` for
+  exactly this reason, and the `SOURCE_READ` trace records the cost so the question stays answerable. Code
+  has since changed so that only files the worker *created* are gated; patched files stay readable, which
+  is what makes iterating on an existing file possible at all.
+- **Run the loop from a session rooted at the repository.** A fresh agent inherits the workspace of the
+  session that spawned it. From anywhere else — `C:\Projects\temp`, for instance — every write is denied,
+  including to `.git`, so the commit/push/CI gate cannot run and no useful work is possible. The first
+  automated round discovered exactly this and correctly refused to half-land a cut.
+
 - **Delegate source changes.** The code guard refuses a cloud-authored source write (rule 2). `index.ts`,
   any new `.ts`, and any `.cjs` are source. Yours to write directly: `.md`, and nothing else in the repo.
 - **Never commit red.** The gate command is:
