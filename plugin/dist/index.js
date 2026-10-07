@@ -1246,8 +1246,14 @@ async function delegateWorker(params = {}, tracker) {
         }
         const emission = extractAndEmitFiles(content, params.targetFiles, workspaceBase, params.emitAllowlist ?? [], contractPaths);
         const filesWritten = emission.filesWritten;
-        // Remember what we wrote on the architect's behalf, so reading it back can be gated.
-        rememberDelegated(filesWritten.map((f) => f.path));
+        // Remember what we wrote on the architect's behalf, so reading it back can be gated -- distinguishing
+        // files the worker created, which the architect never saw, from files it patched, which it did.
+        const createdPaths = filesWritten.filter((f) => f.mode !== 'patch').map((f) => f.path);
+        const patchedPaths = filesWritten.filter((f) => f.mode === 'patch').map((f) => f.path);
+        if (createdPaths.length > 0)
+            rememberDelegated(createdPaths, 'created');
+        if (patchedPaths.length > 0)
+            rememberDelegated(patchedPaths, 'patched');
         let testResults = undefined;
         let verificationGate = undefined;
         if (params.runVerification) {
@@ -1823,6 +1829,9 @@ function parseDelegatedRegistry(text) {
             path: entryPath,
             sha256: typeof entry.sha256 === 'string' && entry.sha256 ? entry.sha256 : null,
             at: Number.isFinite(Number(entry.at)) ? Number(entry.at) : 0,
+            // Records written before this field existed predate the distinction, and the conservative reading
+            // of an old record is the one that protects more: treat it as created.
+            mode: entry.mode === 'patched' ? 'patched' : 'created',
         });
     }
     return records;
@@ -1876,7 +1885,7 @@ function loadDelegatedRegistry() {
     }
     return pruneDelegatedRecords(parseDelegatedRegistry(text));
 }
-function rememberDelegated(paths) {
+function rememberDelegated(paths, mode = 'created') {
     const added = [];
     for (const p of paths) {
         if (typeof p !== 'string' || !p)
@@ -1885,15 +1894,18 @@ function rememberDelegated(paths) {
         // go?". Canonicalisation resolves symlinks — `os.tmpdir()` on Windows is a junction — so it
         // belongs in the index and the comparisons, not in the record.
         const resolved = path.resolve(p);
-        added.push({ path: resolved, sha256: sha256File(resolved), at: Date.now() });
+        added.push({ path: resolved, sha256: sha256File(resolved), at: Date.now(), mode });
     }
     if (added.length === 0)
         return;
     const merged = mergeDelegatedRecords(loadDelegatedRegistry(), added);
     saveDelegatedRegistry(merged);
-    // The in-memory index mirrors what was persisted, so the two cannot drift apart.
-    for (const entry of merged)
-        delegatedPaths.add((0, paths_1.canonicalisePath)(entry.path));
+    // Only whole files the worker produced enter the read guard's index. A patched file is one the
+    // architect was working on and must keep reading; the record still remembers it either way.
+    for (const entry of merged) {
+        if (entry.mode === 'created')
+            delegatedPaths.add((0, paths_1.canonicalisePath)(entry.path));
+    }
     while (delegatedPaths.size > DELEGATED_PATH_LIMIT) {
         const oldest = delegatedPaths.values().next().value;
         if (typeof oldest === 'string')
@@ -2584,8 +2596,10 @@ function apply(ctx, options = {}) {
     // Restore what was delegated before this process started. Without this, a restart silently widened
     // what the architect may read back — the gap a live run found, and the reason this is not merely
     // in-memory state any more.
-    for (const record of loadDelegatedRegistry())
-        delegatedPaths.add((0, paths_1.canonicalisePath)(record.path));
+    for (const record of loadDelegatedRegistry()) {
+        if (record.mode === 'created')
+            delegatedPaths.add((0, paths_1.canonicalisePath)(record.path));
+    }
     const REGISTERED_KEY = Symbol.for('dsh-plugin-coding-delegate.registered');
     const isTest = process.env.NODE_ENV === 'test';
     if (!isTest) {

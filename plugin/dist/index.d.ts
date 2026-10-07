@@ -575,6 +575,13 @@ export interface DelegatedRecord {
     path: string;
     sha256: string | null;
     at: number;
+    /**
+     * How the worker touched this file. `created` means it produced the whole thing and the architect has
+     * never seen it, so reading it back is the thing rule 3 forbids. `patched` means it changed part of a
+     * file the architect already had -- the architect must stay able to read that, or iterating on an
+     * existing file becomes impossible the moment a patch to it has been delegated once.
+     */
+    mode: 'created' | 'patched';
 }
 export declare function resolveDelegatedRegistryPath(): string;
 /**
@@ -594,7 +601,7 @@ export declare function pruneDelegatedRecords(records: DelegatedRecord[], exists
 export declare function saveDelegatedRegistry(records: DelegatedRecord[]): boolean;
 /** Load, validate and prune. Called at startup so a restart does not forget what was delegated. */
 export declare function loadDelegatedRegistry(): DelegatedRecord[];
-export declare function rememberDelegated(paths: string[]): void;
+export declare function rememberDelegated(paths: string[], mode?: 'created' | 'patched'): void;
 export interface GuardVerdict {
     kind: 'deny' | 'ask';
     target: string;
