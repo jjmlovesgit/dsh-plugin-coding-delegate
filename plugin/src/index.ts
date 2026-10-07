@@ -285,6 +285,10 @@ export interface FileEmissionResult {
   relativeName: string
   lines: number
   bytes: number
+  /** How the change arrived: a whole file, or a delta against the file already there. */
+  mode?: 'write' | 'patch'
+  /** Search/replace blocks applied, when the emission was a patch. */
+  hunks?: number
 }
 
 /**
@@ -393,11 +397,47 @@ export function extractAndEmitFiles(
     if (seenPaths.has(resolvedPath)) return
     seenPaths.add(resolvedPath)
 
+    // A search/replace body is a delta against an existing file rather than a replacement for it. The
+    // header syntax is shared, so the body decides the mode. An empty list means the body started a
+    // patch and never finished it, which is refused rather than written over a real file.
+    const patchBlocks = parseSearchReplaceBlocks(fileCode)
+    if (patchBlocks) {
+      if (!fs.existsSync(resolvedPath)) {
+        emissionErrors.push(
+          `Refused to patch ${resolvedPath}: it does not exist, and a search/replace block edits a ` +
+            `file rather than creating one.`
+        )
+        return
+      }
+
+      let original: string
+      try {
+        original = fs.readFileSync(resolvedPath, 'utf8')
+      } catch (err: any) {
+        emissionErrors.push(
+          `Failed to read ${resolvedPath} for patching: ${err?.message || String(err)}`
+        )
+        return
+      }
+
+      const applied = applySearchReplaceBlocks(original, patchBlocks)
+      if (!applied.ok) {
+        emissionErrors.push(`Refused to patch ${resolvedPath}: ${applied.reason}`)
+        console.warn(`[EMIT_PATCH_BLOCKED] ${resolvedPath}: ${applied.reason}`)
+        return
+      }
+      fileCode = applied.content as string
+    }
+
     try {
       // Guard against clobbering: a model that cannot see the target file may return
       // a stub, and a wholesale rewrite far smaller than what is already there is
       // almost always damage rather than an edit.
-      if (fs.existsSync(resolvedPath)) {
+      //
+      // Deliberately skipped for a patch. The guard exists to catch output that is not really an
+      // edit, and a patch has already been matched byte-for-byte against the file it changes, so the
+      // failure it protects against cannot occur -- and a patch may legitimately shrink a file.
+      if (!patchBlocks && fs.existsSync(resolvedPath)) {
         const previousBytes = fs.statSync(resolvedPath).size
         const nextBytes = Buffer.byteLength(fileCode, 'utf8')
         if (previousBytes > 200 && nextBytes < previousBytes * 0.5) {
@@ -422,6 +462,8 @@ export function extractAndEmitFiles(
         relativeName,
         lines,
         bytes,
+        mode: patchBlocks ? 'patch' : 'write',
+        ...(patchBlocks ? { hunks: patchBlocks.length } : {}),
       })
     } catch (err) {
       const message = `Failed to write ${resolvedPath}: ${(err as any)?.message || String(err)}`
@@ -1086,6 +1128,122 @@ export function resolveChatCompletionsUrl(base: string): string {
   return /\/chat\/completions$/i.test(trimmed) ? trimmed : `${trimmed}/chat/completions`
 }
 
+/** A delta block: the bytes to find, and what to put there instead. */
+export interface SearchReplaceBlock {
+  search: string
+  replace: string
+}
+
+export interface PatchResult {
+  ok: boolean
+  content?: string
+  reason?: string
+}
+
+/**
+ * A one- or two-character search is unique by accident rather than by intent, so it is refused even
+ * when the exactly-once rule would allow it. The property that matters is exactness, not cleverness.
+ */
+export const MIN_SEARCH_CHARS = 8
+
+const SEARCH_MARKER = '<<<<<<< SEARCH'
+const REPLACE_MARKER = '>>>>>>> REPLACE'
+const DIVIDER_MARKER = '======='
+
+/**
+ * Recognise a search/replace body. The fenced header is shared with whole-file emission, so the body
+ * decides the mode and the worker does not have to know which of the two it is producing.
+ *
+ * Returns null when there is no delta here, which tells the caller to treat the body as a whole file.
+ * A body that *starts* a search/replace block but never finishes it returns an empty list instead --
+ * never null -- so a malformed patch cannot fall through and be written over a real file.
+ */
+export function parseSearchReplaceBlocks(body: string): SearchReplaceBlock[] | null {
+  if (typeof body !== 'string' || !body.includes(SEARCH_MARKER)) return null
+
+  const blocks: SearchReplaceBlock[] = []
+  let search: string[] | null = null
+  let replace: string[] | null = null
+  let state: 'idle' | 'search' | 'replace' = 'idle'
+
+  for (const line of body.split(/\r?\n/)) {
+    const trimmed = line.trim()
+    if (trimmed === SEARCH_MARKER) {
+      search = []
+      replace = []
+      state = 'search'
+      continue
+    }
+    if (state === 'search' && trimmed === DIVIDER_MARKER) {
+      state = 'replace'
+      continue
+    }
+    if (trimmed === REPLACE_MARKER) {
+      if (search && replace) blocks.push({ search: search.join('\n'), replace: replace.join('\n') })
+      search = null
+      replace = null
+      state = 'idle'
+      continue
+    }
+    if (state === 'search' && search) search.push(line)
+    else if (state === 'replace' && replace) replace.push(line)
+  }
+
+  return blocks
+}
+
+/**
+ * Apply every block, or none. A partially applied change is worse than no change: it leaves the tree
+ * in a state that no contract was written against.
+ *
+ * Everything is normalised to LF for matching and the file's own ending is restored at the end.
+ * Nothing else is normalised -- indentation is bytes -- because a near miss must fail loudly rather
+ * than be massaged into a match. Fuzzy patching is not a tuning choice here; it is the mechanism by
+ * which a wrong edit lands silently.
+ */
+export function applySearchReplaceBlocks(content: string, blocks: SearchReplaceBlock[]): PatchResult {
+  if (!Array.isArray(blocks) || blocks.length === 0) {
+    return { ok: false, reason: 'the patch contained no complete search/replace block' }
+  }
+
+  const usesCrlf = content.includes('\r\n')
+  let work = content.split('\r\n').join('\n')
+
+  for (const block of blocks) {
+    const search = String(block?.search ?? '').split('\r\n').join('\n')
+    const replace = String(block?.replace ?? '').split('\r\n').join('\n')
+
+    if (!search.trim()) {
+      return { ok: false, reason: 'a search block was empty' }
+    }
+    if (search.trim().length < MIN_SEARCH_CHARS) {
+      return {
+        ok: false,
+        reason:
+          `a search block was too short to be unambiguous (${search.trim().length} characters, ` +
+          `minimum ${MIN_SEARCH_CHARS})`,
+      }
+    }
+
+    const occurrences = work.split(search).length - 1
+    if (occurrences === 0) {
+      return {
+        ok: false,
+        reason: `no exact match for a search block (${search.trim().slice(0, 60)})`,
+      }
+    }
+    if (occurrences > 1) {
+      return {
+        ok: false,
+        reason: `a search block matched more than once (${occurrences} times), so the edit is ambiguous`,
+      }
+    }
+    work = work.replace(search, () => replace)
+  }
+
+  return { ok: true, content: usesCrlf ? work.split('\n').join('\r\n') : work }
+}
+
 /** One file the architect wants the worker to see. Names and ranges only, never contents. */
 export interface ContextRequest {
   path: string
@@ -1299,7 +1457,10 @@ export async function delegateWorker(
   )
   const model = params.model || PROFILES.WORKER.model
   const fileInstruction =
-    'When generating code for target files, wrap each file in a code block with the target file path in the header or first line, e.g. ```typescript file="src/math-helper.ts"\n...code...\n``` or // FILE: tests/math-helper.test.ts'
+    'To change part of an existing file, emit a patch block instead of the whole file:\n' +
+    '```patch file="src/thing.ts"\n<<<<<<< SEARCH\n<the exact existing lines>\n=======\n<the replacement lines>\n>>>>>>> REPLACE\n```\n' +
+    'The SEARCH text must match the file exactly and occur exactly once, and there is no fuzzy matching.\n' +
+    'To create a file, or replace one wholesale, wrap it in a code block with the target file path in the header or first line, e.g. ```typescript file="src/math-helper.ts"\n...code...\n``` or // FILE: tests/math-helper.test.ts'
   const systemPrompt =
     params.systemPrompt || `You are a fast, accurate local coding worker executing a discrete task. ${fileInstruction}`
 
@@ -1506,7 +1667,14 @@ export async function delegateWorker(
     if (filesWritten.length > 0) {
       summaryText =
         `Task '${params.taskName || 'Subtask'}' completed. Wrote ${filesWritten.length} file(s):\n` +
-        filesWritten.map((f) => `  - ${f.path} (${f.lines} lines, ${f.bytes} bytes)`).join('\n')
+        filesWritten
+          .map(
+            (f) =>
+              `  - ${f.path} (${f.lines} lines, ${f.bytes} bytes${
+                f.mode === 'patch' ? `, patched in place with ${f.hunks} hunk(s)` : ''
+              })`
+          )
+          .join('\n')
     } else {
       summaryText = `Task '${params.taskName || 'Subtask'}' completed. Worker returned ${content.split('\n').length} line(s) of output.`
     }
@@ -2975,6 +3143,9 @@ const pluginExport = {
   parseTestOutput,
   sha256File,
   resolveContextFiles,
+  parseSearchReplaceBlocks,
+  applySearchReplaceBlocks,
+  MIN_SEARCH_CHARS,
   DEFAULT_CONTEXT_MAX_BYTES,
   resolveContractFiles,
   contractFileHashes,

@@ -64,8 +64,9 @@ Stated plainly, because these limits decide whether it fits your work:
 
 - **The worker cannot discover, but it can be shown.** It has no repository read, so it will never find
   the file it needs. Declare `contextFiles` and the plugin reads them into its prompt — so the architect
-  supplies code it never sees. What is still missing is the **emission** side: the worker returns whole
-  files, bounded by its output budget, so it cannot hand back a large existing file in one piece.
+  supplies code it never sees — and the worker answers with a whole file or a search/replace delta, so
+  it does not have to return a large file in one piece. What is still missing is **cross-unit
+  coherence**: nothing decides which files a unit needs, and nothing checks that two units agree.
 - **The architect is blind by policy**, deliberately: reading the code back is what the delegation
   exists to prevent. That leaves nobody holding the code and the design at the same time. Supplying
   that role is the plugin's next piece of work, not something it does today.
@@ -115,8 +116,9 @@ Four things, in the order they act:
 4. **`delegate_worker`.** A tool the architect calls to hand one unit of implementation to a local
    OpenAI-compatible server (LM Studio, Ollama, vLLM, llama.cpp, a remote gateway). File writes are
    contained to the workspace, verification output is redacted to structure before it travels, and the
-   verification command itself requires approval. The worker is given the instruction and the target
-   *paths*, not their contents — it has no repository read, so a unit has to be self-contained.
+   verification command itself requires approval. The worker has no repository read, so it only ever sees
+   what the architect declares with `contextFiles`, and it answers with a whole file or a search/replace
+   delta.
 
 ## Requirements
 
@@ -204,10 +206,11 @@ npm run test:all       # both
 
 ## What this does not claim
 
-- **It cannot rewrite a file the worker cannot re-emit.** The architect can show the worker code with
-  `contextFiles` and still never see it. But the worker returns *whole files*, bounded by its own output
-  budget, so a large existing file cannot come back in one piece. Creating new files, and editing small
-  ones, close cleanly today; editing large ones does not.
+- **A patch must match exactly, and a stale one fails.** The worker returns either a whole file or a
+  search/replace delta matched byte-for-byte against what it was shown. There is no fuzzy matching, so a
+  miss is refused rather than approximated — if the code changed after the worker was given it, the
+  edit fails and the unit is re-delegated. Nothing here lets the worker *discover* code; it only ever
+  edits what it was given.
 - The guard sees tool calls and shell text, not intent. Runtime-computed paths and library-mediated
   writes are invisible to it; configuration files are out of scope.
 - The DLP gate scans the user messages the plugin has seen — not assistant output or tool results —

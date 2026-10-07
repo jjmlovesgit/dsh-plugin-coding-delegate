@@ -257,6 +257,10 @@ export interface FileEmissionResult {
     relativeName: string;
     lines: number;
     bytes: number;
+    /** How the change arrived: a whole file, or a delta against the file already there. */
+    mode?: 'write' | 'patch';
+    /** Search/replace blocks applied, when the emission was a patch. */
+    hunks?: number;
 }
 /** True when `candidate` is `root` itself or lives beneath it. Case-insensitive on Windows. */
 export declare function isPathWithin(root: string, candidate: string): boolean;
@@ -388,6 +392,40 @@ export declare const DEFAULT_LOCAL_ENDPOINT = "http://127.0.0.1:1234/v1";
  * written without the operator having to know this plugin appends the path.
  */
 export declare function resolveChatCompletionsUrl(base: string): string;
+/** A delta block: the bytes to find, and what to put there instead. */
+export interface SearchReplaceBlock {
+    search: string;
+    replace: string;
+}
+export interface PatchResult {
+    ok: boolean;
+    content?: string;
+    reason?: string;
+}
+/**
+ * A one- or two-character search is unique by accident rather than by intent, so it is refused even
+ * when the exactly-once rule would allow it. The property that matters is exactness, not cleverness.
+ */
+export declare const MIN_SEARCH_CHARS = 8;
+/**
+ * Recognise a search/replace body. The fenced header is shared with whole-file emission, so the body
+ * decides the mode and the worker does not have to know which of the two it is producing.
+ *
+ * Returns null when there is no delta here, which tells the caller to treat the body as a whole file.
+ * A body that *starts* a search/replace block but never finishes it returns an empty list instead --
+ * never null -- so a malformed patch cannot fall through and be written over a real file.
+ */
+export declare function parseSearchReplaceBlocks(body: string): SearchReplaceBlock[] | null;
+/**
+ * Apply every block, or none. A partially applied change is worse than no change: it leaves the tree
+ * in a state that no contract was written against.
+ *
+ * Everything is normalised to LF for matching and the file's own ending is restored at the end.
+ * Nothing else is normalised -- indentation is bytes -- because a near miss must fail loudly rather
+ * than be massaged into a match. Fuzzy patching is not a tuning choice here; it is the mechanism by
+ * which a wrong edit lands silently.
+ */
+export declare function applySearchReplaceBlocks(content: string, blocks: SearchReplaceBlock[]): PatchResult;
 /** One file the architect wants the worker to see. Names and ranges only, never contents. */
 export interface ContextRequest {
     path: string;
@@ -556,6 +594,9 @@ declare const pluginExport: {
     parseTestOutput: typeof parseTestOutput;
     sha256File: typeof sha256File;
     resolveContextFiles: typeof resolveContextFiles;
+    parseSearchReplaceBlocks: typeof parseSearchReplaceBlocks;
+    applySearchReplaceBlocks: typeof applySearchReplaceBlocks;
+    MIN_SEARCH_CHARS: number;
     DEFAULT_CONTEXT_MAX_BYTES: number;
     resolveContractFiles: typeof resolveContractFiles;
     contractFileHashes: typeof contractFileHashes;

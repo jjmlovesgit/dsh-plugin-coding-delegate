@@ -271,9 +271,8 @@ when the unit declared a contract.
 The worker receives the `instruction`, the `targetFiles` **paths**, the verification command, and any
 `contextFiles` the architect declared — and nothing else. It has no repository read, so it cannot
 discover anything; it only ever sees what it was shown. Declaring `contextFiles` is how a unit closes
-on existing code without that code entering the architect's context. What remains unsolved is the
-emission side: the worker returns whole files bounded by its output budget, so it cannot return a large
-existing file in one piece.
+on existing code without that code entering the architect's context. What remains unsolved is cross-unit
+coherence: nothing decides which files a unit needs, and nothing checks that two units agree.
 
 - **File emission** is driven by fenced code blocks whose header names the target, e.g.
   ```` ```ts file="src/thing.ts" ```` or a `// FILE: src/thing.ts` first line.
@@ -284,6 +283,16 @@ existing file in one piece.
   cannot see the DSH session workspace (the Cordis `Agent` exposes only an id, and the path
   lives in session metadata behind a store the plugin cannot reach), so omitting it resolves
   to the server's working directory and says so in `summary`.
+- **A patch edits in place; a code block replaces.** To change part of an existing file the worker emits
+  a fenced block headed `patch file="…"` whose body holds `<<<<<<< SEARCH`, `=======` and
+  `>>>>>>> REPLACE` markers. The SEARCH text must match the file exactly and **exactly once**: zero
+  matches, two matches, an empty search, and a trivially short search are each refused, and every block
+  applies or none does. There is deliberately no fuzzy matching — a near miss is the mechanism by which
+  a wrong edit lands silently, so it fails and the unit is re-delegated instead. The file's own line
+  endings survive the edit, a malformed patch is refused rather than falling through as a whole-file
+  write, and a patch is exempt from the whole-file size guard precisely because it has already been
+  matched against the bytes it changes. The receipt reports which files were patched and how many hunks
+  each took.
 - **`contextFiles` shows the worker the code it must change, without showing it to you.** Entries are
   `{ path, startLine?, endLine? }` with 1-based inclusive ranges. The plugin reads them into the worker
   prompt and returns a record of what it injected — path, range, lines, bytes, sha256 — and never the

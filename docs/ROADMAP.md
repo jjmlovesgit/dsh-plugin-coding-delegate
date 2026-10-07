@@ -42,13 +42,15 @@ No host dependency, no decision pending. **This is the actionable track.**
 | --- | --- | --- |
 | C | **Contract-path integrity** — declare the contract's test files, hash them before the worker runs, refuse worker emissions targeting them, re-hash after verification and fail the verdict if they changed | **Built.** `tests/oracles/contract-integrity.test.cjs`, 9 assertions, failing 8 of 9 before implementation |
 | A | **Architect-blind context injection** — `contextFiles` names and ranges, contained, DLP-scanned, reported as metadata only | **Built.** `tests/oracles/context-injection.test.cjs`, 10 assertions, failing 10 of 10 before implementation |
-| B | **Search/replace delta emission** — exact-match, no fuzz, all-or-nothing | Designed, not built; depends on A |
+| B | **Search/replace delta emission** — exact-match, no fuzz, all-or-nothing | **Built.** `tests/oracles/delta-emission.test.cjs`, 10 assertions, failing 10 of 10 before implementation |
 | 18 | `Select-String <file>.js` read-detection false positive | Not started |
 
 C shipped first because it is small, independent, and it is the unit that makes a passing verdict mean
-*the architect's tests, unmodified, passed against the worker's code*. A followed it, so the worker can
-now be shown existing code without the architect seeing it either. **B is next**: the worker still
-returns whole files bounded by its output budget, so it cannot hand back a large file in one piece.
+*the architect's tests, unmodified, passed against the worker's code*. A followed, then B. **Track 1 is
+complete**: the worker can be shown existing code without the architect seeing it, and it can return a
+delta rather than a whole file, so the loop closes on existing code as well as on new files.
+
+What is left in this track is item 18, a false positive in read detection that predates all of this.
 
 ## Track 2 — the lead tier
 
