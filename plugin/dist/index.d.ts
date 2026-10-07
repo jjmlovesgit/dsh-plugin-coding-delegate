@@ -55,6 +55,16 @@ export interface PluginConfig {
      * full host authority and can kill the server, so it is opt-in only.
      */
     allowInProcessFallback?: boolean;
+    /**
+     * Base URL of the local OpenAI-compatible server that `delegate_worker` posts to — for
+     * example `http://127.0.0.1:11434/v1` for Ollama, or a vLLM/llama.cpp port. A full
+     * `/chat/completions` URL is also accepted. Defaults to `http://127.0.0.1:1234/v1`.
+     *
+     * This is operator configuration, deliberately separate from the tool's arguments: a
+     * caller-supplied `endpoint` is ignored, because honouring it would let the model redirect
+     * a task — and the file contents it carries — to any address.
+     */
+    localEndpoint?: string;
 }
 export interface RouterMetadata {
     provider: string;
@@ -304,6 +314,14 @@ export interface DelegateWorkerParams {
     /** Extra roots the worker may write into beyond `workspaceDir`. */
     emitAllowlist?: string[];
 }
+/** Where the local worker is assumed to live when nothing else is configured. */
+export declare const DEFAULT_LOCAL_ENDPOINT = "http://127.0.0.1:1234/v1";
+/**
+ * Accept either a base URL or a full chat-completions URL and return the full one, so
+ * `localEndpoint: 'http://127.0.0.1:11434/v1'` (Ollama, vLLM, llama.cpp, …) works exactly as
+ * written without the operator having to know this plugin appends the path.
+ */
+export declare function resolveChatCompletionsUrl(base: string): string;
 export declare function delegateWorker(params?: DelegateWorkerParams, tracker?: SavingsTracker): Promise<any>;
 export declare function extractPromptText(session: LLMSession | any): string;
 export declare function estimateTokenCount(text: string): number;

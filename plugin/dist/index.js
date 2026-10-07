@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.DELETE_PRIMITIVES = exports.LocalRouter = exports.DEFAULT_VERIFICATION_POLICY = exports.DELEGATE_WORKER_SCHEMA = exports.DELEGATE_WORKER_OPENAI_SCHEMA = exports.name = exports.using = exports.inject = exports.SavingsTracker = exports.PROFILES = void 0;
+exports.DELETE_PRIMITIVES = exports.LocalRouter = exports.DEFAULT_LOCAL_ENDPOINT = exports.DEFAULT_VERIFICATION_POLICY = exports.DELEGATE_WORKER_SCHEMA = exports.DELEGATE_WORKER_OPENAI_SCHEMA = exports.name = exports.using = exports.inject = exports.SavingsTracker = exports.PROFILES = void 0;
 exports.resolveDataDir = resolveDataDir;
 exports.scanDLP = scanDLP;
 exports.isPathWithin = isPathWithin;
@@ -46,6 +46,7 @@ exports.runInProcessFallback = runInProcessFallback;
 exports.commandProgram = commandProgram;
 exports.evaluateVerificationPolicy = evaluateVerificationPolicy;
 exports.runSandboxVerification = runSandboxVerification;
+exports.resolveChatCompletionsUrl = resolveChatCompletionsUrl;
 exports.delegateWorker = delegateWorker;
 exports.extractPromptText = extractPromptText;
 exports.estimateTokenCount = estimateTokenCount;
@@ -813,11 +814,21 @@ function persistRaw(output, rawLogPath) {
         return undefined;
     }
 }
+/** Where the local worker is assumed to live when nothing else is configured. */
+exports.DEFAULT_LOCAL_ENDPOINT = 'http://127.0.0.1:1234/v1';
+/**
+ * Accept either a base URL or a full chat-completions URL and return the full one, so
+ * `localEndpoint: 'http://127.0.0.1:11434/v1'` (Ollama, vLLM, llama.cpp, …) works exactly as
+ * written without the operator having to know this plugin appends the path.
+ */
+function resolveChatCompletionsUrl(base) {
+    const trimmed = String(base || '').trim().replace(/\/+$/, '');
+    if (!trimmed)
+        return `${exports.DEFAULT_LOCAL_ENDPOINT}/chat/completions`;
+    return /\/chat\/completions$/i.test(trimmed) ? trimmed : `${trimmed}/chat/completions`;
+}
 async function delegateWorker(params = {}, tracker) {
-    const endpoint = params.endpoint ||
-        (profiles_1.PROFILES.WORKER.endpoint
-            ? `${profiles_1.PROFILES.WORKER.endpoint}/chat/completions`
-            : 'http://127.0.0.1:1234/v1/chat/completions');
+    const endpoint = resolveChatCompletionsUrl(params.endpoint || profiles_1.PROFILES.WORKER.endpoint || exports.DEFAULT_LOCAL_ENDPOINT);
     const model = params.model || profiles_1.PROFILES.WORKER.model;
     const fileInstruction = 'When generating code for target files, wrap each file in a code block with the target file path in the header or first line, e.g. ```typescript file="src/math-helper.ts"\n...code...\n``` or // FILE: tests/math-helper.test.ts';
     const systemPrompt = params.systemPrompt || `You are a fast, accurate local coding worker executing a discrete task. ${fileInstruction}`;
@@ -1782,6 +1793,10 @@ function apply(ctx, options = {}) {
                     const policy = resolveVerificationPolicy(options);
                     return await delegateWorker({
                         ...callerArgs,
+                        // Operator settings, not caller arguments. The local endpoint and model are
+                        // trusted configuration; a caller-supplied `endpoint` was dropped just above.
+                        ...(options?.localEndpoint ? { endpoint: options.localEndpoint } : {}),
+                        ...(options?.localModel ? { model: options.localModel } : {}),
                         workspaceDir: explicitDir || resolved.dir,
                         workspaceSource: explicitDir ? 'caller-supplied workspaceDir' : resolved.source,
                         verificationPolicy: policy,
@@ -1819,6 +1834,9 @@ function apply(ctx, options = {}) {
             const { endpoint: _ignoredEndpoint, ...callerArgs } = args || {};
             return await delegateWorker({
                 ...callerArgs,
+                // Same operator settings as the registered tool path above.
+                ...(options?.localEndpoint ? { endpoint: options.localEndpoint } : {}),
+                ...(options?.localModel ? { model: options.localModel } : {}),
                 workspaceDir: explicitDir || resolved.dir,
                 workspaceSource: explicitDir ? 'caller-supplied workspaceDir' : resolved.source,
                 // This path has no agent or call id, so no approval can be requested: with the

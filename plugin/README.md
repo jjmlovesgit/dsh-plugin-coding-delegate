@@ -90,11 +90,22 @@ llm-pi-ai:
           maxTokens: 32768
 ```
 
-Then set `localModel` to that `id`. Nothing else changes: routing, the DLP gate and
-`delegate_worker` work against whatever that endpoint serves. One caveat — if the endpoint is
-remote, "local" now means "not the cloud architect" rather than "on this machine", and
-`dlpAction: 'local'` would send a credential-bearing payload *to that endpoint*. Prefer
-`'block'` unless you trust it as you would your own machine.
+Then set `localModel` to that `id`, and set `localEndpoint` to the same base URL:
+
+```yaml
+localModel: Qwen/Qwen3-Coder-30B-A3B-Instruct
+localEndpoint: http://192.168.1.50:8000/v1
+```
+
+Both matter, for different paths. `localModel` covers the local *reroute*, which travels through
+the host's provider registry. `delegate_worker` talks to the server directly rather than through
+that registry, so it needs `localEndpoint` — without it, dispatch would still go to LM Studio's
+default port no matter what `baseURL` said. With both set, routing, the DLP gate and
+`delegate_worker` all work against whatever the endpoint serves.
+
+One caveat — if the endpoint is remote, "local" now means "not the cloud architect" rather than
+"on this machine", and `dlpAction: 'local'` would send a credential-bearing payload *to that
+endpoint*. Prefer `'block'` unless you trust it as you would your own machine.
 
 ### Option 3 — cloud only, no local model
 
@@ -181,7 +192,8 @@ Decision output: `{ provider, model, route, gate, rationale, scores, latencyMs }
 | --- | --- | --- |
 | `localProvider` | `lm-studio` | Provider id used for local execution |
 | `cloudProvider` | `deepseek-official` | Provider id used for escalated execution |
-| `localModel` | `qwen/qwen3.8-27b` | Local model id |
+| `localModel` | `qwen/qwen3.8-27b` | Local model id, used for the local reroute *and* for `delegate_worker` |
+| `localEndpoint` | `http://127.0.0.1:1234/v1` | Base URL `delegate_worker` posts to (a full `/chat/completions` URL is also accepted). Operator configuration — a caller-supplied `endpoint` argument is ignored, so a model cannot redirect the task |
 | `cloudModel` | `deepseek-chat` | Cloud model id |
 | `contextThreshold` / `contextTokenThreshold` | `30000` | Tokens above which requests go straight to cloud |
 | `timeoutMs` | `2000` | Timeout for the worker HTTP call |

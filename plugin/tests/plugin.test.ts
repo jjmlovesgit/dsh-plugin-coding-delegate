@@ -18,6 +18,7 @@ import {
   hasCommandWriteSignal,
   hasCommandDeleteSignal,
   evaluateCodeWriteGuard,
+  resolveChatCompletionsUrl,
 } from '../src/index'
 import { classifyLocally } from '../src/local-classifier'
 import * as path from 'path'
@@ -438,5 +439,47 @@ describe('Local-code guard: command-line write detection', () => {
     // Regression: the first match won, so prose mentioning `(.ts)` became the target.
     const verdict = evaluateCodeWriteGuard(shell('Remove-Item src/gone.ts   # (.ts) note'))
     expect(verdict?.target).toBe('src/gone.ts')
+  })
+})
+
+describe('Local worker target configuration', () => {
+  it('accepts a base URL and completes the chat-completions path', () => {
+    // Ollama, vLLM and llama.cpp are all reachable by setting localEndpoint; before this the
+    // worker posted to LM Studio's port no matter what the operator configured.
+    expect(resolveChatCompletionsUrl('http://127.0.0.1:11434/v1')).toBe(
+      'http://127.0.0.1:11434/v1/chat/completions'
+    )
+    expect(resolveChatCompletionsUrl('http://127.0.0.1:11434/v1/')).toBe(
+      'http://127.0.0.1:11434/v1/chat/completions'
+    )
+    expect(resolveChatCompletionsUrl('https://gateway.internal/openai/v1/chat/completions')).toBe(
+      'https://gateway.internal/openai/v1/chat/completions'
+    )
+    expect(resolveChatCompletionsUrl('')).toBe('http://127.0.0.1:1234/v1/chat/completions')
+  })
+
+  it('posts to the completed URL rather than the built-in default', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: 'noop' } }],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const tmpDir = makeTempWorkspace('lr-endpoint')
+    await delegateWorker(
+      {
+        taskName: 'EndpointShape',
+        instruction: 'noop',
+        endpoint: 'http://127.0.0.1:11434/v1',
+        workspaceDir: tmpDir,
+      },
+      new SavingsTracker(tmpDir)
+    )
+
+    expect(fetchMock.mock.calls[0][0]).toBe('http://127.0.0.1:11434/v1/chat/completions')
+    fs.rmSync(tmpDir, { recursive: true, force: true })
   })
 })

@@ -63,6 +63,16 @@ export interface PluginConfig {
    * full host authority and can kill the server, so it is opt-in only.
    */
   allowInProcessFallback?: boolean
+  /**
+   * Base URL of the local OpenAI-compatible server that `delegate_worker` posts to — for
+   * example `http://127.0.0.1:11434/v1` for Ollama, or a vLLM/llama.cpp port. A full
+   * `/chat/completions` URL is also accepted. Defaults to `http://127.0.0.1:1234/v1`.
+   *
+   * This is operator configuration, deliberately separate from the tool's arguments: a
+   * caller-supplied `endpoint` is ignored, because honouring it would let the model redirect
+   * a task — and the file contents it carries — to any address.
+   */
+  localEndpoint?: string
 }
 
 export interface RouterMetadata {
@@ -1011,15 +1021,27 @@ export interface DelegateWorkerParams {
   emitAllowlist?: string[]
 }
 
+/** Where the local worker is assumed to live when nothing else is configured. */
+export const DEFAULT_LOCAL_ENDPOINT = 'http://127.0.0.1:1234/v1'
+
+/**
+ * Accept either a base URL or a full chat-completions URL and return the full one, so
+ * `localEndpoint: 'http://127.0.0.1:11434/v1'` (Ollama, vLLM, llama.cpp, …) works exactly as
+ * written without the operator having to know this plugin appends the path.
+ */
+export function resolveChatCompletionsUrl(base: string): string {
+  const trimmed = String(base || '').trim().replace(/\/+$/, '')
+  if (!trimmed) return `${DEFAULT_LOCAL_ENDPOINT}/chat/completions`
+  return /\/chat\/completions$/i.test(trimmed) ? trimmed : `${trimmed}/chat/completions`
+}
+
 export async function delegateWorker(
   params: DelegateWorkerParams = {},
   tracker?: SavingsTracker
 ): Promise<any> {
-  const endpoint =
-    params.endpoint ||
-    (PROFILES.WORKER.endpoint
-      ? `${PROFILES.WORKER.endpoint}/chat/completions`
-      : 'http://127.0.0.1:1234/v1/chat/completions')
+  const endpoint = resolveChatCompletionsUrl(
+    params.endpoint || PROFILES.WORKER.endpoint || DEFAULT_LOCAL_ENDPOINT
+  )
   const model = params.model || PROFILES.WORKER.model
   const fileInstruction =
     'When generating code for target files, wrap each file in a code block with the target file path in the header or first line, e.g. ```typescript file="src/math-helper.ts"\n...code...\n``` or // FILE: tests/math-helper.test.ts'
@@ -2138,6 +2160,10 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
           return await delegateWorker(
             {
               ...callerArgs,
+              // Operator settings, not caller arguments. The local endpoint and model are
+              // trusted configuration; a caller-supplied `endpoint` was dropped just above.
+              ...(options?.localEndpoint ? { endpoint: options.localEndpoint } : {}),
+              ...(options?.localModel ? { model: options.localModel } : {}),
               workspaceDir: explicitDir || resolved.dir,
               workspaceSource: explicitDir ? 'caller-supplied workspaceDir' : resolved.source,
               verificationPolicy: policy,
@@ -2176,6 +2202,9 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
       return await delegateWorker(
         {
           ...callerArgs,
+          // Same operator settings as the registered tool path above.
+          ...(options?.localEndpoint ? { endpoint: options.localEndpoint } : {}),
+          ...(options?.localModel ? { model: options.localModel } : {}),
           workspaceDir: explicitDir || resolved.dir,
           workspaceSource: explicitDir ? 'caller-supplied workspaceDir' : resolved.source,
           // This path has no agent or call id, so no approval can be requested: with the
