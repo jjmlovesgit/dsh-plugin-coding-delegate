@@ -33,7 +33,8 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.AGENT_ROLE_LIMIT = exports.DEFAULT_SOURCE_EGRESS_MIN_LINES = exports.LocalRouter = exports.MIN_SEARCH_CHARS = exports.DEFAULT_LOCAL_ENDPOINT = exports.DELEGATE_WORKER_SCHEMA = exports.DELEGATE_WORKER_OPENAI_SCHEMA = exports.name = exports.using = exports.inject = exports.runSandboxVerification = exports.runInProcessFallback = exports.redactVerificationOutput = exports.parseTestOutput = exports.evaluateVerificationPolicy = exports.describeFailures = exports.commandProgram = exports.DEFAULT_VERIFICATION_POLICY = exports.sha256File = exports.saveDelegatedRegistry = exports.resolveDelegatedRegistryPath = exports.resolveContractFiles = exports.rememberDelegated = exports.pruneDelegatedRecords = exports.parseDelegatedRegistry = exports.mergeDelegatedRecords = exports.loadDelegatedRegistry = exports.contractViolations = exports.contractFileHashes = exports.resolveContextFiles = exports.DEFAULT_CONTEXT_MAX_BYTES = exports.hasCommandWriteSignal = exports.hasCommandDeleteSignal = exports.evaluateDelegatedReadPolicy = exports.evaluateCodeWriteGuard = exports.DELETE_PRIMITIVES = exports.extractAndEmitFiles = exports.evaluateEmissionPath = exports.isPathWithin = exports.trace = exports.resolveDataDir = exports.SavingsTracker = exports.PROFILES = void 0;
+exports.DELEGATE_WORKER_SCHEMA = exports.DELEGATE_WORKER_OPENAI_SCHEMA = exports.name = exports.using = exports.inject = exports.runSandboxVerification = exports.runInProcessFallback = exports.redactVerificationOutput = exports.parseTestOutput = exports.evaluateVerificationPolicy = exports.describeFailures = exports.commandProgram = exports.DEFAULT_VERIFICATION_POLICY = exports.sha256File = exports.saveDelegatedRegistry = exports.resolveDelegatedRegistryPath = exports.resolveContractFiles = exports.rememberDelegated = exports.pruneDelegatedRecords = exports.parseDelegatedRegistry = exports.mergeDelegatedRecords = exports.loadDelegatedRegistry = exports.contractViolations = exports.contractFileHashes = exports.resolveContextFiles = exports.DEFAULT_CONTEXT_MAX_BYTES = exports.roleForAgent = exports.resolveLeadProviders = exports.resolveAgentRole = exports.resetAgentRoles = exports.rememberAgentRole = exports.evaluateSourceEgress = exports.detectSourceEgress = exports.describeSourceRead = exports.applyArchitectConfig = exports.applyAgentRole = exports.DEFAULT_SOURCE_EGRESS_MIN_LINES = exports.AGENT_ROLE_LIMIT = exports.hasCommandWriteSignal = exports.hasCommandDeleteSignal = exports.evaluateDelegatedReadPolicy = exports.evaluateCodeWriteGuard = exports.DELETE_PRIMITIVES = exports.extractAndEmitFiles = exports.evaluateEmissionPath = exports.isPathWithin = exports.trace = exports.resolveDataDir = exports.SavingsTracker = exports.PROFILES = void 0;
+exports.LocalRouter = exports.MIN_SEARCH_CHARS = exports.DEFAULT_LOCAL_ENDPOINT = void 0;
 exports.scanDLP = scanDLP;
 exports.resolveChatCompletionsUrl = resolveChatCompletionsUrl;
 exports.parseSearchReplaceBlocks = parseSearchReplaceBlocks;
@@ -42,19 +43,9 @@ exports.resolveDelegateStatus = resolveDelegateStatus;
 exports.delegateWorker = delegateWorker;
 exports.extractPromptText = extractPromptText;
 exports.estimateTokenCount = estimateTokenCount;
-exports.detectSourceEgress = detectSourceEgress;
-exports.evaluateSourceEgress = evaluateSourceEgress;
-exports.rememberAgentRole = rememberAgentRole;
-exports.roleForAgent = roleForAgent;
-exports.resetAgentRoles = resetAgentRoles;
-exports.describeSourceRead = describeSourceRead;
 exports.requestApprovalForWrite = requestApprovalForWrite;
 exports.resolveVerificationPolicy = resolveVerificationPolicy;
 exports.requestApprovalForVerification = requestApprovalForVerification;
-exports.resolveLeadProviders = resolveLeadProviders;
-exports.resolveAgentRole = resolveAgentRole;
-exports.applyArchitectConfig = applyArchitectConfig;
-exports.applyAgentRole = applyAgentRole;
 exports.apply = apply;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
@@ -69,6 +60,7 @@ const emission_1 = require("./emission");
 const verification_1 = require("./verification");
 const context_1 = require("./context");
 const guard_1 = require("./guard");
+const roles_1 = require("./roles");
 const contracts_1 = require("./contracts");
 var logging_2 = require("./logging");
 Object.defineProperty(exports, "resolveDataDir", { enumerable: true, get: function () { return logging_2.resolveDataDir; } });
@@ -84,6 +76,19 @@ Object.defineProperty(exports, "evaluateCodeWriteGuard", { enumerable: true, get
 Object.defineProperty(exports, "evaluateDelegatedReadPolicy", { enumerable: true, get: function () { return guard_2.evaluateDelegatedReadPolicy; } });
 Object.defineProperty(exports, "hasCommandDeleteSignal", { enumerable: true, get: function () { return guard_2.hasCommandDeleteSignal; } });
 Object.defineProperty(exports, "hasCommandWriteSignal", { enumerable: true, get: function () { return guard_2.hasCommandWriteSignal; } });
+var roles_2 = require("./roles");
+Object.defineProperty(exports, "AGENT_ROLE_LIMIT", { enumerable: true, get: function () { return roles_2.AGENT_ROLE_LIMIT; } });
+Object.defineProperty(exports, "DEFAULT_SOURCE_EGRESS_MIN_LINES", { enumerable: true, get: function () { return roles_2.DEFAULT_SOURCE_EGRESS_MIN_LINES; } });
+Object.defineProperty(exports, "applyAgentRole", { enumerable: true, get: function () { return roles_2.applyAgentRole; } });
+Object.defineProperty(exports, "applyArchitectConfig", { enumerable: true, get: function () { return roles_2.applyArchitectConfig; } });
+Object.defineProperty(exports, "describeSourceRead", { enumerable: true, get: function () { return roles_2.describeSourceRead; } });
+Object.defineProperty(exports, "detectSourceEgress", { enumerable: true, get: function () { return roles_2.detectSourceEgress; } });
+Object.defineProperty(exports, "evaluateSourceEgress", { enumerable: true, get: function () { return roles_2.evaluateSourceEgress; } });
+Object.defineProperty(exports, "rememberAgentRole", { enumerable: true, get: function () { return roles_2.rememberAgentRole; } });
+Object.defineProperty(exports, "resetAgentRoles", { enumerable: true, get: function () { return roles_2.resetAgentRoles; } });
+Object.defineProperty(exports, "resolveAgentRole", { enumerable: true, get: function () { return roles_2.resolveAgentRole; } });
+Object.defineProperty(exports, "resolveLeadProviders", { enumerable: true, get: function () { return roles_2.resolveLeadProviders; } });
+Object.defineProperty(exports, "roleForAgent", { enumerable: true, get: function () { return roles_2.roleForAgent; } });
 var context_2 = require("./context");
 Object.defineProperty(exports, "DEFAULT_CONTEXT_MAX_BYTES", { enumerable: true, get: function () { return context_2.DEFAULT_CONTEXT_MAX_BYTES; } });
 Object.defineProperty(exports, "resolveContextFiles", { enumerable: true, get: function () { return context_2.resolveContextFiles; } });
@@ -1010,144 +1015,6 @@ function logWorkerBenchmarks() {
     }
     console.log(`[WORKER_BENCH] Active worker model: ${profiles_1.PROFILES.WORKER.model} (max_tokens: ${profiles_1.PROFILES.WORKER.max_tokens ?? 'unset'}, thinking: ${profiles_1.PROFILES.WORKER.enable_thinking === false ? 'off' : 'on'})`);
 }
-/**
- * Fenced-block languages that count as source. Scripts are included: a deployment script is source,
- * and it is exactly the sort of thing that should not be typed into a metered cloud conversation.
- */
-const SOURCE_LANGUAGES = new Set([
-    'ts', 'typescript', 'tsx', 'js', 'javascript', 'jsx', 'mjs', 'cjs',
-    'py', 'python', 'rb', 'ruby', 'php', 'java', 'kt', 'kotlin', 'scala', 'swift', 'dart',
-    'cs', 'csharp', 'fs', 'fsharp', 'vb', 'go', 'rs', 'rust',
-    'c', 'h', 'cpp', 'c++', 'hpp', 'cc', 'mm',
-    'ps1', 'powershell', 'sh', 'bash', 'zsh', 'fish', 'bat', 'cmd',
-    'sql', 'html', 'css', 'scss', 'less', 'vue', 'svelte', 'lua', 'pl', 'perl', 'r',
-    'ex', 'exs', 'erl', 'hs', 'clj', 'asm', 'sol',
-]);
-/** Blocks shorter than this are treated as quotations rather than as code being handed over. */
-exports.DEFAULT_SOURCE_EGRESS_MIN_LINES = 3;
-/**
- * Look for source being handed to a cloud provider.
- *
- * Only fenced blocks with a source language tag and at least `minLines` lines count. Prose about code
- * does not, and neither does an untagged block — that is a real false negative and the oracle asserts
- * it, so this is never mistaken for a proof that source cannot leave. Like the rest of the guard it is
- * a deterrent, pointed at the one route the other gates do not cover: source sitting in the outbound
- * payload because it was typed into a cloud-bound conversation.
- */
-function detectSourceEgress(text, options = {}) {
-    if (typeof text !== 'string' || !text)
-        return { found: false, blocks: 0, languages: [] };
-    const minLines = Math.max(1, Number(options.minLines ?? exports.DEFAULT_SOURCE_EGRESS_MIN_LINES));
-    const languages = [];
-    let blocks = 0;
-    const fenced = /```([a-zA-Z0-9_+#-]+)[ \t]*\n([\s\S]*?)```/g;
-    let match;
-    while ((match = fenced.exec(text)) !== null) {
-        const language = match[1].toLowerCase();
-        if (!SOURCE_LANGUAGES.has(language))
-            continue;
-        const body = match[2].replace(/\n$/, '');
-        if (body.split('\n').length < minLines)
-            continue;
-        blocks += 1;
-        languages.push(language);
-    }
-    return { found: blocks > 0, blocks, languages };
-}
-/**
- * Rule 8: source may not reach the cloud. A request bound for the local worker is not egress at all,
- * so the policy never applies to it — which is the entire reason the lead tier runs locally.
- */
-function evaluateSourceEgress(action, detection, destination) {
-    if (destination === 'local') {
-        return {
-            kind: 'allow',
-            reason: 'the request is bound for the local worker, so nothing is leaving the machine',
-        };
-    }
-    if (!detection.found) {
-        return { kind: 'allow', reason: 'no fenced source block was found in the outbound payload' };
-    }
-    const summary = `${detection.blocks} fenced source block(s) in the outbound payload ` +
-        `(${detection.languages.join(', ')})`;
-    if (action === 'allow') {
-        return { kind: 'allow', reason: `sourceEgress is allow, so ${summary} will be transmitted` };
-    }
-    if (action === 'ask') {
-        return { kind: 'ask', reason: `${summary} needs an operator decision (sourceEgress is ask)` };
-    }
-    return {
-        kind: 'deny',
-        reason: `rule 8 refuses this request: ${summary}. Set sourceEgress: 'ask' to approve case by case, or ` +
-            `'allow' to send source to the cloud deliberately.`,
-    };
-}
-/** Bounded, newest-wins. Built from observed requests, because the host does not say which agent is which. */
-exports.AGENT_ROLE_LIMIT = 200;
-const agentRoles = new Map();
-/**
- * Remember which role an agent last made a request as.
- *
- * This is a correlation, not lineage: the plugin sees an `agent` on `agent/request` and an `agent` on
- * `tools/pre-execute`, and it assumes the same id means the same agent. That assumption is recorded
- * rather than trusted — an unobserved id resolves to 'unknown' and the observation says so, so the
- * record degrades honestly instead of inventing an attribution.
- */
-function rememberAgentRole(agentId, role) {
-    const id = String(agentId ?? '').trim();
-    if (!id)
-        return;
-    if (agentRoles.has(id))
-        agentRoles.delete(id);
-    agentRoles.set(id, role);
-    while (agentRoles.size > exports.AGENT_ROLE_LIMIT) {
-        const oldest = agentRoles.keys().next().value;
-        if (typeof oldest === 'string')
-            agentRoles.delete(oldest);
-    }
-}
-function roleForAgent(agentId) {
-    const id = String(agentId ?? '').trim();
-    if (!id)
-        return 'unknown';
-    return agentRoles.get(id) ?? 'unknown';
-}
-/** The map is module state, so tests need a way to clear it. */
-function resetAgentRoles() {
-    agentRoles.clear();
-}
-/**
- * Should this tool call be recorded as a source read?
- *
- * Observation, not enforcement. The architect is allowed to read source today — the guard gates only
- * files a worker wrote — and that is not a claim this project wants to keep making on faith. Recording
- * every source read is what will say whether the architect's access is ever used, and therefore whether
- * it can be closed.
- *
- * The tool check matters as much as the path check: without it, the architect's own refused writes to
- * source would be counted as reads, and the evidence this exists to gather would be wrong.
- */
-function describeSourceRead(input) {
-    const role = input?.role ?? 'unknown';
-    const tool = String(input?.tool ?? '').trim().toLowerCase();
-    if (!guard_1.READ_TOOLS.has(tool)) {
-        return { track: false, role, reason: `'${tool || 'unknown tool'}' is not a read tool` };
-    }
-    const target = String(input?.target ?? '').trim();
-    if (!target)
-        return { track: false, role, reason: 'no target to attribute' };
-    const extension = path.extname(target).toLowerCase();
-    if (!paths_1.CODE_EXTENSIONS.has(extension)) {
-        return { track: false, role, target, extension, reason: 'not a source file' };
-    }
-    return {
-        track: true,
-        role,
-        target,
-        extension,
-        reason: `source read attributed to ${role}`,
-    };
-}
 const APPROVAL_OUTCOMES = new Set(['allowed-once', 'rejected', 'cancelled', 'unavailable']);
 /**
  * Route an `ask` guard decision through the real approval seam.
@@ -1221,111 +1088,8 @@ async function requestApprovalForVerification(ctx, exec, command) {
         return false;
     }
 }
-/**
- * Which role does this request belong to?
- *
- * The hook used to treat every agent as the architect: it repinned the provider, appended the
- * architect's system instruction, and injected `delegate_worker`. That is correct for the architect
- * and wrong for everything else — a lead configured to run locally would be redirected to the cloud
- * and told it was the architect, silently undoing the preset.
- *
- * The discriminator is an explicit operator allowlist. Inferring the role from "the resolved provider
- * is not the architect's" would be worse than useless: a profile that named its provider anything else
- * would stop being pinned, and the failure would be silent and in the direction of the cloud.
- */
-/**
- * Which providers are the lead tier? `leadTier` derives the list from the LEAD profile so the provider
- * id is declared in one place; an explicit `leadProviders` list always wins.
- */
-function resolveLeadProviders(options = {}) {
-    if (Array.isArray(options.leadProviders) && options.leadProviders.length > 0) {
-        return options.leadProviders;
-    }
-    return options.leadTier ? [profiles_1.PROFILES.LEAD.provider] : [];
-}
-function resolveAgentRole(input) {
-    const host = String(input.hostProvider ?? '')
-        .trim()
-        .toLowerCase();
-    const declared = (input.leadProviders ?? [])
-        .map((p) => String(p ?? '').trim().toLowerCase())
-        .filter(Boolean);
-    if (!host) {
-        return {
-            role: 'architect',
-            reason: 'the host resolved no provider, so the architect default applies',
-        };
-    }
-    if (declared.includes(host)) {
-        return {
-            role: 'lead',
-            reason: `provider '${host}' is declared as a non-architect (lead) provider`,
-        };
-    }
-    return { role: 'architect', reason: `provider '${host}' is not declared as a lead provider` };
-}
-/**
- * The architect's request treatment: pin the provider, uncap the window, supply the tool and the role
- * instruction. Extracted from the hook so the behaviour is testable without a host.
- *
- * Deliberately unchanged: the instruction is only injected into a `system` string or a `messages`
- * array. A request carrying neither is left without it, because inventing a field the host may not
- * read would be a silent no-op dressed up as a fix.
- */
-function applyArchitectConfig(requestConfig, options = {}) {
-    // A tripped DLP under dlpAction 'local' pins this request to the local provider instead of the cloud.
-    const mutatedConfig = {
-        ...(requestConfig || {}),
-        provider: options.rerouteLocal ? options.localProvider : options.cloudProvider,
-        model: options.rerouteLocal ? options.localModel : options.cloudModel,
-    };
-    // Uncap the context window for the cloud architect.
-    delete mutatedConfig.contextWindow;
-    delete mutatedConfig.maxTokens;
-    delete mutatedConfig.max_tokens;
-    delete mutatedConfig.max_completion_tokens;
-    delete mutatedConfig.apiKey;
-    // Inject the `delegate_worker` tool definition for the architect thread.
-    if (Array.isArray(mutatedConfig.tools)) {
-        const hasWorker = mutatedConfig.tools.some((t) => (t?.function?.name || t?.name) === 'delegate_worker');
-        if (!hasWorker && options.workerTool)
-            mutatedConfig.tools.push(options.workerTool);
-    }
-    else if (options.workerTool) {
-        mutatedConfig.tools = [options.workerTool];
-    }
-    if (options.architectInstruction) {
-        if (typeof mutatedConfig.system === 'string') {
-            if (!mutatedConfig.system.includes('delegate_worker')) {
-                mutatedConfig.system += '\n\n' + options.architectInstruction;
-            }
-        }
-        else if (Array.isArray(mutatedConfig.messages)) {
-            const sysMsg = mutatedConfig.messages.find((m) => m.role === 'system');
-            if (sysMsg) {
-                if (typeof sysMsg.content === 'string' && !sysMsg.content.includes('delegate_worker')) {
-                    sysMsg.content += '\n\n' + options.architectInstruction;
-                }
-            }
-            else {
-                mutatedConfig.messages.unshift({
-                    role: 'system',
-                    content: options.architectInstruction,
-                });
-            }
-        }
-    }
-    return mutatedConfig;
-}
-/**
- * Apply the role. A lead request is returned unchanged: the plugin's job is to enforce boundaries, not
- * to reinvent a preset it did not write.
- */
-function applyAgentRole(requestConfig, role, architectOptions = {}) {
-    if (role.role === 'lead')
-        return { ...(requestConfig || {}) };
-    return applyArchitectConfig(requestConfig, architectOptions);
-}
+// Role resolution, the architect config and the lead tier moved to ./roles.ts and are imported
+// above. They are re-exported beside the other module re-exports because callers depend on them.
 function apply(ctx, options = {}) {
     // Restore what was delegated before this process started. Without this, a restart silently widened
     // what the architect may read back — the gap a live run found, and the reason this is not merely
@@ -1513,10 +1277,10 @@ function apply(ctx, options = {}) {
                 // Observation, not enforcement: the architect is allowed to read source, and this records it.
                 // The guard above answers "may this happen"; this answers "did it, and who by" — which is what
                 // will later say whether that access is used at all, and so whether it can be taken away.
-                const observed = describeSourceRead({
+                const observed = (0, roles_1.describeSourceRead)({
                     tool: exec?.name,
                     target: (0, guard_1.extractWriteTarget)(exec?.arguments),
-                    role: roleForAgent(exec?.agent?.id),
+                    role: (0, roles_1.roleForAgent)(exec?.agent?.id),
                 });
                 if (observed.track) {
                     (0, logging_1.trace)('SOURCE_READ', {
@@ -1622,14 +1386,14 @@ function apply(ctx, options = {}) {
         // right for the architect and wrong for everything else: a lead configured to run locally would
         // be repinned to the cloud and told it was the architect. The DLP gate above runs either way, so
         // opting a provider out of the architect role does not opt it out of the firewall.
-        const role = resolveAgentRole({
+        const role = (0, roles_1.resolveAgentRole)({
             hostProvider: resolvedConfig?.provider,
-            leadProviders: resolveLeadProviders(options),
+            leadProviders: (0, roles_1.resolveLeadProviders)(options),
         });
         // Correlate the role with the agent, so a later tool call can be attributed. Best effort by
         // construction: the host does not expose lineage, so this is the plugin's own inference.
-        rememberAgentRole(agent?.id, role.role);
-        const mutatedConfig = applyAgentRole(resolvedConfig || {}, role, {
+        (0, roles_1.rememberAgentRole)(agent?.id, role.role);
+        const mutatedConfig = (0, roles_1.applyAgentRole)(resolvedConfig || {}, role, {
             cloudProvider: config.cloudProvider,
             cloudModel: config.cloudModel,
             localProvider: config.localProvider,
@@ -1646,10 +1410,10 @@ function apply(ctx, options = {}) {
                 String(config.localProvider || '').toLowerCase()
             ? 'local'
             : 'cloud';
-        const egressDetection = detectSourceEgress(dlpSubject, {
+        const egressDetection = (0, roles_1.detectSourceEgress)(dlpSubject, {
             minLines: options?.sourceEgressMinLines,
         });
-        const egress = evaluateSourceEgress(options?.sourceEgress ?? 'deny', egressDetection, destination);
+        const egress = (0, roles_1.evaluateSourceEgress)(options?.sourceEgress ?? 'deny', egressDetection, destination);
         if (egress.kind !== 'allow') {
             let permitted = false;
             if (egress.kind === 'ask') {
@@ -1779,16 +1543,16 @@ const pluginExport = {
     contractFileHashes: contracts_1.contractFileHashes,
     contractViolations: contracts_1.contractViolations,
     resolveDelegateStatus,
-    resolveLeadProviders,
+    resolveLeadProviders: roles_1.resolveLeadProviders,
     evaluateDelegatedReadPolicy: guard_1.evaluateDelegatedReadPolicy,
-    rememberAgentRole,
-    roleForAgent,
-    resetAgentRoles,
-    describeSourceRead,
-    AGENT_ROLE_LIMIT: exports.AGENT_ROLE_LIMIT,
-    detectSourceEgress,
-    evaluateSourceEgress,
-    DEFAULT_SOURCE_EGRESS_MIN_LINES: exports.DEFAULT_SOURCE_EGRESS_MIN_LINES,
+    rememberAgentRole: roles_1.rememberAgentRole,
+    roleForAgent: roles_1.roleForAgent,
+    resetAgentRoles: roles_1.resetAgentRoles,
+    describeSourceRead: roles_1.describeSourceRead,
+    AGENT_ROLE_LIMIT: roles_1.AGENT_ROLE_LIMIT,
+    detectSourceEgress: roles_1.detectSourceEgress,
+    evaluateSourceEgress: roles_1.evaluateSourceEgress,
+    DEFAULT_SOURCE_EGRESS_MIN_LINES: roles_1.DEFAULT_SOURCE_EGRESS_MIN_LINES,
     resolveDelegatedRegistryPath: contracts_1.resolveDelegatedRegistryPath,
     parseDelegatedRegistry: contracts_1.parseDelegatedRegistry,
     mergeDelegatedRecords: contracts_1.mergeDelegatedRecords,
@@ -1796,9 +1560,9 @@ const pluginExport = {
     saveDelegatedRegistry: contracts_1.saveDelegatedRegistry,
     loadDelegatedRegistry: contracts_1.loadDelegatedRegistry,
     rememberDelegated: contracts_1.rememberDelegated,
-    resolveAgentRole,
-    applyArchitectConfig,
-    applyAgentRole,
+    resolveAgentRole: roles_1.resolveAgentRole,
+    applyArchitectConfig: roles_1.applyArchitectConfig,
+    applyAgentRole: roles_1.applyAgentRole,
     DELEGATE_WORKER_SCHEMA: exports.DELEGATE_WORKER_SCHEMA,
     DELEGATE_WORKER_OPENAI_SCHEMA: exports.DELEGATE_WORKER_OPENAI_SCHEMA,
     PROFILES: profiles_1.PROFILES,

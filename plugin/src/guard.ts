@@ -289,6 +289,11 @@ export function evaluateDelegatedReadPolicy(policy: DelegateReadPolicy = 'ask'):
   }
 }
 
+/**
+ * Decide whether a tool call would author source code from the cloud context.
+ * Pure and exported so it can be unit-tested without a running server.
+ * Returns null when the call has nothing to do with code authoring.
+ */
 export function evaluateCodeWriteGuard(
   exec: any,
   config: {

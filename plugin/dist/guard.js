@@ -295,6 +295,11 @@ function evaluateDelegatedReadPolicy(policy = 'ask') {
         reason: 'delegateReadPolicy is ask (the default), so this read needs an operator decision.',
     };
 }
+/**
+ * Decide whether a tool call would author source code from the cloud context.
+ * Pure and exported so it can be unit-tested without a running server.
+ * Returns null when the call has nothing to do with code authoring.
+ */
 function evaluateCodeWriteGuard(exec, config = {}) {
     const name = String(exec?.name || '');
     const args = exec?.arguments;

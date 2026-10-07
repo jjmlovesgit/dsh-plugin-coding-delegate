@@ -46,6 +46,11 @@ export declare function evaluateDelegatedReadPolicy(policy?: DelegateReadPolicy)
     kind: 'allow' | 'ask' | 'deny';
     reason: string;
 };
+/**
+ * Decide whether a tool call would author source code from the cloud context.
+ * Pure and exported so it can be unit-tested without a running server.
+ * Returns null when the call has nothing to do with code authoring.
+ */
 export declare function evaluateCodeWriteGuard(exec: any, config?: {
     askPaths?: string[];
     /** Injectable reader, so the script scan is testable without touching disk. */

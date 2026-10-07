@@ -5,12 +5,14 @@ import { extractAndEmitFiles } from './emission';
 import { VerificationPolicy, parseTestOutput, runSandboxVerification } from './verification';
 import { ContextRequest, resolveContextFiles } from './context';
 import { DelegateReadPolicy, GuardVerdict, evaluateDelegatedReadPolicy } from './guard';
+import { SourceEgressPolicy, applyAgentRole, applyArchitectConfig, describeSourceRead, detectSourceEgress, evaluateSourceEgress, rememberAgentRole, resetAgentRoles, resolveAgentRole, resolveLeadProviders, roleForAgent } from './roles';
 import { contractFileHashes, contractViolations, loadDelegatedRegistry, mergeDelegatedRecords, parseDelegatedRegistry, pruneDelegatedRecords, rememberDelegated, resolveContractFiles, resolveDelegatedRegistryPath, saveDelegatedRegistry, sha256File } from './contracts';
 export { PROFILES, ProfileConfig, SavingsTracker, RouteType, StepUsage };
 export { resolveDataDir, trace } from './logging';
 export { isPathWithin } from './paths';
 export { evaluateEmissionPath, extractAndEmitFiles } from './emission';
 export { DELETE_PRIMITIVES, evaluateCodeWriteGuard, evaluateDelegatedReadPolicy, hasCommandDeleteSignal, hasCommandWriteSignal, } from './guard';
+export { AGENT_ROLE_LIMIT, DEFAULT_SOURCE_EGRESS_MIN_LINES, applyAgentRole, applyArchitectConfig, describeSourceRead, detectSourceEgress, evaluateSourceEgress, rememberAgentRole, resetAgentRoles, resolveAgentRole, resolveLeadProviders, roleForAgent, } from './roles';
 export { ContextInjection, ContextRequest, ContextResolution, DEFAULT_CONTEXT_MAX_BYTES, resolveContextFiles, } from './context';
 export { contractFileHashes, contractViolations, loadDelegatedRegistry, mergeDelegatedRecords, parseDelegatedRegistry, pruneDelegatedRecords, rememberDelegated, resolveContractFiles, resolveDelegatedRegistryPath, saveDelegatedRegistry, sha256File, } from './contracts';
 export { DEFAULT_VERIFICATION_POLICY, commandProgram, describeFailures, evaluateVerificationPolicy, parseTestOutput, redactVerificationOutput, runInProcessFallback, runSandboxVerification, } from './verification';
@@ -443,76 +445,10 @@ export declare class LocalRouter {
 
 }
 
-/**
- * Decide whether a tool call would author source code from the cloud context.
- * Pure and exported so it can be unit-tested without a running server.
- * Returns null when the call has nothing to do with code authoring.
- */
-export type SourceEgressPolicy = 'deny' | 'ask' | 'allow';
-/** Blocks shorter than this are treated as quotations rather than as code being handed over. */
-export declare const DEFAULT_SOURCE_EGRESS_MIN_LINES = 3;
-export interface SourceEgressDetection {
-    found: boolean;
-    blocks: number;
-    languages: string[];
-}
-/**
- * Look for source being handed to a cloud provider.
- *
- * Only fenced blocks with a source language tag and at least `minLines` lines count. Prose about code
- * does not, and neither does an untagged block — that is a real false negative and the oracle asserts
- * it, so this is never mistaken for a proof that source cannot leave. Like the rest of the guard it is
- * a deterrent, pointed at the one route the other gates do not cover: source sitting in the outbound
- * payload because it was typed into a cloud-bound conversation.
- */
-export declare function detectSourceEgress(text: string, options?: {
-    minLines?: number;
-}): SourceEgressDetection;
-/**
- * Rule 8: source may not reach the cloud. A request bound for the local worker is not egress at all,
- * so the policy never applies to it — which is the entire reason the lead tier runs locally.
- */
-export declare function evaluateSourceEgress(action: SourceEgressPolicy, detection: SourceEgressDetection, destination: 'cloud' | 'local'): {
-    kind: 'allow' | 'ask' | 'deny';
-    reason: string;
-};
-/** Bounded, newest-wins. Built from observed requests, because the host does not say which agent is which. */
-export declare const AGENT_ROLE_LIMIT = 200;
-/**
- * Remember which role an agent last made a request as.
- *
- * This is a correlation, not lineage: the plugin sees an `agent` on `agent/request` and an `agent` on
- * `tools/pre-execute`, and it assumes the same id means the same agent. That assumption is recorded
- * rather than trusted — an unobserved id resolves to 'unknown' and the observation says so, so the
- * record degrades honestly instead of inventing an attribution.
- */
-export declare function rememberAgentRole(agentId: string | undefined, role: 'architect' | 'lead'): void;
-export declare function roleForAgent(agentId: string | undefined): 'architect' | 'lead' | 'unknown';
-/** The map is module state, so tests need a way to clear it. */
-export declare function resetAgentRoles(): void;
-export interface SourceReadObservation {
-    track: boolean;
-    role: 'architect' | 'lead' | 'unknown';
-    target?: string;
-    extension?: string;
-    reason: string;
-}
-/**
- * Should this tool call be recorded as a source read?
- *
- * Observation, not enforcement. The architect is allowed to read source today — the guard gates only
- * files a worker wrote — and that is not a claim this project wants to keep making on faith. Recording
- * every source read is what will say whether the architect's access is ever used, and therefore whether
- * it can be closed.
- *
- * The tool check matters as much as the path check: without it, the architect's own refused writes to
- * source would be counted as reads, and the evidence this exists to gather would be wrong.
- */
-export declare function describeSourceRead(input: {
-    tool?: string;
-    target?: string;
-    role?: 'architect' | 'lead' | 'unknown';
-}): SourceReadObservation;
+
+
+
+
 /** Closed approval vocabulary; only 'allowed-once' is a grant. */
 export type ApprovalOutcome = 'allowed-once' | 'rejected' | 'cancelled' | 'unavailable';
 /**
@@ -533,54 +469,6 @@ export declare function resolveVerificationPolicy(options?: PluginConfig): Verif
  * Fails closed on every error path.
  */
 export declare function requestApprovalForVerification(ctx: any, exec: any, command: string): Promise<boolean>;
-/**
- * Which role does this request belong to?
- *
- * The hook used to treat every agent as the architect: it repinned the provider, appended the
- * architect's system instruction, and injected `delegate_worker`. That is correct for the architect
- * and wrong for everything else — a lead configured to run locally would be redirected to the cloud
- * and told it was the architect, silently undoing the preset.
- *
- * The discriminator is an explicit operator allowlist. Inferring the role from "the resolved provider
- * is not the architect's" would be worse than useless: a profile that named its provider anything else
- * would stop being pinned, and the failure would be silent and in the direction of the cloud.
- */
-/**
- * Which providers are the lead tier? `leadTier` derives the list from the LEAD profile so the provider
- * id is declared in one place; an explicit `leadProviders` list always wins.
- */
-export declare function resolveLeadProviders(options?: PluginConfig): string[];
-export declare function resolveAgentRole(input: {
-    hostProvider?: string;
-    leadProviders?: string[];
-}): {
-    role: 'architect' | 'lead';
-    reason: string;
-};
-/**
- * The architect's request treatment: pin the provider, uncap the window, supply the tool and the role
- * instruction. Extracted from the hook so the behaviour is testable without a host.
- *
- * Deliberately unchanged: the instruction is only injected into a `system` string or a `messages`
- * array. A request carrying neither is left without it, because inventing a field the host may not
- * read would be a silent no-op dressed up as a fix.
- */
-export declare function applyArchitectConfig(requestConfig: Record<string, any>, options?: {
-    cloudProvider?: string;
-    cloudModel?: string;
-    localProvider?: string;
-    localModel?: string;
-    rerouteLocal?: boolean;
-    architectInstruction?: string;
-    workerTool?: any;
-}): Record<string, any>;
-/**
- * Apply the role. A lead request is returned unchanged: the plugin's job is to enforce boundaries, not
- * to reinvent a preset it did not write.
- */
-export declare function applyAgentRole(requestConfig: Record<string, any>, role: {
-    role: 'architect' | 'lead';
-}, architectOptions?: Parameters<typeof applyArchitectConfig>[1]): Record<string, any>;
 export declare function apply(ctx: Context, options?: PluginConfig): void;
 declare const pluginExport: {
     name: string;
