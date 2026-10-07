@@ -33,8 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.AGENT_ROLE_LIMIT = exports.DEFAULT_SOURCE_EGRESS_MIN_LINES = exports.DELETE_PRIMITIVES = exports.LocalRouter = exports.DEFAULT_CONTEXT_MAX_BYTES = exports.MIN_SEARCH_CHARS = exports.DEFAULT_LOCAL_ENDPOINT = exports.DEFAULT_VERIFICATION_POLICY = exports.DELEGATE_WORKER_SCHEMA = exports.DELEGATE_WORKER_OPENAI_SCHEMA = exports.name = exports.using = exports.inject = exports.SavingsTracker = exports.PROFILES = void 0;
-exports.resolveDataDir = resolveDataDir;
+exports.AGENT_ROLE_LIMIT = exports.DEFAULT_SOURCE_EGRESS_MIN_LINES = exports.DELETE_PRIMITIVES = exports.LocalRouter = exports.DEFAULT_CONTEXT_MAX_BYTES = exports.MIN_SEARCH_CHARS = exports.DEFAULT_LOCAL_ENDPOINT = exports.DEFAULT_VERIFICATION_POLICY = exports.DELEGATE_WORKER_SCHEMA = exports.DELEGATE_WORKER_OPENAI_SCHEMA = exports.name = exports.using = exports.inject = exports.trace = exports.resolveDataDir = exports.SavingsTracker = exports.PROFILES = void 0;
 exports.scanDLP = scanDLP;
 exports.isPathWithin = isPathWithin;
 exports.evaluateEmissionPath = evaluateEmissionPath;
@@ -84,7 +83,6 @@ exports.applyArchitectConfig = applyArchitectConfig;
 exports.applyAgentRole = applyAgentRole;
 exports.apply = apply;
 const fs = __importStar(require("fs"));
-const os = __importStar(require("os"));
 const path = __importStar(require("path"));
 const child_process = __importStar(require("child_process"));
 const crypto = __importStar(require("crypto"));
@@ -93,6 +91,10 @@ Object.defineProperty(exports, "SavingsTracker", { enumerable: true, get: functi
 const profiles_1 = require("./profiles");
 Object.defineProperty(exports, "PROFILES", { enumerable: true, get: function () { return profiles_1.PROFILES; } });
 const local_classifier_1 = require("./local-classifier");
+const logging_1 = require("./logging");
+var logging_2 = require("./logging");
+Object.defineProperty(exports, "resolveDataDir", { enumerable: true, get: function () { return logging_2.resolveDataDir; } });
+Object.defineProperty(exports, "trace", { enumerable: true, get: function () { return logging_2.trace; } });
 exports.inject = ['tools'];
 exports.using = ['tools'];
 /**
@@ -130,32 +132,8 @@ function resolveWorkspaceDir(ctx) {
     return { dir: process.cwd(), source: 'process.cwd() FALLBACK (not a Session workspace)' };
 }
 exports.name = 'dsh-plugin-coding-delegate';
-/**
- * All plugin state (debug log, savings ledger) lives under one derived directory.
- * It must never be a hard-coded absolute path: the previous build wrote its log
- * into the plugin author's own project directory on every machine, which was
- * correct on exactly one of them.
- * Precedence: explicit env override, then DSH_HOME, then ~/.dsh.
- */
-function resolveDataDir() {
-    const explicit = process.env.DSH_LOCAL_ROUTER_DATA_DIR;
-    if (explicit && explicit.trim())
-        return explicit.trim();
-    const dshHome = process.env.DSH_HOME;
-    if (dshHome && dshHome.trim())
-        return path.join(dshHome.trim(), 'local-router');
-    return path.join(os.homedir(), '.dsh', 'local-router');
-}
-const LOG_FILE = path.join(resolveDataDir(), 'router-debug.log');
-function trace(event, data) {
-    const timestamp = new Date().toISOString();
-    const entry = `\n[${timestamp}] === ${event} ===\n${typeof data === 'string' ? data : JSON.stringify(data, null, 2)}\n`;
-    try {
-        fs.mkdirSync(path.dirname(LOG_FILE), { recursive: true });
-        fs.appendFileSync(LOG_FILE, entry, 'utf8');
-    }
-    catch (err) { }
-}
+// resolveDataDir and trace moved to ./logging.ts and are imported above. The re-export beside the other
+// module re-exports keeps `resolveDataDir` on the public surface, where callers already depend on it.
 exports.DELEGATE_WORKER_OPENAI_SCHEMA = {
     type: 'function',
     function: {
@@ -791,7 +769,7 @@ function evaluateVerificationPolicy(command, policy = exports.DEFAULT_VERIFICATI
  * as an ordinary child process for everyone, and the fallback is not needed at all.
  */
 function captureCommandOutput(cmd, workspaceDir, timeoutMs) {
-    const dir = resolveDataDir();
+    const dir = (0, logging_1.resolveDataDir)();
     const unique = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const outPath = path.join(dir, `verify-${unique}.stdout`);
     const errPath = path.join(dir, `verify-${unique}.stderr`);
@@ -1317,7 +1295,7 @@ async function delegateWorker(params = {}, tracker) {
             if (permitted) {
                 testResults = runSandboxVerification(params.runVerification, workspaceBase, {
                     redact: params.redactVerification ?? process.env.DSH_LOCAL_ROUTER_RAW_VERIFICATION !== '1',
-                    rawLogPath: path.join(resolveDataDir(), 'last-verification.log'),
+                    rawLogPath: path.join((0, logging_1.resolveDataDir)(), 'last-verification.log'),
                     allowInProcessFallback: policy.allowInProcessFallback,
                 });
             }
@@ -1620,7 +1598,7 @@ class LocalRouter {
             tier: decision.route === 'ARCHITECT_CLOUD' ? 'Cloud Tier (Cloud Architect)' : 'Local Tier (Local Worker)',
             estimatedTokens: estimateTokenCount(fullText),
         };
-        trace('ROUTER_DECISION', {
+        (0, logging_1.trace)('ROUTER_DECISION', {
             prompt: fullText.slice(0, 100).replace(/\n/g, ' '),
             tokens: estimateTokenCount(fullText),
             gate: decision.gate,
@@ -1699,7 +1677,7 @@ class LocalRouter {
                 tier: 'Cloud Tier (DeepSeek Cloud Fallback)',
                 estimatedTokens: prevMetadata?.estimatedTokens || 0,
             };
-            trace('ROUTER_FAILOVER', {
+            (0, logging_1.trace)('ROUTER_FAILOVER', {
                 errorMessage,
                 cloudProvider: this.config.cloudProvider,
                 cloudModel: this.config.cloudModel,
@@ -1854,7 +1832,7 @@ const READ_TOOLS = new Set(['read', 'read_file', 'fs_read', 'view', 'view_file',
 const delegatedPaths = new Set();
 const DELEGATED_PATH_LIMIT = 500;
 function resolveDelegatedRegistryPath() {
-    return path.join(resolveDataDir(), 'delegated-registry.json');
+    return path.join((0, logging_1.resolveDataDir)(), 'delegated-registry.json');
 }
 /**
  * Parse a registry file. Anything unreadable, malformed, or entry-shaped-but-wrong yields no records
@@ -2659,8 +2637,8 @@ function apply(ctx, options = {}) {
     console.log('[LOCAL_ROUTER_DEBUG] ctx.tools available:', Boolean(ctx.tools));
     const router = new LocalRouter(options);
     const config = router.getConfig();
-    const tracker = new savings_tracker_1.SavingsTracker(resolveDataDir());
-    trace('PLUGIN_INIT_ASYMMETRIC_ORCHESTRATOR', { config });
+    const tracker = new savings_tracker_1.SavingsTracker((0, logging_1.resolveDataDir)());
+    (0, logging_1.trace)('PLUGIN_INIT_ASYMMETRIC_ORCHESTRATOR', { config });
     // Register `delegate_worker` strictly adhering to `@deepseek-ai/dsh-tools` and DeepSeek JSON Schema contract
     if (ctx.tools && typeof ctx.tools.register === 'function') {
         try {
@@ -2830,7 +2808,7 @@ function apply(ctx, options = {}) {
                     role: roleForAgent(exec?.agent?.id),
                 });
                 if (observed.track) {
-                    trace('SOURCE_READ', {
+                    (0, logging_1.trace)('SOURCE_READ', {
                         role: observed.role,
                         agent: String(exec?.agent?.id ?? '').slice(0, 8) || 'unknown',
                         tool: String(exec?.name ?? ''),
@@ -2858,7 +2836,7 @@ function apply(ctx, options = {}) {
         if (turn !== undefined && prompt) {
             pendingTurnPrompts.set(turn, prompt);
             accumulateCorpus(corpusKeyFor(payload), prompt);
-            trace('HOOK_CAPTURE: PROMPT_CAPTURED (agent/pre-step)', {
+            (0, logging_1.trace)('HOOK_CAPTURE: PROMPT_CAPTURED (agent/pre-step)', {
                 turn,
                 prompt: prompt.slice(0, 100),
             });
@@ -2912,7 +2890,7 @@ function apply(ctx, options = {}) {
         const shouldBlock = dlpTripped && !rerouteLocal;
         if (dlpTripped) {
             const violations = dlpResult.violations.join(', ');
-            trace('DLP_FIREWALL_TRIPPED', {
+            (0, logging_1.trace)('DLP_FIREWALL_TRIPPED', {
                 violations,
                 action: rerouteLocal ? 'reroute-local' : 'block',
                 confidence: dlpResult.highConfidence ? 'high' : 'entropy-only',
@@ -2983,7 +2961,7 @@ function apply(ctx, options = {}) {
                 }
             }
             if (!permitted) {
-                trace('SOURCE_EGRESS_BLOCKED', {
+                (0, logging_1.trace)('SOURCE_EGRESS_BLOCKED', {
                     blocks: egressDetection.blocks,
                     languages: egressDetection.languages,
                     destination,
@@ -2994,7 +2972,7 @@ function apply(ctx, options = {}) {
                     `turn keeps it closed until the session is restarted.`);
             }
         }
-        trace(role.role === 'lead'
+        (0, logging_1.trace)(role.role === 'lead'
             ? 'HOOK_EXIT: LEAD_LEFT_AS_CONFIGURED (agent/request)'
             : rerouteLocal
                 ? 'HOOK_EXIT: DLP_PINNED_LOCAL (agent/request)'

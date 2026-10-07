@@ -2,6 +2,7 @@ import { Context } from 'cordis';
 import { SavingsTracker, RouteType, StepUsage } from './savings-tracker';
 import { PROFILES, ProfileConfig } from './profiles';
 export { PROFILES, ProfileConfig, SavingsTracker, RouteType, StepUsage };
+export { resolveDataDir, trace } from './logging';
 export declare const inject: string[];
 export declare const using: readonly ["tools"];
 export interface PluginConfig {
@@ -166,14 +167,6 @@ export interface LLMSession {
     [key: string]: any;
 }
 export declare const name = "dsh-plugin-coding-delegate";
-/**
- * All plugin state (debug log, savings ledger) lives under one derived directory.
- * It must never be a hard-coded absolute path: the previous build wrote its log
- * into the plugin author's own project directory on every machine, which was
- * correct on exactly one of them.
- * Precedence: explicit env override, then DSH_HOME, then ~/.dsh.
- */
-export declare function resolveDataDir(): string;
 export declare const DELEGATE_WORKER_OPENAI_SCHEMA: {
     type: string;
     function: {
