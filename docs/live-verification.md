@@ -63,6 +63,40 @@ DSH's own status line reported **213M tokens over 575 steps, 99.8% cache hit**. 
   uncached remainder, arrived at from outside the plugin entirely.
 - **16 turns.** As above.
 
+## The A2 loop, verified live after the next restart
+
+`retryContext` shipped in `3d9404a` and, like everything before it, was invisible to the running process
+until a restart. The restart happened, and the loop was then run for real through the registered tool path
+— not against a stub HTTP server, as the oracle does, but through DSH's own `delegate_worker`.
+
+It needs a failure that carries a location, so a scratch tree was built outside the repo's build path and
+the loop was run in three calls against one workspace:
+
+| call | what it did | what came back |
+| --- | --- | --- |
+| 1 | created `src/thing.ts` (60 lines) and a `fail.js` printing a TAP failure at `src/thing.ts:30:5` | `SUCCESS`; the `node -e` check over both files passed — which also confirms **verification commands really do execute** on this path |
+| 2 | a delegation with `runVerification: "node fail.js"` | `VERIFICATION_FAILED`, with `failures[0].location = "src/thing.ts:30:5"` |
+| 3 | a delegation declaring **no `contextFiles` at all** | `contextInjected` = `src/thing.ts` **lines 20–40**, 21 lines, 230 bytes, with a `sha256` |
+
+Three things follow, and only the first was ever in doubt:
+
+1. **The stored location reached the next attempt's injection.** Nothing was declared, so the injection
+   cannot have come from anywhere else.
+2. **The window is the reported line ± 10.** Line 30 in, 20–40 out — `RETRY_CONTEXT_WINDOW_LINES` doing
+   exactly what it says it does.
+3. **The architect was handed metadata and not one byte of code.** The verdict carries `path`,
+   `relativeName`, `lineRange`, `lines`, `bytes` and `sha256`; the contents went to the worker. That is
+   this plugin's whole thesis, demonstrated on its own failure path.
+
+A fourth call, declaring nothing again, returned **no `contextInjected` key at all** — the locations were
+consumed by the one attempt that used them, so an old failure cannot quietly influence every later unit in
+a session. The scratch tree was deleted afterwards and the working tree was clean.
+
+Because this run touches `tools.register`, the registered tool path, the approval seam, the verification
+spawn, emission under unit scope and `session/event` in one go, it is also the closest thing to a host
+integration test this project has. [`dsh-0.2-upgrade.md`](dsh-0.2-upgrade.md) uses it as the post-update
+check for exactly that reason.
+
 ## What remains unverified live
 
 - **The compaction counters.** No compaction has occurred in any observed session, so `compaction/summary`,
