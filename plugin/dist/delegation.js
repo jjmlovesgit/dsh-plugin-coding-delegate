@@ -73,7 +73,7 @@ exports.DELEGATE_WORKER_OPENAI_SCHEMA = {
                 targetFiles: {
                     type: 'array',
                     items: { type: 'string' },
-                    description: 'Optional file paths to target or modify',
+                    description: 'The files this unit may write. ENFORCED: an emission to any path not listed here is refused and reported, because a unit that writes outside what it declared is how two units come to disagree about the same code. Declare every file the unit creates or changes, including a directory if the unit chooses the filenames within it. Omit the field to leave the unit unrestricted.',
                 },
                 runVerification: {
                     type: 'string',
@@ -396,7 +396,7 @@ async function delegateWorker(params = {}, tracker) {
                 };
             }
         }
-        const emission = (0, emission_1.extractAndEmitFiles)(content, params.targetFiles, workspaceBase, params.emitAllowlist ?? [], contractPaths);
+        const emission = (0, emission_1.extractAndEmitFiles)(content, params.targetFiles, workspaceBase, params.emitAllowlist ?? [], contractPaths, { enforceUnitScope: params.unitScope !== 'off' });
         const filesWritten = emission.filesWritten;
         // Remember what we wrote on the architect's behalf, so reading it back can be gated -- distinguishing
         // files the worker created, which the architect never saw, from files it patched, which it did.

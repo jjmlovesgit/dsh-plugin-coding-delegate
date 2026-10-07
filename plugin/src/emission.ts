@@ -69,6 +69,53 @@ export function evaluateEmissionPath(
   }
 }
 
+/** The declared targets, in the shapes the tool accepts, with blanks dropped. */
+function normaliseTargets(targetFilesHint: string[] | string | undefined): string[] {
+  if (Array.isArray(targetFilesHint)) {
+    return targetFilesHint.map((t) => String(t ?? '')).filter((t) => t.trim().length > 0)
+  }
+  if (typeof targetFilesHint === 'string' && targetFilesHint.trim()) return [targetFilesHint.trim()]
+  return []
+}
+
+/**
+ * The scope decision for one delegated write: is this path one the unit declared?
+ *
+ * `targetFiles` used to be entirely passive — it became prompt text and it chose a fallback path when a
+ * fenced block named no file of its own — so a unit told to change one file could rewrite another, and
+ * nothing refused it, reported it, or noticed. That is the precondition for two units disagreeing, and it
+ * lands strictly before any project-level check could see it.
+ *
+ * A declared directory covers its subtree, because `isPathWithin` counts a path as within itself or
+ * beneath it. That makes `src`, `src/` and an exact file name all usable declarations, with one rule.
+ *
+ * An empty or absent declaration constrains nothing. A unit that declared no targets has not exceeded
+ * them, and refusing everything for an empty list would break every caller that never set the field.
+ */
+export function evaluateUnitScope(
+  resolvedPath: string,
+  declaredTargets: string[] | string | undefined,
+  baseDir: string
+): { allowed: boolean; reason?: string } {
+  const declared = normaliseTargets(declaredTargets)
+  if (declared.length === 0) return { allowed: true }
+
+  const canonical = canonicalisePath(resolvedPath)
+  for (const target of declared) {
+    const resolvedTarget = path.isAbsolute(target) ? target : path.resolve(baseDir, target)
+    if (isPathWithin(canonicalisePath(resolvedTarget), canonical)) return { allowed: true }
+  }
+
+  return {
+    allowed: false,
+    reason:
+      `Refused to write '${resolvedPath}': this unit declared its targets, and that path is not one of ` +
+      `them (${declared.join(', ')}). A unit that writes outside what it declared is how two units come ` +
+      `to disagree. Re-delegate with the file declared if the change is intended, or set unitScope: ` +
+      `'off' to allow writes anywhere in the workspace.`,
+  }
+}
+
 /**
  * Parse the model's final content into file emissions and write them to disk.
  *
@@ -86,9 +133,15 @@ export function extractAndEmitFiles(
   targetFilesHint?: string[] | string,
   baseDir: string = process.cwd(),
   allowedRoots: string[] = [],
-  protectedPaths: string[] = []
+  protectedPaths: string[] = [],
+  options: { enforceUnitScope?: boolean } = {}
 ): { filesWritten: FileEmissionResult[]; errors: string[]; cleanContent: string } {
   if (!content) return { filesWritten: [], errors: [], cleanContent: '' }
+
+  // Declared targets are a boundary unless a caller says otherwise. `false` restores the behaviour before
+  // that boundary existed, which is what `unitScope: 'off'` is for; anything else, including absent, means
+  // enforce.
+  const enforceUnitScope = options.enforceUnitScope !== false
 
   const filesWritten: FileEmissionResult[] = []
   const emissionErrors: string[] = []
@@ -122,6 +175,18 @@ export function extractAndEmitFiles(
       )
       console.warn(`[EMIT_FILE_BLOCKED] contract file: ${resolvedPath}`)
       return
+    }
+
+    // Scope third, and after the contract check deliberately: a contract file has to be refused for being
+    // a contract rather than for being undeclared, or the reason the operator reads would name the wrong
+    // rule.
+    if (enforceUnitScope) {
+      const scope = evaluateUnitScope(resolvedPath, targetFilesHint, baseDir)
+      if (!scope.allowed) {
+        emissionErrors.push(String(scope.reason))
+        console.warn(`[EMIT_FILE_SCOPE_BLOCKED] ${scope.reason}`)
+        return
+      }
     }
 
     if (seenPaths.has(resolvedPath)) return
@@ -208,12 +273,19 @@ export function extractAndEmitFiles(
   // at the first one *anywhere*, so a body that itself contains a fence -- a patch quoting one, or a
   // markdown example inside a source file -- had its tail silently dropped and was then refused as a
   // malformed patch. The comment is kept fence-free so this line stays patchable by a confined agent.
+  // The fallback at the bottom is for output that named no file of its own. It must not run when a file
+  // WAS named and then refused: writing that content at the declared hint instead would put bytes meant
+  // for one path at another, and it would walk straight around a containment, contract or scope refusal
+  // by simply retrying somewhere the check happens to allow.
+  let namedTargetSeen = false
+
   const fileAttrRegex = new RegExp(
     FENCE + '[a-zA-Z0-9_-]*\\s+(?:file|filename)=["\']?([^"\'\\s\\n>]+)["\']?\\s*\\n([\\s\\S]*?)[ \\t]*' + FENCE + '[ \\t]*(?:\\r?\\n|$)',
     'gi'
   )
   let match: RegExpExecArray | null
   while ((match = fileAttrRegex.exec(content)) !== null) {
+    namedTargetSeen = true
     emitFile(match[1], match[2])
   }
 
@@ -222,10 +294,11 @@ export function extractAndEmitFiles(
     'gi'
   )
   while ((match = fileMarkerRegex.exec(content)) !== null) {
+    namedTargetSeen = true
     emitFile(match[1], match[2])
   }
 
-  if (filesWritten.length === 0 && targetFilesHint) {
+  if (!namedTargetSeen && filesWritten.length === 0 && targetFilesHint) {
     const hints = Array.isArray(targetFilesHint)
       ? targetFilesHint
       : typeof targetFilesHint === 'string'

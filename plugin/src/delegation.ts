@@ -45,7 +45,8 @@ export const DELEGATE_WORKER_OPENAI_SCHEMA = {
         targetFiles: {
           type: 'array',
           items: { type: 'string' },
-          description: 'Optional file paths to target or modify',
+          description:
+            'The files this unit may write. ENFORCED: an emission to any path not listed here is refused and reported, because a unit that writes outside what it declared is how two units come to disagree about the same code. Declare every file the unit creates or changes, including a directory if the unit chooses the filenames within it. Omit the field to leave the unit unrestricted.',
         },
         runVerification: {
           type: 'string',
@@ -125,6 +126,15 @@ export interface DelegateWorkerParams {
   verificationApproval?: (command: string) => Promise<boolean>
   /** Extra roots the worker may write into beyond `workspaceDir`. */
   emitAllowlist?: string[]
+  /**
+   * What to do when the worker writes a file the unit did not declare in `targetFiles`. `'enforce'`
+   * (the default) refuses it and reports why; `'off'` restores the permissive behaviour that predates
+   * the boundary.
+   *
+   * Enforced by default because declaring targets is what makes a later project-level failure
+   * attributable: without it, a unit can sprawl and no record says which unit broke the tree.
+   */
+  unitScope?: 'enforce' | 'off'
 }
 
 /** Where the local worker is assumed to live when nothing else is configured. */
@@ -480,7 +490,8 @@ export async function delegateWorker(
       params.targetFiles,
       workspaceBase,
       params.emitAllowlist ?? [],
-      contractPaths
+      contractPaths,
+      { enforceUnitScope: params.unitScope !== 'off' }
     )
     const filesWritten = emission.filesWritten
     // Remember what we wrote on the architect's behalf, so reading it back can be gated -- distinguishing

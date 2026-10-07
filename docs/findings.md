@@ -3,6 +3,34 @@
 Small, real, and known-but-open. Each is the kind of thing this project would rather write down than
 rediscover. Resolved entries are kept in place, marked, so the reasoning is not lost.
 
+## A refused write was retried at the declared hint — fixed
+
+**Any emission refusal could be walked around.** Found while building the unit-scope boundary, and it is
+the more serious half of the same defect.
+
+`extractAndEmitFiles` ends with a fallback: if nothing was written and the caller declared `targetFiles`,
+the content's first code block is written to the first declared hint. The fallback exists for output that
+named no file of its own. But it was gated on `filesWritten.length === 0` — which is also true when a file
+*was* named and then **refused**.
+
+So a refusal did not stop the write; it moved it. The content meant for the refused path landed at the
+declared hint instead, and the verdict reported a written file rather than an error. Measured: a unit
+declaring `a.ts` whose worker emitted `b.ts` wrote **1 file** where it should have written none. And the
+obvious probe — declaring an inside path while the worker emits a path outside the workspace — would have
+put the escaped content inside the workspace at the declared name.
+
+**Impact:** containment, contract-file protection and now unit scope were all advisory to a worker that
+named its own file and lost. The checks reported refusals into `emission.errors` that a caller reading
+only `filesWritten` would never see as a problem.
+
+**Fixed** by tracking whether a file was *named*, and gating the fallback on that rather than on whether
+anything was written (`plugin/src/emission.ts`). Regression test in `unit-scope.test.cjs`: a write refused
+for being outside the workspace must not be retried inside it.
+
+Worth noting how it was found: not by reviewing the fallback, which reads correctly in isolation, but by
+writing a contract for a *different* feature and having it fail with `1 !== 0`. The two features were
+unrelated; the bug lived in the seam between them.
+
 ## `TokenUsage.inputTokens` is not the window — found by live testing, fixed
 
 The context-quality counters first reported the prompt as `usage.inputTokens`. That is wrong, and wrong by

@@ -11,7 +11,7 @@ import { contractFileHashes, contractViolations, loadDelegatedRegistry, mergeDel
 export { PROFILES, ProfileConfig, SavingsTracker, RouteType, StepUsage };
 export { resolveDataDir, trace } from './logging';
 export { isPathWithin } from './paths';
-export { evaluateEmissionPath, extractAndEmitFiles } from './emission';
+export { evaluateEmissionPath, evaluateUnitScope, extractAndEmitFiles } from './emission';
 export { DELETE_PRIMITIVES, evaluateCodeWriteGuard, evaluateDelegatedReadPolicy, hasCommandDeleteSignal, hasCommandWriteSignal, } from './guard';
 export { AGENT_ROLE_LIMIT, DEFAULT_SOURCE_EGRESS_MIN_LINES, applyAgentRole, applyArchitectConfig, describeSourceRead, detectSourceEgress, evaluateSourceEgress, rememberAgentRole, resetAgentRoles, resolveAgentRole, resolveLeadProviders, roleForAgent, } from './roles';
 export { ContextInjection, ContextRequest, ContextResolution, DEFAULT_CONTEXT_MAX_BYTES, resolveContextFiles, } from './context';
@@ -86,6 +86,15 @@ export interface PluginConfig {
      * project is not, which is a different instruction to the architect.
      */
     coherenceVerification?: string;
+    /**
+     * Whether a unit's declared `targetFiles` is a boundary. `'enforce'` (the default) refuses a write to
+     * any path the unit did not declare; `'off'` restores the behaviour before the boundary existed.
+     *
+     * This is what makes the coherence check above attributable. A unit that sprawls can break the tree in
+     * a way no record can assign to a unit, so `coherenceVerification` can say *that* something broke but
+     * not *what*. Declared targets, enforced, are the other half of that pair.
+     */
+    unitScope?: 'enforce' | 'off';
     /**
      * Extra directories a delegated worker may write into besides the resolved session
      * workspace. Absolute worker paths and `..` escapes outside every allowed root are

@@ -35,6 +35,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.configurePatchEngine = configurePatchEngine;
 exports.evaluateEmissionPath = evaluateEmissionPath;
+exports.evaluateUnitScope = evaluateUnitScope;
 exports.extractAndEmitFiles = extractAndEmitFiles;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
@@ -76,6 +77,47 @@ function evaluateEmissionPath(resolvedPath, baseDir, allowedRoots = []) {
             `. A delegated worker may only write inside its workspace; add the directory to emitAllowlist to permit it.`,
     };
 }
+/** The declared targets, in the shapes the tool accepts, with blanks dropped. */
+function normaliseTargets(targetFilesHint) {
+    if (Array.isArray(targetFilesHint)) {
+        return targetFilesHint.map((t) => String(t ?? '')).filter((t) => t.trim().length > 0);
+    }
+    if (typeof targetFilesHint === 'string' && targetFilesHint.trim())
+        return [targetFilesHint.trim()];
+    return [];
+}
+/**
+ * The scope decision for one delegated write: is this path one the unit declared?
+ *
+ * `targetFiles` used to be entirely passive — it became prompt text and it chose a fallback path when a
+ * fenced block named no file of its own — so a unit told to change one file could rewrite another, and
+ * nothing refused it, reported it, or noticed. That is the precondition for two units disagreeing, and it
+ * lands strictly before any project-level check could see it.
+ *
+ * A declared directory covers its subtree, because `isPathWithin` counts a path as within itself or
+ * beneath it. That makes `src`, `src/` and an exact file name all usable declarations, with one rule.
+ *
+ * An empty or absent declaration constrains nothing. A unit that declared no targets has not exceeded
+ * them, and refusing everything for an empty list would break every caller that never set the field.
+ */
+function evaluateUnitScope(resolvedPath, declaredTargets, baseDir) {
+    const declared = normaliseTargets(declaredTargets);
+    if (declared.length === 0)
+        return { allowed: true };
+    const canonical = (0, paths_1.canonicalisePath)(resolvedPath);
+    for (const target of declared) {
+        const resolvedTarget = path.isAbsolute(target) ? target : path.resolve(baseDir, target);
+        if ((0, paths_1.isPathWithin)((0, paths_1.canonicalisePath)(resolvedTarget), canonical))
+            return { allowed: true };
+    }
+    return {
+        allowed: false,
+        reason: `Refused to write '${resolvedPath}': this unit declared its targets, and that path is not one of ` +
+            `them (${declared.join(', ')}). A unit that writes outside what it declared is how two units come ` +
+            `to disagree. Re-delegate with the file declared if the change is intended, or set unitScope: ` +
+            `'off' to allow writes anywhere in the workspace.`,
+    };
+}
 /**
  * Parse the model's final content into file emissions and write them to disk.
  *
@@ -88,9 +130,13 @@ function evaluateEmissionPath(resolvedPath, baseDir, allowedRoots = []) {
  * are anchored to. `parseSearchReplaceBlocks` and `applySearchReplaceBlocks` are the
  * delta machinery, injected so this module does not import the composition root back.
  */
-function extractAndEmitFiles(content, targetFilesHint, baseDir = process.cwd(), allowedRoots = [], protectedPaths = []) {
+function extractAndEmitFiles(content, targetFilesHint, baseDir = process.cwd(), allowedRoots = [], protectedPaths = [], options = {}) {
     if (!content)
         return { filesWritten: [], errors: [], cleanContent: '' };
+    // Declared targets are a boundary unless a caller says otherwise. `false` restores the behaviour before
+    // that boundary existed, which is what `unitScope: 'off'` is for; anything else, including absent, means
+    // enforce.
+    const enforceUnitScope = options.enforceUnitScope !== false;
     const filesWritten = [];
     const emissionErrors = [];
     const seenPaths = new Set();
@@ -117,6 +163,17 @@ function extractAndEmitFiles(content, targetFilesHint, baseDir = process.cwd(), 
                 `executor may not modify the test that judges it.`);
             console.warn(`[EMIT_FILE_BLOCKED] contract file: ${resolvedPath}`);
             return;
+        }
+        // Scope third, and after the contract check deliberately: a contract file has to be refused for being
+        // a contract rather than for being undeclared, or the reason the operator reads would name the wrong
+        // rule.
+        if (enforceUnitScope) {
+            const scope = evaluateUnitScope(resolvedPath, targetFilesHint, baseDir);
+            if (!scope.allowed) {
+                emissionErrors.push(String(scope.reason));
+                console.warn(`[EMIT_FILE_SCOPE_BLOCKED] ${scope.reason}`);
+                return;
+            }
         }
         if (seenPaths.has(resolvedPath))
             return;
@@ -191,16 +248,23 @@ function extractAndEmitFiles(content, targetFilesHint, baseDir = process.cwd(), 
     // at the first one *anywhere*, so a body that itself contains a fence -- a patch quoting one, or a
     // markdown example inside a source file -- had its tail silently dropped and was then refused as a
     // malformed patch. The comment is kept fence-free so this line stays patchable by a confined agent.
+    // The fallback at the bottom is for output that named no file of its own. It must not run when a file
+    // WAS named and then refused: writing that content at the declared hint instead would put bytes meant
+    // for one path at another, and it would walk straight around a containment, contract or scope refusal
+    // by simply retrying somewhere the check happens to allow.
+    let namedTargetSeen = false;
     const fileAttrRegex = new RegExp(FENCE + '[a-zA-Z0-9_-]*\\s+(?:file|filename)=["\']?([^"\'\\s\\n>]+)["\']?\\s*\\n([\\s\\S]*?)[ \\t]*' + FENCE + '[ \\t]*(?:\\r?\\n|$)', 'gi');
     let match;
     while ((match = fileAttrRegex.exec(content)) !== null) {
+        namedTargetSeen = true;
         emitFile(match[1], match[2]);
     }
     const fileMarkerRegex = new RegExp(FENCE + '[a-zA-Z0-9_-]*\\n(?://\\s*FILE:\\s*|#\\s*FILE:\\s*|/\\*\\s*FILE:\\s*|\\[FILE:\\s*)([^\\s\\n\\*\\]]+)(?:\\s*\\*/|\\])?\\n([\\s\\S]*?)' + FENCE, 'gi');
     while ((match = fileMarkerRegex.exec(content)) !== null) {
+        namedTargetSeen = true;
         emitFile(match[1], match[2]);
     }
-    if (filesWritten.length === 0 && targetFilesHint) {
+    if (!namedTargetSeen && filesWritten.length === 0 && targetFilesHint) {
         const hints = Array.isArray(targetFilesHint)
             ? targetFilesHint
             : typeof targetFilesHint === 'string'

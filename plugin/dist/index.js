@@ -33,8 +33,8 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.foldContextQuality = exports.describeContextQuality = exports.EMPTY_CONTEXT_QUALITY = exports.runSandboxVerification = exports.runInProcessFallback = exports.resolveVerificationTimeoutMs = exports.redactVerificationOutput = exports.parseTestOutput = exports.evaluateVerificationPolicy = exports.describeFailures = exports.commandProgram = exports.DEFAULT_VERIFICATION_TIMEOUT_MS = exports.DEFAULT_VERIFICATION_POLICY = exports.sha256File = exports.saveDelegatedRegistry = exports.resolveDelegatedRegistryPath = exports.resolveContractFiles = exports.rememberDelegated = exports.pruneDelegatedRecords = exports.parseDelegatedRegistry = exports.mergeDelegatedRecords = exports.loadDelegatedRegistry = exports.contractViolations = exports.contractFileHashes = exports.resolveContextFiles = exports.DEFAULT_CONTEXT_MAX_BYTES = exports.roleForAgent = exports.resolveLeadProviders = exports.resolveAgentRole = exports.resetAgentRoles = exports.rememberAgentRole = exports.evaluateSourceEgress = exports.detectSourceEgress = exports.describeSourceRead = exports.applyArchitectConfig = exports.applyAgentRole = exports.DEFAULT_SOURCE_EGRESS_MIN_LINES = exports.AGENT_ROLE_LIMIT = exports.hasCommandWriteSignal = exports.hasCommandDeleteSignal = exports.evaluateDelegatedReadPolicy = exports.evaluateCodeWriteGuard = exports.DELETE_PRIMITIVES = exports.extractAndEmitFiles = exports.evaluateEmissionPath = exports.isPathWithin = exports.trace = exports.resolveDataDir = exports.SavingsTracker = exports.PROFILES = void 0;
-exports.LocalRouter = exports.name = exports.using = exports.inject = exports.resolveDelegateStatus = exports.resolveChatCompletionsUrl = exports.parseSearchReplaceBlocks = exports.extractPromptText = exports.estimateTokenCount = exports.delegateWorker = exports.applySearchReplaceBlocks = exports.MIN_SEARCH_CHARS = exports.DEFAULT_LOCAL_ENDPOINT = exports.DELEGATE_WORKER_SCHEMA = exports.DELEGATE_WORKER_OPENAI_SCHEMA = void 0;
+exports.describeContextQuality = exports.EMPTY_CONTEXT_QUALITY = exports.runSandboxVerification = exports.runInProcessFallback = exports.resolveVerificationTimeoutMs = exports.redactVerificationOutput = exports.parseTestOutput = exports.evaluateVerificationPolicy = exports.describeFailures = exports.commandProgram = exports.DEFAULT_VERIFICATION_TIMEOUT_MS = exports.DEFAULT_VERIFICATION_POLICY = exports.sha256File = exports.saveDelegatedRegistry = exports.resolveDelegatedRegistryPath = exports.resolveContractFiles = exports.rememberDelegated = exports.pruneDelegatedRecords = exports.parseDelegatedRegistry = exports.mergeDelegatedRecords = exports.loadDelegatedRegistry = exports.contractViolations = exports.contractFileHashes = exports.resolveContextFiles = exports.DEFAULT_CONTEXT_MAX_BYTES = exports.roleForAgent = exports.resolveLeadProviders = exports.resolveAgentRole = exports.resetAgentRoles = exports.rememberAgentRole = exports.evaluateSourceEgress = exports.detectSourceEgress = exports.describeSourceRead = exports.applyArchitectConfig = exports.applyAgentRole = exports.DEFAULT_SOURCE_EGRESS_MIN_LINES = exports.AGENT_ROLE_LIMIT = exports.hasCommandWriteSignal = exports.hasCommandDeleteSignal = exports.evaluateDelegatedReadPolicy = exports.evaluateCodeWriteGuard = exports.DELETE_PRIMITIVES = exports.extractAndEmitFiles = exports.evaluateUnitScope = exports.evaluateEmissionPath = exports.isPathWithin = exports.trace = exports.resolveDataDir = exports.SavingsTracker = exports.PROFILES = void 0;
+exports.LocalRouter = exports.name = exports.using = exports.inject = exports.resolveDelegateStatus = exports.resolveChatCompletionsUrl = exports.parseSearchReplaceBlocks = exports.extractPromptText = exports.estimateTokenCount = exports.delegateWorker = exports.applySearchReplaceBlocks = exports.MIN_SEARCH_CHARS = exports.DEFAULT_LOCAL_ENDPOINT = exports.DELEGATE_WORKER_SCHEMA = exports.DELEGATE_WORKER_OPENAI_SCHEMA = exports.foldContextQuality = void 0;
 exports.scanDLP = scanDLP;
 exports.requestApprovalForWrite = requestApprovalForWrite;
 exports.resolveVerificationPolicy = resolveVerificationPolicy;
@@ -63,6 +63,7 @@ var paths_2 = require("./paths");
 Object.defineProperty(exports, "isPathWithin", { enumerable: true, get: function () { return paths_2.isPathWithin; } });
 var emission_2 = require("./emission");
 Object.defineProperty(exports, "evaluateEmissionPath", { enumerable: true, get: function () { return emission_2.evaluateEmissionPath; } });
+Object.defineProperty(exports, "evaluateUnitScope", { enumerable: true, get: function () { return emission_2.evaluateUnitScope; } });
 Object.defineProperty(exports, "extractAndEmitFiles", { enumerable: true, get: function () { return emission_2.extractAndEmitFiles; } });
 var guard_2 = require("./guard");
 Object.defineProperty(exports, "DELETE_PRIMITIVES", { enumerable: true, get: function () { return guard_2.DELETE_PRIMITIVES; } });
@@ -598,7 +599,7 @@ function apply(ctx, options = {}) {
                         targetFiles: {
                             type: 'array',
                             items: { type: 'string' },
-                            description: 'Optional file paths to target or modify',
+                            description: 'The files this unit may write. ENFORCED: an emission to any path not listed here is refused and reported, because a unit that writes outside what it declared is how two units come to disagree about the same code. Declare every file the unit creates or changes, including a directory if the unit chooses the filenames within it. Omit the field to leave the unit unrestricted.',
                         },
                         runVerification: {
                             type: 'string',
@@ -700,6 +701,9 @@ function apply(ctx, options = {}) {
                 // default 'ask' policy the verification command is refused rather than run.
                 verificationPolicy: resolveVerificationPolicy(options),
                 emitAllowlist: options?.emitAllowlist,
+                // Operator setting, placed after the caller args deliberately: a caller that sent its own
+                // `unitScope` must not be able to switch off the boundary that keeps it in its lane.
+                unitScope: options?.unitScope ?? 'enforce',
             }, tracker);
         }
     });

@@ -32,6 +32,24 @@ export declare function evaluateEmissionPath(resolvedPath: string, baseDir: stri
     reason?: string;
 };
 /**
+ * The scope decision for one delegated write: is this path one the unit declared?
+ *
+ * `targetFiles` used to be entirely passive — it became prompt text and it chose a fallback path when a
+ * fenced block named no file of its own — so a unit told to change one file could rewrite another, and
+ * nothing refused it, reported it, or noticed. That is the precondition for two units disagreeing, and it
+ * lands strictly before any project-level check could see it.
+ *
+ * A declared directory covers its subtree, because `isPathWithin` counts a path as within itself or
+ * beneath it. That makes `src`, `src/` and an exact file name all usable declarations, with one rule.
+ *
+ * An empty or absent declaration constrains nothing. A unit that declared no targets has not exceeded
+ * them, and refusing everything for an empty list would break every caller that never set the field.
+ */
+export declare function evaluateUnitScope(resolvedPath: string, declaredTargets: string[] | string | undefined, baseDir: string): {
+    allowed: boolean;
+    reason?: string;
+};
+/**
  * Parse the model's final content into file emissions and write them to disk.
  *
  * The model may emit either whole files (fenced code blocks with a file path in the
@@ -43,7 +61,9 @@ export declare function evaluateEmissionPath(resolvedPath: string, baseDir: stri
  * are anchored to. `parseSearchReplaceBlocks` and `applySearchReplaceBlocks` are the
  * delta machinery, injected so this module does not import the composition root back.
  */
-export declare function extractAndEmitFiles(content: string, targetFilesHint?: string[] | string, baseDir?: string, allowedRoots?: string[], protectedPaths?: string[]): {
+export declare function extractAndEmitFiles(content: string, targetFilesHint?: string[] | string, baseDir?: string, allowedRoots?: string[], protectedPaths?: string[], options?: {
+    enforceUnitScope?: boolean;
+}): {
     filesWritten: FileEmissionResult[];
     errors: string[];
     cleanContent: string;

@@ -166,6 +166,15 @@ export interface DelegateWorkerParams {
     verificationApproval?: (command: string) => Promise<boolean>;
     /** Extra roots the worker may write into beyond `workspaceDir`. */
     emitAllowlist?: string[];
+    /**
+     * What to do when the worker writes a file the unit did not declare in `targetFiles`. `'enforce'`
+     * (the default) refuses it and reports why; `'off'` restores the permissive behaviour that predates
+     * the boundary.
+     *
+     * Enforced by default because declaring targets is what makes a later project-level failure
+     * attributable: without it, a unit can sprawl and no record says which unit broke the tree.
+     */
+    unitScope?: 'enforce' | 'off';
 }
 /** Where the local worker is assumed to live when nothing else is configured. */
 export declare const DEFAULT_LOCAL_ENDPOINT = "http://127.0.0.1:1234/v1";

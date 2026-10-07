@@ -95,7 +95,7 @@ import {
 export { PROFILES, ProfileConfig, SavingsTracker, RouteType, StepUsage }
 export { resolveDataDir, trace } from './logging'
 export { isPathWithin } from './paths'
-export { evaluateEmissionPath, extractAndEmitFiles } from './emission'
+export { evaluateEmissionPath, evaluateUnitScope, extractAndEmitFiles } from './emission'
 export {
   DELETE_PRIMITIVES,
   evaluateCodeWriteGuard,
@@ -237,6 +237,15 @@ export interface PluginConfig {
    * project is not, which is a different instruction to the architect.
    */
   coherenceVerification?: string
+  /**
+   * Whether a unit's declared `targetFiles` is a boundary. `'enforce'` (the default) refuses a write to
+   * any path the unit did not declare; `'off'` restores the behaviour before the boundary existed.
+   *
+   * This is what makes the coherence check above attributable. A unit that sprawls can break the tree in
+   * a way no record can assign to a unit, so `coherenceVerification` can say *that* something broke but
+   * not *what*. Declared targets, enforced, are the other half of that pair.
+   */
+  unitScope?: 'enforce' | 'off'
   /**
    * Extra directories a delegated worker may write into besides the resolved session
    * workspace. Absolute worker paths and `..` escapes outside every allowed root are
@@ -966,7 +975,8 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
             targetFiles: {
               type: 'array',
               items: { type: 'string' },
-              description: 'Optional file paths to target or modify',
+              description:
+                'The files this unit may write. ENFORCED: an emission to any path not listed here is refused and reported, because a unit that writes outside what it declared is how two units come to disagree about the same code. Declare every file the unit creates or changes, including a directory if the unit chooses the filenames within it. Omit the field to leave the unit unrestricted.',
             },
             runVerification: {
               type: 'string',
@@ -1074,6 +1084,9 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
           // default 'ask' policy the verification command is refused rather than run.
           verificationPolicy: resolveVerificationPolicy(options),
           emitAllowlist: options?.emitAllowlist,
+          // Operator setting, placed after the caller args deliberately: a caller that sent its own
+          // `unitScope` must not be able to switch off the boundary that keeps it in its lane.
+          unitScope: options?.unitScope ?? 'enforce',
         },
         tracker
       )
