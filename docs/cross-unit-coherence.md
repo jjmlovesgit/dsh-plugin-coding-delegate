@@ -4,6 +4,16 @@ Scoping note, not a plan. `README.md` lists this as the one thing the loop does 
 is the decision material for closing it. Everything asserted here about the current code was measured
 against it rather than recalled.
 
+> **Status: B1 is built** (`coherenceVerification` + the `INCOHERENT` status, see
+> [`ROADMAP.md`](ROADMAP.md) Track 1b). The recommendation below is kept as written, because the reasons
+> for the order are the useful part. A1 and A2 remain unstarted.
+>
+> One thing building it changed: `isSuccess` and "the unit passed" had to be separated. Folding coherence
+> into `isSuccess` first made every broken tree report `VERIFICATION_FAILED`, pointing the architect at a
+> unit that was fine. `resolveDelegateStatus` is given the *unit's* verdict, because `INCOHERENT` means
+> exactly "the unit passed and the project did not" — so the status function has to be told which of the
+> two failed. The oracle caught it.
+
 ## The problem, stated precisely
 
 Two separate problems are hiding behind one phrase, and they need different answers.

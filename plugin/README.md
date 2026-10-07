@@ -255,6 +255,7 @@ When you call `predictRoute` directly, its decision output is
 | `verificationApproval` | `'ask'` | `ask`, `allow` or `deny` for a delegated `runVerification` command |
 | `verificationAllowlist` | `[]` | Programs whose verification commands skip the prompt (matches the program, not its arguments) |
 | `verificationTimeoutMs` | `30000` | How long a verification command may run before it is killed. Raise it for a suite or build that legitimately needs longer; a value that is not a positive finite number falls back to the default rather than removing the bound |
+| `coherenceVerification` | — | The **project's** own check — a build, a full suite — run after each unit's contract and given the power to void it. `INCOHERENT` means the unit passed and the project did not. Operator configuration rather than model input, so it is absent from the tool schema and not approval-gated; a spawn the sandbox denies counts as a failure. Skipped when the unit wrote no files, and when `verificationApproval` is `deny` |
 | `emitAllowlist` | `[]` | Extra directories a delegated worker may write into besides the workspace |
 | `allowInProcessFallback` | `false` | Run a denied spawn's verification module inside the server process |
 | `leadProviders` | `[]` | Provider ids that are **not** the architect. Their requests are left exactly as configured |

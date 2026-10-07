@@ -60,28 +60,30 @@ D was added after that closure, and not from design review: the live run's *inva
 exposed it. Reloading to load the test flag also emptied the in-memory registry, which is how the gap
 became visible — the guard had no way to know, after a restart, what it had been protecting.
 
-## Track 1b — cross-unit coherence: **scoped, not started**
+## Track 1b — cross-unit coherence: **B1 built**
 
-The one thing README lists as not closed, and the only substantive item left on the whole roadmap.
-Everything Track 1 built is *per unit*: the contract judges one unit, verification runs one command, and
-`UNVERIFIED` is about one unit's evidence. Nothing ever asks whether the tree still works.
+The one thing README lists as not closed. Everything Track 1 built is *per unit*: the contract judges one
+unit, verification runs one command, and `UNVERIFIED` is about one unit's evidence. Nothing ever asked
+whether the tree still works.
 
 The decision material is [`cross-unit-coherence.md`](cross-unit-coherence.md), written from the code
 rather than from memory. It separates the two problems hiding behind the phrase — *which files does a
 unit need* and *do two units agree* — and finds a measured gap underneath both: **`targetFiles` is a hint,
 not a boundary.** It is read as prompt text and as a fallback path-chooser, so a unit told to change
-`parser.ts` can rewrite `types.ts` and nothing refuses, reports, or notices. That is how units drift
-apart, and it happens before any coherence check could run.
+`parser.ts` can rewrite `types.ts` and nothing refuses, reports, or notices.
 
-Recommended order: a **project-level verification gate** (B1 — a second declared command, with `INCOHERENT`
-as its own status, since "your unit passed, the project did not" is a different instruction to the
-architect than "your unit failed"), then **declared targets as a boundary** (A1), then **feeding a
-failure's `file:line` back into the next attempt's context** (A2). B1 reuses the whole existing
-verification path; B2 is subsumed by it; B3 is diagnostics rather than a gate; and B4's interface diffing
-is largely what `tsc` already does exactly, so it is not worth a parser dependency.
+| # | Unit | Status |
+| --- | --- | --- |
+| B1 | **A project-level verification gate** — a second, operator-declared command (build, full suite) run after the unit's contract, with the power to void it | **Built.** `coherenceVerification`, with `INCOHERENT` as its own status because "your unit passed, the project did not" is a different instruction to the architect than "your unit failed". `tests/oracles/coherence.test.cjs`, 10 assertions, **4 failing before implementation**; the other 6 are characterisation controls. Skipped when the unit wrote no files, and when verification is denied. Operator configuration rather than model input, so it is absent from the tool schema and not approval-gated |
+| A1 | **Declared targets as a boundary** — refuse or ask about an emission to a path the unit did not declare, so a unit stays in its lane and B1's failures are attributable | Not started. `contractFiles` already works this way (declare → enforce → re-hash), so the shape exists |
+| A2 | **Feed a failure's `file:line` back into the next attempt's context** — widens the worker's view without widening the architect's | Not started. `RedactedFailure.location` is produced today and then discarded |
 
-Item 15 below — "plus checks from outside the contract" — is this item's nearest relative, and was the
-first statement of it.
+Rejected with reasons in the scoping note: B2 (re-running prior contracts) is subsumed by B1; B3
+(file-conflict detection) is diagnostics rather than a gate, and a check that cries wolf is worse than
+none; B4 (interface diffing) is largely what `tsc` already does exactly, so it is not worth a parser
+dependency to approximate it.
+
+Item 15 below — "plus checks from outside the contract" — was this item's first statement.
 
 ## Track 2 — the lead tier: **retired**
 
