@@ -281,16 +281,45 @@ export function parseTestOutput(
   }
 }
 
+/**
+ * The bound on how long a verification command may run, in milliseconds.
+ *
+ * 30 s was the value hardcoded inside `runSandboxVerification`, and it is kept as the default so that an
+ * operator who configures nothing sees no change. It is exported because it is the answer to "how long
+ * do I have?", and previously that answer was only available by reading the source.
+ */
+export const DEFAULT_VERIFICATION_TIMEOUT_MS = 30000
+
+/**
+ * Coerce a configured timeout, falling back to the default rather than to *no bound*.
+ *
+ * The direction matters. "No timeout" on a command that is model-selected and runs with the DSH
+ * process's authority is not a permission, it is a hang — so a value that is not a positive finite
+ * number is refused and the default applies. A fractional value is floored to a whole millisecond
+ * because that is the unit the spawn takes.
+ */
+export function resolveVerificationTimeoutMs(value: unknown): number {
+  const n = Number(value)
+  if (!Number.isFinite(n) || n <= 0) return DEFAULT_VERIFICATION_TIMEOUT_MS
+  return Math.floor(n)
+}
+
 export interface VerificationPolicy {
   mode: 'ask' | 'allow' | 'deny'
   allowlist: string[]
   allowInProcessFallback: boolean
+  /**
+   * How long the verification command may run. Never absent: there is always a bound, because the
+   * alternative is a command that never returns.
+   */
+  timeoutMs: number
 }
 
 export const DEFAULT_VERIFICATION_POLICY: VerificationPolicy = {
   mode: 'ask',
   allowlist: [],
   allowInProcessFallback: false,
+  timeoutMs: DEFAULT_VERIFICATION_TIMEOUT_MS,
 }
 
 /** The program a shell command would run, normalised for allowlist comparison. */
@@ -497,7 +526,13 @@ function captureCommandOutput(
 export function runSandboxVerification(
   verificationCommand: string,
   workspaceDir: string = process.cwd(),
-  options: { redact?: boolean; rawLogPath?: string; allowInProcessFallback?: boolean } = {}
+  options: {
+    redact?: boolean
+    rawLogPath?: string
+    allowInProcessFallback?: boolean
+    /** Overrides the default bound; an unusable value falls back to it rather than removing it. */
+    timeoutMs?: number
+  } = {}
 ): TestResults {
   if (!verificationCommand || !verificationCommand.trim()) {
     return { passed: 0, failed: 0, output: 'No verification command specified.' }
@@ -508,7 +543,11 @@ export function runSandboxVerification(
   let spawnError: any = null
   let exitCode = 0
 
-  const captured = captureCommandOutput(cmd, workspaceDir, 30000)
+  const captured = captureCommandOutput(
+    cmd,
+    workspaceDir,
+    resolveVerificationTimeoutMs(options.timeoutMs)
+  )
   output = captured.output
   spawnError = captured.spawnError
   exitCode = captured.exitCode

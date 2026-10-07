@@ -39,10 +39,32 @@ export declare function parseTestOutput(output: string, exitCode?: number, optio
     redact?: boolean;
     rawOutputPath?: string;
 }): TestResults;
+/**
+ * The bound on how long a verification command may run, in milliseconds.
+ *
+ * 30 s was the value hardcoded inside `runSandboxVerification`, and it is kept as the default so that an
+ * operator who configures nothing sees no change. It is exported because it is the answer to "how long
+ * do I have?", and previously that answer was only available by reading the source.
+ */
+export declare const DEFAULT_VERIFICATION_TIMEOUT_MS = 30000;
+/**
+ * Coerce a configured timeout, falling back to the default rather than to *no bound*.
+ *
+ * The direction matters. "No timeout" on a command that is model-selected and runs with the DSH
+ * process's authority is not a permission, it is a hang — so a value that is not a positive finite
+ * number is refused and the default applies. A fractional value is floored to a whole millisecond
+ * because that is the unit the spawn takes.
+ */
+export declare function resolveVerificationTimeoutMs(value: unknown): number;
 export interface VerificationPolicy {
     mode: 'ask' | 'allow' | 'deny';
     allowlist: string[];
     allowInProcessFallback: boolean;
+    /**
+     * How long the verification command may run. Never absent: there is always a bound, because the
+     * alternative is a command that never returns.
+     */
+    timeoutMs: number;
 }
 export declare const DEFAULT_VERIFICATION_POLICY: VerificationPolicy;
 /** The program a shell command would run, normalised for allowlist comparison. */
@@ -64,4 +86,6 @@ export declare function runSandboxVerification(verificationCommand: string, work
     redact?: boolean;
     rawLogPath?: string;
     allowInProcessFallback?: boolean;
+    /** Overrides the default bound; an unusable value falls back to it rather than removing it. */
+    timeoutMs?: number;
 }): TestResults;

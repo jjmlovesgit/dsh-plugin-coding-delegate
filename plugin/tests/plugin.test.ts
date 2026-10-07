@@ -515,7 +515,14 @@ describe('A delegated result is a verdict on a contract', () => {
         targetFiles: ['src/ok.ts'],
         workspaceDir: tmpDir,
         runVerification: 'node --version',
-        verificationPolicy: { mode: 'allow', allowlist: [], allowInProcessFallback: false },
+        verificationPolicy: {
+        mode: 'allow',
+        allowlist: [],
+        allowInProcessFallback: false,
+        // Required, not optional: a policy always carries a bound, because the alternative on a
+        // model-selected command is a hang rather than a permission.
+        timeoutMs: 30000,
+      },
       },
       new SavingsTracker(tmpDir)
     )

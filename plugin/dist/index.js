@@ -33,8 +33,8 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.applySearchReplaceBlocks = exports.MIN_SEARCH_CHARS = exports.DEFAULT_LOCAL_ENDPOINT = exports.DELEGATE_WORKER_SCHEMA = exports.DELEGATE_WORKER_OPENAI_SCHEMA = exports.runSandboxVerification = exports.runInProcessFallback = exports.redactVerificationOutput = exports.parseTestOutput = exports.evaluateVerificationPolicy = exports.describeFailures = exports.commandProgram = exports.DEFAULT_VERIFICATION_POLICY = exports.sha256File = exports.saveDelegatedRegistry = exports.resolveDelegatedRegistryPath = exports.resolveContractFiles = exports.rememberDelegated = exports.pruneDelegatedRecords = exports.parseDelegatedRegistry = exports.mergeDelegatedRecords = exports.loadDelegatedRegistry = exports.contractViolations = exports.contractFileHashes = exports.resolveContextFiles = exports.DEFAULT_CONTEXT_MAX_BYTES = exports.roleForAgent = exports.resolveLeadProviders = exports.resolveAgentRole = exports.resetAgentRoles = exports.rememberAgentRole = exports.evaluateSourceEgress = exports.detectSourceEgress = exports.describeSourceRead = exports.applyArchitectConfig = exports.applyAgentRole = exports.DEFAULT_SOURCE_EGRESS_MIN_LINES = exports.AGENT_ROLE_LIMIT = exports.hasCommandWriteSignal = exports.hasCommandDeleteSignal = exports.evaluateDelegatedReadPolicy = exports.evaluateCodeWriteGuard = exports.DELETE_PRIMITIVES = exports.extractAndEmitFiles = exports.evaluateEmissionPath = exports.isPathWithin = exports.trace = exports.resolveDataDir = exports.SavingsTracker = exports.PROFILES = void 0;
-exports.LocalRouter = exports.name = exports.using = exports.inject = exports.resolveDelegateStatus = exports.resolveChatCompletionsUrl = exports.parseSearchReplaceBlocks = exports.extractPromptText = exports.estimateTokenCount = exports.delegateWorker = void 0;
+exports.DEFAULT_LOCAL_ENDPOINT = exports.DELEGATE_WORKER_SCHEMA = exports.DELEGATE_WORKER_OPENAI_SCHEMA = exports.runSandboxVerification = exports.runInProcessFallback = exports.resolveVerificationTimeoutMs = exports.redactVerificationOutput = exports.parseTestOutput = exports.evaluateVerificationPolicy = exports.describeFailures = exports.commandProgram = exports.DEFAULT_VERIFICATION_TIMEOUT_MS = exports.DEFAULT_VERIFICATION_POLICY = exports.sha256File = exports.saveDelegatedRegistry = exports.resolveDelegatedRegistryPath = exports.resolveContractFiles = exports.rememberDelegated = exports.pruneDelegatedRecords = exports.parseDelegatedRegistry = exports.mergeDelegatedRecords = exports.loadDelegatedRegistry = exports.contractViolations = exports.contractFileHashes = exports.resolveContextFiles = exports.DEFAULT_CONTEXT_MAX_BYTES = exports.roleForAgent = exports.resolveLeadProviders = exports.resolveAgentRole = exports.resetAgentRoles = exports.rememberAgentRole = exports.evaluateSourceEgress = exports.detectSourceEgress = exports.describeSourceRead = exports.applyArchitectConfig = exports.applyAgentRole = exports.DEFAULT_SOURCE_EGRESS_MIN_LINES = exports.AGENT_ROLE_LIMIT = exports.hasCommandWriteSignal = exports.hasCommandDeleteSignal = exports.evaluateDelegatedReadPolicy = exports.evaluateCodeWriteGuard = exports.DELETE_PRIMITIVES = exports.extractAndEmitFiles = exports.evaluateEmissionPath = exports.isPathWithin = exports.trace = exports.resolveDataDir = exports.SavingsTracker = exports.PROFILES = void 0;
+exports.LocalRouter = exports.name = exports.using = exports.inject = exports.resolveDelegateStatus = exports.resolveChatCompletionsUrl = exports.parseSearchReplaceBlocks = exports.extractPromptText = exports.estimateTokenCount = exports.delegateWorker = exports.applySearchReplaceBlocks = exports.MIN_SEARCH_CHARS = void 0;
 exports.scanDLP = scanDLP;
 exports.requestApprovalForWrite = requestApprovalForWrite;
 exports.resolveVerificationPolicy = resolveVerificationPolicy;
@@ -99,11 +99,13 @@ Object.defineProperty(exports, "saveDelegatedRegistry", { enumerable: true, get:
 Object.defineProperty(exports, "sha256File", { enumerable: true, get: function () { return contracts_2.sha256File; } });
 var verification_2 = require("./verification");
 Object.defineProperty(exports, "DEFAULT_VERIFICATION_POLICY", { enumerable: true, get: function () { return verification_2.DEFAULT_VERIFICATION_POLICY; } });
+Object.defineProperty(exports, "DEFAULT_VERIFICATION_TIMEOUT_MS", { enumerable: true, get: function () { return verification_2.DEFAULT_VERIFICATION_TIMEOUT_MS; } });
 Object.defineProperty(exports, "commandProgram", { enumerable: true, get: function () { return verification_2.commandProgram; } });
 Object.defineProperty(exports, "describeFailures", { enumerable: true, get: function () { return verification_2.describeFailures; } });
 Object.defineProperty(exports, "evaluateVerificationPolicy", { enumerable: true, get: function () { return verification_2.evaluateVerificationPolicy; } });
 Object.defineProperty(exports, "parseTestOutput", { enumerable: true, get: function () { return verification_2.parseTestOutput; } });
 Object.defineProperty(exports, "redactVerificationOutput", { enumerable: true, get: function () { return verification_2.redactVerificationOutput; } });
+Object.defineProperty(exports, "resolveVerificationTimeoutMs", { enumerable: true, get: function () { return verification_2.resolveVerificationTimeoutMs; } });
 Object.defineProperty(exports, "runInProcessFallback", { enumerable: true, get: function () { return verification_2.runInProcessFallback; } });
 Object.defineProperty(exports, "runSandboxVerification", { enumerable: true, get: function () { return verification_2.runSandboxVerification; } });
 var delegation_2 = require("./delegation");
@@ -507,6 +509,7 @@ function resolveVerificationPolicy(options = {}) {
         mode: options.verificationApproval ?? 'ask',
         allowlist: Array.isArray(options.verificationAllowlist) ? options.verificationAllowlist : [],
         allowInProcessFallback: options.allowInProcessFallback === true,
+        timeoutMs: (0, verification_1.resolveVerificationTimeoutMs)(options.verificationTimeoutMs),
     };
 }
 /**

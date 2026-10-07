@@ -33,10 +33,11 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.DEFAULT_VERIFICATION_POLICY = void 0;
+exports.DEFAULT_VERIFICATION_POLICY = exports.DEFAULT_VERIFICATION_TIMEOUT_MS = void 0;
 exports.redactVerificationOutput = redactVerificationOutput;
 exports.describeFailures = describeFailures;
 exports.parseTestOutput = parseTestOutput;
+exports.resolveVerificationTimeoutMs = resolveVerificationTimeoutMs;
 exports.commandProgram = commandProgram;
 exports.evaluateVerificationPolicy = evaluateVerificationPolicy;
 exports.runInProcessFallback = runInProcessFallback;
@@ -287,10 +288,33 @@ function parseTestOutput(output, exitCode, options = {}) {
         ...(options.rawOutputPath ? { rawOutputPath: options.rawOutputPath } : {}),
     };
 }
+/**
+ * The bound on how long a verification command may run, in milliseconds.
+ *
+ * 30 s was the value hardcoded inside `runSandboxVerification`, and it is kept as the default so that an
+ * operator who configures nothing sees no change. It is exported because it is the answer to "how long
+ * do I have?", and previously that answer was only available by reading the source.
+ */
+exports.DEFAULT_VERIFICATION_TIMEOUT_MS = 30000;
+/**
+ * Coerce a configured timeout, falling back to the default rather than to *no bound*.
+ *
+ * The direction matters. "No timeout" on a command that is model-selected and runs with the DSH
+ * process's authority is not a permission, it is a hang — so a value that is not a positive finite
+ * number is refused and the default applies. A fractional value is floored to a whole millisecond
+ * because that is the unit the spawn takes.
+ */
+function resolveVerificationTimeoutMs(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n <= 0)
+        return exports.DEFAULT_VERIFICATION_TIMEOUT_MS;
+    return Math.floor(n);
+}
 exports.DEFAULT_VERIFICATION_POLICY = {
     mode: 'ask',
     allowlist: [],
     allowInProcessFallback: false,
+    timeoutMs: exports.DEFAULT_VERIFICATION_TIMEOUT_MS,
 };
 /** The program a shell command would run, normalised for allowlist comparison. */
 function commandProgram(command) {
@@ -474,7 +498,7 @@ function runSandboxVerification(verificationCommand, workspaceDir = process.cwd(
     let output = '';
     let spawnError = null;
     let exitCode = 0;
-    const captured = captureCommandOutput(cmd, workspaceDir, 30000);
+    const captured = captureCommandOutput(cmd, workspaceDir, resolveVerificationTimeoutMs(options.timeoutMs));
     output = captured.output;
     spawnError = captured.spawnError;
     exitCode = captured.exitCode;

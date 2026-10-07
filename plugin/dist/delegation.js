@@ -415,6 +415,7 @@ async function delegateWorker(params = {}, tracker) {
                     redact: params.redactVerification ?? process.env.DSH_LOCAL_ROUTER_RAW_VERIFICATION !== '1',
                     rawLogPath: path.join((0, logging_1.resolveDataDir)(), 'last-verification.log'),
                     allowInProcessFallback: policy.allowInProcessFallback,
+                    timeoutMs: policy.timeoutMs,
                 });
             }
             else {

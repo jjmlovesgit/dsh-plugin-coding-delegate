@@ -21,6 +21,7 @@ import {
   VerificationPolicy,
   evaluateVerificationPolicy,
   parseTestOutput,
+  resolveVerificationTimeoutMs,
   runSandboxVerification,
 } from './verification'
 import {
@@ -132,11 +133,13 @@ export {
 } from './contracts'
 export {
   DEFAULT_VERIFICATION_POLICY,
+  DEFAULT_VERIFICATION_TIMEOUT_MS,
   commandProgram,
   describeFailures,
   evaluateVerificationPolicy,
   parseTestOutput,
   redactVerificationOutput,
+  resolveVerificationTimeoutMs,
   runInProcessFallback,
   runSandboxVerification,
 } from './verification'
@@ -196,6 +199,17 @@ export interface PluginConfig {
    * not its arguments, so listing `node` also permits `node -e "<anything>"`.
    */
   verificationAllowlist?: string[]
+  /**
+   * How long `delegate_worker`'s verification command may run before it is killed, in milliseconds.
+   * Defaults to 30,000 — the value this used to be hardcoded to — so configuring nothing changes
+   * nothing. Raise it for a contract whose command legitimately needs longer: a full suite, a build,
+   * an install.
+   *
+   * A value that is not a positive finite number falls back to the default rather than removing the
+   * bound. An unbounded command that is model-selected and runs with the DSH process's authority is a
+   * hang, not a permission.
+   */
+  verificationTimeoutMs?: number
   /**
    * Extra directories a delegated worker may write into besides the resolved session
    * workspace. Absolute worker paths and `..` escapes outside every allowed root are
@@ -824,6 +838,7 @@ export function resolveVerificationPolicy(options: PluginConfig = {}): Verificat
     mode: options.verificationApproval ?? 'ask',
     allowlist: Array.isArray(options.verificationAllowlist) ? options.verificationAllowlist : [],
     allowInProcessFallback: options.allowInProcessFallback === true,
+    timeoutMs: resolveVerificationTimeoutMs(options.verificationTimeoutMs),
   }
 }
 

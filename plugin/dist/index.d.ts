@@ -16,7 +16,7 @@ export { DELETE_PRIMITIVES, evaluateCodeWriteGuard, evaluateDelegatedReadPolicy,
 export { AGENT_ROLE_LIMIT, DEFAULT_SOURCE_EGRESS_MIN_LINES, applyAgentRole, applyArchitectConfig, describeSourceRead, detectSourceEgress, evaluateSourceEgress, rememberAgentRole, resetAgentRoles, resolveAgentRole, resolveLeadProviders, roleForAgent, } from './roles';
 export { ContextInjection, ContextRequest, ContextResolution, DEFAULT_CONTEXT_MAX_BYTES, resolveContextFiles, } from './context';
 export { contractFileHashes, contractViolations, loadDelegatedRegistry, mergeDelegatedRecords, parseDelegatedRegistry, pruneDelegatedRecords, rememberDelegated, resolveContractFiles, resolveDelegatedRegistryPath, saveDelegatedRegistry, sha256File, } from './contracts';
-export { DEFAULT_VERIFICATION_POLICY, commandProgram, describeFailures, evaluateVerificationPolicy, parseTestOutput, redactVerificationOutput, runInProcessFallback, runSandboxVerification, } from './verification';
+export { DEFAULT_VERIFICATION_POLICY, DEFAULT_VERIFICATION_TIMEOUT_MS, commandProgram, describeFailures, evaluateVerificationPolicy, parseTestOutput, redactVerificationOutput, resolveVerificationTimeoutMs, runInProcessFallback, runSandboxVerification, } from './verification';
 export { DELEGATE_WORKER_OPENAI_SCHEMA, DELEGATE_WORKER_SCHEMA, DEFAULT_LOCAL_ENDPOINT, MIN_SEARCH_CHARS, applySearchReplaceBlocks, delegateWorker, estimateTokenCount, extractPromptText, parseSearchReplaceBlocks, resolveChatCompletionsUrl, resolveDelegateStatus, } from './delegation';
 export declare const inject: string[];
 export declare const using: readonly ["tools"];
@@ -59,6 +59,17 @@ export interface PluginConfig {
      * not its arguments, so listing `node` also permits `node -e "<anything>"`.
      */
     verificationAllowlist?: string[];
+    /**
+     * How long `delegate_worker`'s verification command may run before it is killed, in milliseconds.
+     * Defaults to 30,000 — the value this used to be hardcoded to — so configuring nothing changes
+     * nothing. Raise it for a contract whose command legitimately needs longer: a full suite, a build,
+     * an install.
+     *
+     * A value that is not a positive finite number falls back to the default rather than removing the
+     * bound. An unbounded command that is model-selected and runs with the DSH process's authority is a
+     * hang, not a permission.
+     */
+    verificationTimeoutMs?: number;
     /**
      * Extra directories a delegated worker may write into besides the resolved session
      * workspace. Absolute worker paths and `..` escapes outside every allowed root are
