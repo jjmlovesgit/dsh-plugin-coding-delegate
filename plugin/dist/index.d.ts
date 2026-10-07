@@ -661,6 +661,43 @@ export declare function evaluateDelegatedReadPolicy(policy?: DelegateReadPolicy)
     kind: 'allow' | 'ask' | 'deny';
     reason: string;
 };
+/** Bounded, newest-wins. Built from observed requests, because the host does not say which agent is which. */
+export declare const AGENT_ROLE_LIMIT = 200;
+/**
+ * Remember which role an agent last made a request as.
+ *
+ * This is a correlation, not lineage: the plugin sees an `agent` on `agent/request` and an `agent` on
+ * `tools/pre-execute`, and it assumes the same id means the same agent. That assumption is recorded
+ * rather than trusted — an unobserved id resolves to 'unknown' and the observation says so, so the
+ * record degrades honestly instead of inventing an attribution.
+ */
+export declare function rememberAgentRole(agentId: string | undefined, role: 'architect' | 'lead'): void;
+export declare function roleForAgent(agentId: string | undefined): 'architect' | 'lead' | 'unknown';
+/** The map is module state, so tests need a way to clear it. */
+export declare function resetAgentRoles(): void;
+export interface SourceReadObservation {
+    track: boolean;
+    role: 'architect' | 'lead' | 'unknown';
+    target?: string;
+    extension?: string;
+    reason: string;
+}
+/**
+ * Should this tool call be recorded as a source read?
+ *
+ * Observation, not enforcement. The architect is allowed to read source today — the guard gates only
+ * files a worker wrote — and that is not a claim this project wants to keep making on faith. Recording
+ * every source read is what will say whether the architect's access is ever used, and therefore whether
+ * it can be closed.
+ *
+ * The tool check matters as much as the path check: without it, the architect's own refused writes to
+ * source would be counted as reads, and the evidence this exists to gather would be wrong.
+ */
+export declare function describeSourceRead(input: {
+    tool?: string;
+    target?: string;
+    role?: 'architect' | 'lead' | 'unknown';
+}): SourceReadObservation;
 export declare function evaluateCodeWriteGuard(exec: any, config?: {
     askPaths?: string[];
     /** Injectable reader, so the script scan is testable without touching disk. */
@@ -765,6 +802,11 @@ declare const pluginExport: {
     resolveDelegateStatus: typeof resolveDelegateStatus;
     resolveLeadProviders: typeof resolveLeadProviders;
     evaluateDelegatedReadPolicy: typeof evaluateDelegatedReadPolicy;
+    rememberAgentRole: typeof rememberAgentRole;
+    roleForAgent: typeof roleForAgent;
+    resetAgentRoles: typeof resetAgentRoles;
+    describeSourceRead: typeof describeSourceRead;
+    AGENT_ROLE_LIMIT: number;
     detectSourceEgress: typeof detectSourceEgress;
     evaluateSourceEgress: typeof evaluateSourceEgress;
     DEFAULT_SOURCE_EGRESS_MIN_LINES: number;

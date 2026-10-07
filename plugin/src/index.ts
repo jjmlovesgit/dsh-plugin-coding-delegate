@@ -2770,6 +2770,88 @@ export function evaluateDelegatedReadPolicy(policy: DelegateReadPolicy = 'ask'):
   }
 }
 
+/** Bounded, newest-wins. Built from observed requests, because the host does not say which agent is which. */
+export const AGENT_ROLE_LIMIT = 200
+const agentRoles = new Map<string, 'architect' | 'lead'>()
+
+/**
+ * Remember which role an agent last made a request as.
+ *
+ * This is a correlation, not lineage: the plugin sees an `agent` on `agent/request` and an `agent` on
+ * `tools/pre-execute`, and it assumes the same id means the same agent. That assumption is recorded
+ * rather than trusted — an unobserved id resolves to 'unknown' and the observation says so, so the
+ * record degrades honestly instead of inventing an attribution.
+ */
+export function rememberAgentRole(agentId: string | undefined, role: 'architect' | 'lead'): void {
+  const id = String(agentId ?? '').trim()
+  if (!id) return
+  if (agentRoles.has(id)) agentRoles.delete(id)
+  agentRoles.set(id, role)
+  while (agentRoles.size > AGENT_ROLE_LIMIT) {
+    const oldest = agentRoles.keys().next().value
+    if (typeof oldest === 'string') agentRoles.delete(oldest)
+  }
+}
+
+export function roleForAgent(agentId: string | undefined): 'architect' | 'lead' | 'unknown' {
+  const id = String(agentId ?? '').trim()
+  if (!id) return 'unknown'
+  return agentRoles.get(id) ?? 'unknown'
+}
+
+/** The map is module state, so tests need a way to clear it. */
+export function resetAgentRoles(): void {
+  agentRoles.clear()
+}
+
+export interface SourceReadObservation {
+  track: boolean
+  role: 'architect' | 'lead' | 'unknown'
+  target?: string
+  extension?: string
+  reason: string
+}
+
+/**
+ * Should this tool call be recorded as a source read?
+ *
+ * Observation, not enforcement. The architect is allowed to read source today — the guard gates only
+ * files a worker wrote — and that is not a claim this project wants to keep making on faith. Recording
+ * every source read is what will say whether the architect's access is ever used, and therefore whether
+ * it can be closed.
+ *
+ * The tool check matters as much as the path check: without it, the architect's own refused writes to
+ * source would be counted as reads, and the evidence this exists to gather would be wrong.
+ */
+export function describeSourceRead(input: {
+  tool?: string
+  target?: string
+  role?: 'architect' | 'lead' | 'unknown'
+}): SourceReadObservation {
+  const role = input?.role ?? 'unknown'
+  const tool = String(input?.tool ?? '').trim().toLowerCase()
+
+  if (!READ_TOOLS.has(tool)) {
+    return { track: false, role, reason: `'${tool || 'unknown tool'}' is not a read tool` }
+  }
+
+  const target = String(input?.target ?? '').trim()
+  if (!target) return { track: false, role, reason: 'no target to attribute' }
+
+  const extension = path.extname(target).toLowerCase()
+  if (!CODE_EXTENSIONS.has(extension)) {
+    return { track: false, role, target, extension, reason: 'not a source file' }
+  }
+
+  return {
+    track: true,
+    role,
+    target,
+    extension,
+    reason: `source read attributed to ${role}`,
+  }
+}
+
 export function evaluateCodeWriteGuard(
   exec: any,
   config: {
@@ -3324,6 +3406,24 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
             reason: `${verdict.reason} (approval outcome: ${outcome})`,
           }
         }
+
+        // Observation, not enforcement: the architect is allowed to read source, and this records it.
+        // The guard above answers "may this happen"; this answers "did it, and who by" — which is what
+        // will later say whether that access is used at all, and so whether it can be taken away.
+        const observed = describeSourceRead({
+          tool: exec?.name,
+          target: extractWriteTarget(exec?.arguments),
+          role: roleForAgent(exec?.agent?.id),
+        })
+        if (observed.track) {
+          trace('SOURCE_READ', {
+            role: observed.role,
+            agent: String(exec?.agent?.id ?? '').slice(0, 8) || 'unknown',
+            tool: String(exec?.name ?? ''),
+            target: observed.target,
+            extension: observed.extension,
+          })
+        }
       } catch (err) {
         // Fail closed: a guard that cannot evaluate must not wave the call through.
         console.warn('[LOCAL_GUARD] evaluation failed; failing closed:', err)
@@ -3440,6 +3540,10 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
         hostProvider: resolvedConfig?.provider,
         leadProviders: resolveLeadProviders(options),
       })
+
+      // Correlate the role with the agent, so a later tool call can be attributed. Best effort by
+      // construction: the host does not expose lineage, so this is the plugin's own inference.
+      rememberAgentRole(agent?.id, role.role)
 
       const mutatedConfig = applyAgentRole(resolvedConfig || {}, role, {
         cloudProvider: config.cloudProvider,
@@ -3618,6 +3722,11 @@ const pluginExport = {
   resolveDelegateStatus,
   resolveLeadProviders,
   evaluateDelegatedReadPolicy,
+  rememberAgentRole,
+  roleForAgent,
+  resetAgentRoles,
+  describeSourceRead,
+  AGENT_ROLE_LIMIT,
   detectSourceEgress,
   evaluateSourceEgress,
   DEFAULT_SOURCE_EGRESS_MIN_LINES,

@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.DEFAULT_SOURCE_EGRESS_MIN_LINES = exports.DELETE_PRIMITIVES = exports.LocalRouter = exports.DEFAULT_CONTEXT_MAX_BYTES = exports.MIN_SEARCH_CHARS = exports.DEFAULT_LOCAL_ENDPOINT = exports.DEFAULT_VERIFICATION_POLICY = exports.DELEGATE_WORKER_SCHEMA = exports.DELEGATE_WORKER_OPENAI_SCHEMA = exports.name = exports.using = exports.inject = exports.SavingsTracker = exports.PROFILES = void 0;
+exports.AGENT_ROLE_LIMIT = exports.DEFAULT_SOURCE_EGRESS_MIN_LINES = exports.DELETE_PRIMITIVES = exports.LocalRouter = exports.DEFAULT_CONTEXT_MAX_BYTES = exports.MIN_SEARCH_CHARS = exports.DEFAULT_LOCAL_ENDPOINT = exports.DEFAULT_VERIFICATION_POLICY = exports.DELEGATE_WORKER_SCHEMA = exports.DELEGATE_WORKER_OPENAI_SCHEMA = exports.name = exports.using = exports.inject = exports.SavingsTracker = exports.PROFILES = void 0;
 exports.resolveDataDir = resolveDataDir;
 exports.scanDLP = scanDLP;
 exports.isPathWithin = isPathWithin;
@@ -70,6 +70,10 @@ exports.hasCommandDeleteSignal = hasCommandDeleteSignal;
 exports.detectSourceEgress = detectSourceEgress;
 exports.evaluateSourceEgress = evaluateSourceEgress;
 exports.evaluateDelegatedReadPolicy = evaluateDelegatedReadPolicy;
+exports.rememberAgentRole = rememberAgentRole;
+exports.roleForAgent = roleForAgent;
+exports.resetAgentRoles = resetAgentRoles;
+exports.describeSourceRead = describeSourceRead;
 exports.evaluateCodeWriteGuard = evaluateCodeWriteGuard;
 exports.requestApprovalForWrite = requestApprovalForWrite;
 exports.resolveVerificationPolicy = resolveVerificationPolicy;
@@ -2262,6 +2266,72 @@ function evaluateDelegatedReadPolicy(policy = 'ask') {
         reason: 'delegateReadPolicy is ask (the default), so this read needs an operator decision.',
     };
 }
+/** Bounded, newest-wins. Built from observed requests, because the host does not say which agent is which. */
+exports.AGENT_ROLE_LIMIT = 200;
+const agentRoles = new Map();
+/**
+ * Remember which role an agent last made a request as.
+ *
+ * This is a correlation, not lineage: the plugin sees an `agent` on `agent/request` and an `agent` on
+ * `tools/pre-execute`, and it assumes the same id means the same agent. That assumption is recorded
+ * rather than trusted — an unobserved id resolves to 'unknown' and the observation says so, so the
+ * record degrades honestly instead of inventing an attribution.
+ */
+function rememberAgentRole(agentId, role) {
+    const id = String(agentId ?? '').trim();
+    if (!id)
+        return;
+    if (agentRoles.has(id))
+        agentRoles.delete(id);
+    agentRoles.set(id, role);
+    while (agentRoles.size > exports.AGENT_ROLE_LIMIT) {
+        const oldest = agentRoles.keys().next().value;
+        if (typeof oldest === 'string')
+            agentRoles.delete(oldest);
+    }
+}
+function roleForAgent(agentId) {
+    const id = String(agentId ?? '').trim();
+    if (!id)
+        return 'unknown';
+    return agentRoles.get(id) ?? 'unknown';
+}
+/** The map is module state, so tests need a way to clear it. */
+function resetAgentRoles() {
+    agentRoles.clear();
+}
+/**
+ * Should this tool call be recorded as a source read?
+ *
+ * Observation, not enforcement. The architect is allowed to read source today — the guard gates only
+ * files a worker wrote — and that is not a claim this project wants to keep making on faith. Recording
+ * every source read is what will say whether the architect's access is ever used, and therefore whether
+ * it can be closed.
+ *
+ * The tool check matters as much as the path check: without it, the architect's own refused writes to
+ * source would be counted as reads, and the evidence this exists to gather would be wrong.
+ */
+function describeSourceRead(input) {
+    const role = input?.role ?? 'unknown';
+    const tool = String(input?.tool ?? '').trim().toLowerCase();
+    if (!READ_TOOLS.has(tool)) {
+        return { track: false, role, reason: `'${tool || 'unknown tool'}' is not a read tool` };
+    }
+    const target = String(input?.target ?? '').trim();
+    if (!target)
+        return { track: false, role, reason: 'no target to attribute' };
+    const extension = path.extname(target).toLowerCase();
+    if (!CODE_EXTENSIONS.has(extension)) {
+        return { track: false, role, target, extension, reason: 'not a source file' };
+    }
+    return {
+        track: true,
+        role,
+        target,
+        extension,
+        reason: `source read attributed to ${role}`,
+    };
+}
 function evaluateCodeWriteGuard(exec, config = {}) {
     const name = String(exec?.name || '');
     const args = exec?.arguments;
@@ -2724,6 +2794,23 @@ function apply(ctx, options = {}) {
                         reason: `${verdict.reason} (approval outcome: ${outcome})`,
                     };
                 }
+                // Observation, not enforcement: the architect is allowed to read source, and this records it.
+                // The guard above answers "may this happen"; this answers "did it, and who by" — which is what
+                // will later say whether that access is used at all, and so whether it can be taken away.
+                const observed = describeSourceRead({
+                    tool: exec?.name,
+                    target: extractWriteTarget(exec?.arguments),
+                    role: roleForAgent(exec?.agent?.id),
+                });
+                if (observed.track) {
+                    trace('SOURCE_READ', {
+                        role: observed.role,
+                        agent: String(exec?.agent?.id ?? '').slice(0, 8) || 'unknown',
+                        tool: String(exec?.name ?? ''),
+                        target: observed.target,
+                        extension: observed.extension,
+                    });
+                }
             }
             catch (err) {
                 // Fail closed: a guard that cannot evaluate must not wave the call through.
@@ -2823,6 +2910,9 @@ function apply(ctx, options = {}) {
             hostProvider: resolvedConfig?.provider,
             leadProviders: resolveLeadProviders(options),
         });
+        // Correlate the role with the agent, so a later tool call can be attributed. Best effort by
+        // construction: the host does not expose lineage, so this is the plugin's own inference.
+        rememberAgentRole(agent?.id, role.role);
         const mutatedConfig = applyAgentRole(resolvedConfig || {}, role, {
             cloudProvider: config.cloudProvider,
             cloudModel: config.cloudModel,
@@ -2969,6 +3059,11 @@ const pluginExport = {
     resolveDelegateStatus,
     resolveLeadProviders,
     evaluateDelegatedReadPolicy,
+    rememberAgentRole,
+    roleForAgent,
+    resetAgentRoles,
+    describeSourceRead,
+    AGENT_ROLE_LIMIT: exports.AGENT_ROLE_LIMIT,
     detectSourceEgress,
     evaluateSourceEgress,
     DEFAULT_SOURCE_EGRESS_MIN_LINES: exports.DEFAULT_SOURCE_EGRESS_MIN_LINES,

@@ -500,6 +500,27 @@ host exposing agent lineage; `allow` is what you use until then, with that cost 
 implied. `deny` is the other end — useful when the architect must never see the code again and a prompt
 would only be a temptation.
 
+### The architect *can* read source, and every such read is recorded
+
+Worth stating plainly, because it is the one boundary in this plugin that is not a boundary. The read
+guard gates files a worker wrote; everything else is readable by any agent, so **the architect can read
+every source file in your repository**. What discourages it is one sentence in its system instruction,
+and a sentence is a convention.
+
+Rather than assert otherwise, the plugin records it. Every read that passes the guard and targets a
+source extension is written to the `SOURCE_READ` trace, with the role when the agent can be identified
+and `unknown` when it cannot.
+
+The point is to settle a design question with evidence. If the trace stays empty across real work, the
+architect's read access can be closed — and that would make "the lead is the only tier that sees code" a
+fact rather than an intention. If it does not stay empty, then the lead is not carrying the reading it is
+supposed to, and closing the access would break the workflow that actually exists.
+
+Attribution is an inference, not lineage, and it is labelled as such. The host does not say which agent
+is which, so the plugin correlates the agent ids it sees on requests with the ids it sees on tool calls.
+An unmatched id is recorded as `unknown`: the read is still counted, and the record does not pretend to
+know who made it.
+
 The registry is persisted to `delegated-registry.json` in the plugin data directory — one entry per
 path, recording the path as it was written plus the sha256 of the content — and reloaded at startup, so
 a restart does not silently forget what was delegated. It is bounded at 500 entries, newest first, and
