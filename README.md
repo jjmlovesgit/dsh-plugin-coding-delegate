@@ -231,6 +231,11 @@ npm run test:all       # both
 `dist/` is committed because DSH loads `dist/index.js`. CI rebuilds and fails if the committed
 `dist` has drifted from `src`.
 
+Run the oracles as `npm run test:oracles`, not as a bare `node --test`. The script carries a `--require`
+preload that redirects the plugin's data directory to a temp home: `vitest.config.ts` covers the unit tests,
+but `node --test` never loads it, so a bare invocation writes test fixtures into your live
+`~/.dsh/local-router/router-debug.log`. `scripts/check-oracle-isolation.cjs` is the contract check for it.
+
 ## What this does not claim
 
 - **A patch must match exactly, and a stale one fails.** The worker returns either a whole file or a

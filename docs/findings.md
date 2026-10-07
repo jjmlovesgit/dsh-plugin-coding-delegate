@@ -257,5 +257,35 @@ author remembers, and 21 authors did not — or did not need to until their orac
 path that calls `trace()`. A per-file fix for a cross-cutting concern is not a fix; it is a habit.
 
 The honest repair is one central redirect for the `.cjs` runner, not 21 more copies of the same two lines.
-Not done yet.
+
+**Fixed.** `plugin/scripts/isolate-oracle-data-dir.cjs` is a `--require` preload, and `npm run test:oracles`
+is now `node --require ./scripts/isolate-oracle-data-dir.cjs --test tests/oracles/*.test.cjs`. The parent
+`node --test` process decides the directory once and every test child inherits it through `DSH_ORACLE_HOME`,
+so a run leaves one temp directory rather than twenty-eight. `DSH_HOME` is used rather than
+`DSH_LOCAL_ROUTER_DATA_DIR`, matching `vitest.config.ts`, because the data-dir override is taken verbatim
+and would break `resolveDataDir`'s own assertion that the result ends in `local-router`.
+
+The preload also asserts, and throws, if the redirect ever resolves back to the live directory, so the
+failure mode is a dead oracle run rather than another few months of silent pollution.
+
+Measured in both directions:
+
+| | effect on the live log, per oracle run |
+| --- | --- |
+| before | **+4 fixture markers** (2 Slack token, 2 `hunter2hunter2`), plus ~19 KB of trace |
+| after | **0** |
+
+The fixtures did not vanish, they moved: each run now leaves a `dsh-oracles-home-*` directory holding a
+19,511-byte trace log with exactly those 2 + 2 markers in it. The suite is unchanged at 275/275.
+
+`scripts/check-oracle-isolation.cjs` encodes the property. It counts fixture markers in the live log before
+and after running `npm run test:oracles` — markers rather than a file hash, because the running DSH host
+appends to that log continuously, so a hash comparison would differ every time and prove nothing. It was
+demonstrated red before the fix and green after.
+
+**The general lesson, and it is not about tests.** The earlier registry fix and this one were both per-file
+conventions, and both leaked through the files nobody remembered to update. Worse: the gate command was
+documented in `docs/refactor.md` as a bare `node --test`, so the manual was instructing every future
+session to reintroduce the bug. A contract check that fails loudly is worth more than a convention that is
+usually followed — and a documented command is part of the system, not a comment on it.
 

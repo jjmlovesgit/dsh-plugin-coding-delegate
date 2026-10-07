@@ -61,12 +61,14 @@ worth doing afterwards is re-reading that file next to `dependencies.json`.
 
 ## Two things found while checking, neither of them about the update
 
-**1. The oracle suite writes into the live plugin data directory.** `router-debug.log` is 3.3 MB and ~120,000
-lines, with test fixtures — a fake Slack token, an RSA key, `hunter2hunter2` — interleaved into live
-traffic. `vitest.config.ts` redirects `DSH_HOME` for the unit tests, but the 275 `.cjs` oracles run under
-`node --test`, which never loads that config. Only 7 of 28 oracles redirect the data dir themselves. This
-matters more than tidiness suggests: `router-debug.log` **is** this project's live-observation instrument,
-and the test suite is writing into it. Recorded in [`findings.md`](findings.md).
+**1. The oracle suite was writing into the live plugin data directory — since fixed.** `router-debug.log`
+had reached 3.3 MB and ~120,000 lines, with test fixtures — a fake Slack token, `hunter2hunter2` — and
+~19 KB of trace per run interleaved into live traffic. `vitest.config.ts` redirects `DSH_HOME` for the unit
+tests, but the 275 `.cjs` oracles run under `node --test`, which never loads that config, and only 7 of 28
+redirected the data dir themselves. This mattered more than tidiness suggests: `router-debug.log` **is**
+this project's live-observation instrument. Now fixed with one central `--require` preload on the oracle
+runner, guarded by `scripts/check-oracle-isolation.cjs` — demonstrated red, then green. See
+[`findings.md`](findings.md) and ROADMAP item 22.
 
 **2. A stray `dsh` on PATH.** `dsh` resolves to the unreferenced `0.1.5-rc.3` copy. Any diagnostic run from
 a terminal — `dsh --dump-config`, `dsh --version`, `--dump-config-schema` — inspects a **different

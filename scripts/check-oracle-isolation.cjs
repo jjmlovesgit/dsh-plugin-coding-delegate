@@ -1,0 +1,96 @@
+#!/usr/bin/env node
+/**
+ * Contract check: running the oracle suite must not write into the operator's live plugin data
+ * directory.
+ *
+ * `npm test` (vitest) redirects `DSH_HOME` through `vitest.config.ts`. The `.cjs` oracles run under
+ * `node --test`, which never loads that config, so they were appending their own fixtures to the real
+ * `~/.dsh/local-router/router-debug.log` -- the very file `docs/live-verification.md` is built by
+ * reading. See `docs/findings.md`.
+ *
+ * This counts *fixture markers* rather than hashing the data directory. The running DSH host appends
+ * to `router-debug.log` continuously, so a plain before/after hash would always differ and the check
+ * would be worthless. Fixture markers are strings only a test run emits, so they are immune to that
+ * noise -- which is the whole reason the assertion can mean anything.
+ *
+ * The suite is run with `stdio: 'inherit'` rather than captured. DSH's confined sandbox modes refuse a
+ * piped spawn outright (`spawn EPERM`), and capturing output through a pipe is what triggers it. The
+ * exit status is still available either way, and the suite's own output is more useful on the console
+ * than swallowed.
+ *
+ * Usage:  node scripts/check-oracle-isolation.cjs
+ * Exit 0 when the suite left the live data directory alone, 1 when it did not, 2 when the suite itself
+ * failed and the check therefore proves nothing.
+ */
+'use strict'
+
+const { spawnSync } = require('node:child_process')
+const fs = require('node:fs')
+const os = require('node:os')
+const path = require('node:path')
+
+const REPO = path.resolve(__dirname, '..')
+const PLUGIN = path.join(REPO, 'plugin')
+const LIVE_LOG = path.join(os.homedir(), '.dsh', 'local-router', 'router-debug.log')
+
+// Strings only a test run emits. Kept short and specific so that no live session can produce them.
+const MARKERS = ['xoxb-1234567890-abcdefghij', 'hunter2hunter2']
+
+function countMarkers() {
+  if (!fs.existsSync(LIVE_LOG)) return null
+  const text = fs.readFileSync(LIVE_LOG, 'utf8')
+  const counts = {}
+  for (const marker of MARKERS) counts[marker] = text.split(marker).length - 1
+  return counts
+}
+
+function total(counts) {
+  return Object.values(counts).reduce((sum, n) => sum + n, 0)
+}
+
+const before = countMarkers()
+if (before === null) {
+  console.log('SKIP: no live trace log at ' + LIVE_LOG)
+  console.log('      Nothing can be polluted yet. Run the plugin once, then re-run this check.')
+  process.exit(0)
+}
+
+console.log('live trace log : ' + LIVE_LOG)
+console.log('markers before : ' + JSON.stringify(before))
+console.log('')
+console.log('running: npm run test:oracles  (in ' + PLUGIN + ')')
+console.log('')
+
+const run = spawnSync('npm', ['run', 'test:oracles'], {
+  cwd: PLUGIN,
+  stdio: 'inherit',
+  shell: true,
+})
+
+const after = countMarkers()
+console.log('')
+console.log('markers after  : ' + JSON.stringify(after))
+
+if (run.status !== 0) {
+  console.log('')
+  console.log('The oracle suite itself did not pass (exit ' + run.status + '), so this check cannot')
+  console.log('conclude anything about isolation. Fix the suite first.')
+  process.exit(2)
+}
+
+const grew = total(after) - total(before)
+console.log('')
+if (grew === 0) {
+  console.log('OK: the oracle suite wrote no fixture markers into the live data directory.')
+  process.exit(0)
+}
+
+console.log('FAIL: the oracle suite added ' + grew + ' fixture marker(s) to the live data directory.')
+for (const marker of MARKERS) {
+  const delta = after[marker] - before[marker]
+  if (delta) console.log('  +' + delta + '  ' + marker)
+}
+console.log('')
+console.log('The `.cjs` oracles are not isolating their data directory. See docs/findings.md and')
+console.log('ROADMAP item 22.')
+process.exit(1)

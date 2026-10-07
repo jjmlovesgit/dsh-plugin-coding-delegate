@@ -90,12 +90,21 @@ The predicted eighth pass for `LocalRouter` / routing and the DLP rules in `inde
 - **Never commit red.** The gate command is:
 
   ```powershell
-  node --test plugin/tests/oracles/*.test.cjs
-  # then, from plugin/: node node_modules/vitest/vitest.mjs run
+  cd plugin
+  npm run build
+  npx vitest run
+  npm run test:oracles
   ```
 
   Run it and gate the commit on the exit code **in the same command**. A red suite has been pushed once by
   running the check and the commit without gating between them; do not repeat it.
+- **Run the oracles as `npm run test:oracles`, never as a bare `node --test`.** That script carries a
+  `--require` preload (`plugin/scripts/isolate-oracle-data-dir.cjs`) which redirects the plugin's data
+  directory to a temp home. `vitest.config.ts` covers the unit tests, but `node --test` never loads it, so a
+  bare invocation writes test fixtures and ~19 KB of trace output into the operator's live
+  `~/.dsh/local-router/router-debug.log` — the file `docs/live-verification.md` is built by reading. A
+  per-file redirect was tried first and covered only 7 of 28 oracles. `scripts/check-oracle-isolation.cjs`
+  is the contract check that keeps this honest.
 - **`node --test` needs the escalation.** In a confined shell it fails with `spawn EPERM` because the test
   runner spawns one child per file. Inside the plugin's own verification spawn it works fine.
 - **The public surface is frozen.** `plugin/tests/oracles/public-surface.test.cjs` records 64 named exports
