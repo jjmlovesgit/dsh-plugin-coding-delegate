@@ -257,6 +257,8 @@ When you call `predictRoute` directly, its decision output is
 | `emitAllowlist` | `[]` | Extra directories a delegated worker may write into besides the workspace |
 | `allowInProcessFallback` | `false` | Run a denied spawn's verification module inside the server process |
 | `leadProviders` | `[]` | Provider ids that are **not** the architect. Their requests are left exactly as configured |
+| `leadTier` | `false` | Derive `leadProviders` from the `LEAD` profile instead of naming providers |
+| `delegateReadPolicy` | `'ask'` | `ask`, `allow` or `deny` for reading a file a worker wrote. `allow` weakens rule 3 |
 
 `guardAskPaths` **replaces** the built-in default rather than adding to it. Setting it to
 `["plugin/src/"]` therefore makes `tests/` and `tools/` hard denies: list every path you want to
@@ -456,6 +458,17 @@ that code back into the architect's context defeats the point of having delegate
 route that gets the file summarised back either, because the worker has no repository read and cannot
 inspect a file it was not given. Either approve the read and accept the context cost, or re-plan the
 unit so that it does not need the contents.
+
+`delegateReadPolicy` changes what "asked" means. `deny` refuses the read outright rather than prompting.
+`allow` permits it, and that is the setting a lead tier needs: the lead's job is to read the code it
+writes contracts about, and the guard cannot yet tell a lead from the architect because the host does
+not expose which agent is which.
+
+**`allow` is an honest weakening of rule 3, not a fix.** It relaxes the rule for *every* agent, so a
+prompt that would have caught the architect reading back delegated code stops appearing. The fix is the
+host exposing agent lineage; `allow` is what you use until then, with that cost written down rather than
+implied. `deny` is the other end — useful when the architect must never see the code again and a prompt
+would only be a temptation.
 
 The registry is in-memory and process-scoped — it is a workflow guard, not durable state — and it is
 bounded at 500 paths. Only files this plugin wrote are covered; everything else reads freely, and a

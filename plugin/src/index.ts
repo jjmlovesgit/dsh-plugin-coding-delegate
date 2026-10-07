@@ -93,6 +93,15 @@ export interface PluginConfig {
    * which is the one failure direction that costs you source leaving the machine.
    */
   leadTier?: boolean
+  /**
+   * What happens when an agent reads a file a delegated worker wrote. `ask` (default) prompts,
+   * `deny` refuses, and `allow` permits it.
+   *
+   * `allow` exists for a lead tier that must read the code it writes contracts about, and it is an
+   * honest weakening of rule 3 rather than a fix — the fix is the host exposing agent lineage. The
+   * guard cannot yet tell the architect from a lead, so `allow` relaxes the rule for every agent.
+   */
+  delegateReadPolicy?: DelegateReadPolicy
 }
 
 export interface RouterMetadata {
@@ -2506,6 +2515,43 @@ function findWriteViaScript(
  * Pure and exported so it can be unit-tested without a running server.
  * Returns null when the call has nothing to do with code authoring.
  */
+export type DelegateReadPolicy = 'ask' | 'allow' | 'deny'
+
+/**
+ * What happens when an agent reads a file a delegated worker wrote.
+ *
+ * The guard cannot yet tell the architect from a lead, so it gates any agent reading delegated code.
+ * `ask` is the right default: pulling that code back into the architect's context defeats the point of
+ * having delegated it, but reviewing a line is sometimes exactly what an operator wants.
+ *
+ * `allow` is an escape hatch for a lead tier that has to read the code it writes contracts about. It is
+ * an honest weakening of rule 3 rather than a fix, so the reason says which rule it costs — the config
+ * entry documents its own price instead of quietly being a bypass.
+ */
+export function evaluateDelegatedReadPolicy(policy: DelegateReadPolicy = 'ask'): {
+  kind: 'allow' | 'ask' | 'deny'
+  reason: string
+} {
+  if (policy === 'allow') {
+    return {
+      kind: 'allow',
+      reason:
+        'delegateReadPolicy is allow, which weakens rule 3: reading delegated source back into a ' +
+        'context is permitted for every agent, because the host does not yet say which agent is which.',
+    }
+  }
+  if (policy === 'deny') {
+    return {
+      kind: 'deny',
+      reason: 'delegateReadPolicy is deny, so reading delegated source back is refused (rule 3).',
+    }
+  }
+  return {
+    kind: 'ask',
+    reason: 'delegateReadPolicy is ask (the default), so this read needs an operator decision.',
+  }
+}
+
 export function evaluateCodeWriteGuard(
   exec: any,
   config: {
@@ -2516,6 +2562,8 @@ export function evaluateCodeWriteGuard(
     scriptDepth?: number
     /** Paths a delegated worker wrote; reads of them are gated. Injectable for tests. */
     delegatedPaths?: Iterable<string>
+    /** ask | allow | deny for reading a delegated file back. Defaults to ask. */
+    delegateReadPolicy?: DelegateReadPolicy
   } = {}
 ): GuardVerdict | null {
   const name = String(exec?.name || '')
@@ -2534,14 +2582,16 @@ export function evaluateCodeWriteGuard(
   if (READ_TOOLS.has(name)) {
     const target = extractWriteTarget(args)
     if (target && isDelegatedPath(target, config.delegatedPaths)) {
+      const delegatedRead = evaluateDelegatedReadPolicy(config.delegateReadPolicy)
+      if (delegatedRead.kind === 'allow') return null
       return {
-        kind: 'ask',
+        kind: delegatedRead.kind === 'deny' ? 'deny' : 'ask',
         target,
         reason:
           `'${target}' was written by a delegated worker, and reading it pulls that code into the ` +
           `cloud architect's context — the noise the delegation exists to keep out. The worker has no ` +
           `repository read, so it cannot summarise the file back either: approve only if you need the ` +
-          `contents here, or re-plan the unit so that it does not.`,
+          `contents here, or re-plan the unit so that it does not. ${delegatedRead.reason}`,
       }
     }
     return null
@@ -2622,13 +2672,15 @@ export function evaluateCodeWriteGuard(
     // Reading a delegated file through the shell is the same read by another route.
     const delegatedRead = findDelegatedRead(command, config.delegatedPaths)
     if (delegatedRead) {
+      const readPolicy = evaluateDelegatedReadPolicy(config.delegateReadPolicy)
+      if (readPolicy.kind === 'allow') return null
       return {
-        kind: 'ask',
+        kind: readPolicy.kind === 'deny' ? 'deny' : 'ask',
         target: delegatedRead,
         reason:
           `Shell command reads '${delegatedRead}', which a delegated worker wrote. Reading it pulls ` +
           `that code into the cloud architect's context, and the worker has no repository read to ` +
-          `summarise it back instead. Approve only if you need the contents here.`,
+          `summarise it back instead. Approve only if you need the contents here. ${readPolicy.reason}`,
       }
     }
 
@@ -3025,6 +3077,7 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
         const verdict = evaluateCodeWriteGuard(exec, {
           askPaths: options?.guardAskPaths,
           delegatedPaths,
+          delegateReadPolicy: options?.delegateReadPolicy,
         })
         if (verdict) {
           // guardMode 'deny' wins outright: an operator who said "never prompt" must
@@ -3282,6 +3335,7 @@ const pluginExport = {
   contractViolations,
   resolveDelegateStatus,
   resolveLeadProviders,
+  evaluateDelegatedReadPolicy,
   resolveAgentRole,
   applyArchitectConfig,
   applyAgentRole,

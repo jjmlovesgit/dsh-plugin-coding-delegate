@@ -84,6 +84,15 @@ export interface PluginConfig {
      * which is the one failure direction that costs you source leaving the machine.
      */
     leadTier?: boolean;
+    /**
+     * What happens when an agent reads a file a delegated worker wrote. `ask` (default) prompts,
+     * `deny` refuses, and `allow` permits it.
+     *
+     * `allow` exists for a lead tier that must read the code it writes contracts about, and it is an
+     * honest weakening of rule 3 rather than a fix — the fix is the host exposing agent lineage. The
+     * guard cannot yet tell the architect from a lead, so `allow` relaxes the rule for every agent.
+     */
+    delegateReadPolicy?: DelegateReadPolicy;
 }
 export interface RouterMetadata {
     provider: string;
@@ -569,6 +578,22 @@ export declare function hasCommandDeleteSignal(text: string): boolean;
  * Pure and exported so it can be unit-tested without a running server.
  * Returns null when the call has nothing to do with code authoring.
  */
+export type DelegateReadPolicy = 'ask' | 'allow' | 'deny';
+/**
+ * What happens when an agent reads a file a delegated worker wrote.
+ *
+ * The guard cannot yet tell the architect from a lead, so it gates any agent reading delegated code.
+ * `ask` is the right default: pulling that code back into the architect's context defeats the point of
+ * having delegated it, but reviewing a line is sometimes exactly what an operator wants.
+ *
+ * `allow` is an escape hatch for a lead tier that has to read the code it writes contracts about. It is
+ * an honest weakening of rule 3 rather than a fix, so the reason says which rule it costs — the config
+ * entry documents its own price instead of quietly being a bypass.
+ */
+export declare function evaluateDelegatedReadPolicy(policy?: DelegateReadPolicy): {
+    kind: 'allow' | 'ask' | 'deny';
+    reason: string;
+};
 export declare function evaluateCodeWriteGuard(exec: any, config?: {
     askPaths?: string[];
     /** Injectable reader, so the script scan is testable without touching disk. */
@@ -577,6 +602,8 @@ export declare function evaluateCodeWriteGuard(exec: any, config?: {
     scriptDepth?: number;
     /** Paths a delegated worker wrote; reads of them are gated. Injectable for tests. */
     delegatedPaths?: Iterable<string>;
+    /** ask | allow | deny for reading a delegated file back. Defaults to ask. */
+    delegateReadPolicy?: DelegateReadPolicy;
 }): GuardVerdict | null;
 /** Closed approval vocabulary; only 'allowed-once' is a grant. */
 export type ApprovalOutcome = 'allowed-once' | 'rejected' | 'cancelled' | 'unavailable';
@@ -670,6 +697,7 @@ declare const pluginExport: {
     contractViolations: typeof contractViolations;
     resolveDelegateStatus: typeof resolveDelegateStatus;
     resolveLeadProviders: typeof resolveLeadProviders;
+    evaluateDelegatedReadPolicy: typeof evaluateDelegatedReadPolicy;
     resolveAgentRole: typeof resolveAgentRole;
     applyArchitectConfig: typeof applyArchitectConfig;
     applyAgentRole: typeof applyAgentRole;

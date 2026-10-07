@@ -93,7 +93,7 @@ evaluated, or the approval service cannot be reached, the answer is no.
 | --- | --- | --- |
 | 1 | A credential may not reach the cloud | DLP gate: refused, or pinned local |
 | 2 | The architect may not author or delete source | code guard: denied, or approval-gated |
-| 3 | The architect may not read back what it delegated | reads of worker-written files need approval |
+| 3 | The architect may not read back what it delegated | reads of worker-written files need approval; `delegateReadPolicy: 'allow'` relaxes this for every agent, and says so |
 | 4 | The worker may not write outside the workspace | containment on every emitted path |
 | 5 | The worker's code may not run inside the server | subprocess only; in-process fallback off |
 | 6 | A command the architect proposes may not run unchecked | approval seam |
@@ -211,6 +211,10 @@ npm run test:all       # both
   miss is refused rather than approximated — if the code changed after the worker was given it, the
   edit fails and the unit is re-delegated. Nothing here lets the worker *discover* code; it only ever
   edits what it was given.
+- **The read guard cannot tell the architect from a lead.** Until the host says which agent is which,
+  `delegateReadPolicy: 'allow'` is the only way to let a lead read the code it writes contracts about,
+  and it grants that to every agent. That is a deliberate weakening of rule 3 with the cost written
+  down, not a boundary.
 - The guard sees tool calls and shell text, not intent. Runtime-computed paths and library-mediated
   writes are invisible to it; configuration files are out of scope.
 - The DLP gate scans the user messages the plugin has seen — not assistant output or tool results —
