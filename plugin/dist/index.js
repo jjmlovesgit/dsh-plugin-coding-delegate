@@ -33,12 +33,11 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.AGENT_ROLE_LIMIT = exports.DEFAULT_SOURCE_EGRESS_MIN_LINES = exports.DELETE_PRIMITIVES = exports.LocalRouter = exports.DEFAULT_CONTEXT_MAX_BYTES = exports.MIN_SEARCH_CHARS = exports.DEFAULT_LOCAL_ENDPOINT = exports.DELEGATE_WORKER_SCHEMA = exports.DELEGATE_WORKER_OPENAI_SCHEMA = exports.name = exports.using = exports.inject = exports.runSandboxVerification = exports.runInProcessFallback = exports.redactVerificationOutput = exports.parseTestOutput = exports.evaluateVerificationPolicy = exports.describeFailures = exports.commandProgram = exports.DEFAULT_VERIFICATION_POLICY = exports.sha256File = exports.saveDelegatedRegistry = exports.resolveDelegatedRegistryPath = exports.resolveContractFiles = exports.rememberDelegated = exports.pruneDelegatedRecords = exports.parseDelegatedRegistry = exports.mergeDelegatedRecords = exports.loadDelegatedRegistry = exports.contractViolations = exports.contractFileHashes = exports.extractAndEmitFiles = exports.evaluateEmissionPath = exports.isPathWithin = exports.trace = exports.resolveDataDir = exports.SavingsTracker = exports.PROFILES = void 0;
+exports.AGENT_ROLE_LIMIT = exports.DEFAULT_SOURCE_EGRESS_MIN_LINES = exports.DELETE_PRIMITIVES = exports.LocalRouter = exports.MIN_SEARCH_CHARS = exports.DEFAULT_LOCAL_ENDPOINT = exports.DELEGATE_WORKER_SCHEMA = exports.DELEGATE_WORKER_OPENAI_SCHEMA = exports.name = exports.using = exports.inject = exports.runSandboxVerification = exports.runInProcessFallback = exports.redactVerificationOutput = exports.parseTestOutput = exports.evaluateVerificationPolicy = exports.describeFailures = exports.commandProgram = exports.DEFAULT_VERIFICATION_POLICY = exports.sha256File = exports.saveDelegatedRegistry = exports.resolveDelegatedRegistryPath = exports.resolveContractFiles = exports.rememberDelegated = exports.pruneDelegatedRecords = exports.parseDelegatedRegistry = exports.mergeDelegatedRecords = exports.loadDelegatedRegistry = exports.contractViolations = exports.contractFileHashes = exports.resolveContextFiles = exports.DEFAULT_CONTEXT_MAX_BYTES = exports.extractAndEmitFiles = exports.evaluateEmissionPath = exports.isPathWithin = exports.trace = exports.resolveDataDir = exports.SavingsTracker = exports.PROFILES = void 0;
 exports.scanDLP = scanDLP;
 exports.resolveChatCompletionsUrl = resolveChatCompletionsUrl;
 exports.parseSearchReplaceBlocks = parseSearchReplaceBlocks;
 exports.applySearchReplaceBlocks = applySearchReplaceBlocks;
-exports.resolveContextFiles = resolveContextFiles;
 exports.resolveDelegateStatus = resolveDelegateStatus;
 exports.delegateWorker = delegateWorker;
 exports.extractPromptText = extractPromptText;
@@ -63,7 +62,6 @@ exports.applyAgentRole = applyAgentRole;
 exports.apply = apply;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
-const crypto = __importStar(require("crypto"));
 const savings_tracker_1 = require("./savings-tracker");
 Object.defineProperty(exports, "SavingsTracker", { enumerable: true, get: function () { return savings_tracker_1.SavingsTracker; } });
 const profiles_1 = require("./profiles");
@@ -73,6 +71,7 @@ const logging_1 = require("./logging");
 const paths_1 = require("./paths");
 const emission_1 = require("./emission");
 const verification_1 = require("./verification");
+const context_1 = require("./context");
 const contracts_1 = require("./contracts");
 var logging_2 = require("./logging");
 Object.defineProperty(exports, "resolveDataDir", { enumerable: true, get: function () { return logging_2.resolveDataDir; } });
@@ -82,6 +81,9 @@ Object.defineProperty(exports, "isPathWithin", { enumerable: true, get: function
 var emission_2 = require("./emission");
 Object.defineProperty(exports, "evaluateEmissionPath", { enumerable: true, get: function () { return emission_2.evaluateEmissionPath; } });
 Object.defineProperty(exports, "extractAndEmitFiles", { enumerable: true, get: function () { return emission_2.extractAndEmitFiles; } });
+var context_2 = require("./context");
+Object.defineProperty(exports, "DEFAULT_CONTEXT_MAX_BYTES", { enumerable: true, get: function () { return context_2.DEFAULT_CONTEXT_MAX_BYTES; } });
+Object.defineProperty(exports, "resolveContextFiles", { enumerable: true, get: function () { return context_2.resolveContextFiles; } });
 var contracts_2 = require("./contracts");
 Object.defineProperty(exports, "contractFileHashes", { enumerable: true, get: function () { return contracts_2.contractFileHashes; } });
 Object.defineProperty(exports, "contractViolations", { enumerable: true, get: function () { return contracts_2.contractViolations; } });
@@ -330,87 +332,6 @@ function applySearchReplaceBlocks(content, blocks) {
     return { ok: true, content: usesCrlf ? work.split('\n').join('\r\n') : work };
 }
 /**
- * Injected context competes with the instruction for the worker's input window, so the budget is a
- * safety bound rather than a caller preference. Over budget refuses; it never truncates quietly,
- * because a worker given half a file answers confidently about a file it only half saw.
- */
-exports.DEFAULT_CONTEXT_MAX_BYTES = 32768;
-/**
- * Read the files the architect named and render them for the worker's prompt. Containment matches
- * emission exactly: the same resolution, and the same refusal of escapes and absolute paths outside
- * the root, because reading a file in order to transmit it is an egress route and deserves the same
- * scepticism as writing one.
- */
-function resolveContextFiles(requests, baseDir, allowedRoots = [], maxBytes = exports.DEFAULT_CONTEXT_MAX_BYTES) {
-    const injected = [];
-    const errors = [];
-    const sections = [];
-    let totalBytes = 0;
-    for (const request of requests ?? []) {
-        const declared = String(request?.path || '').trim();
-        if (!declared) {
-            errors.push('a contextFiles entry had no path');
-            continue;
-        }
-        const resolvedPath = path.isAbsolute(declared) ? declared : path.resolve(baseDir, declared);
-        const containment = (0, emission_1.evaluateEmissionPath)(resolvedPath, baseDir, allowedRoots);
-        if (!containment.allowed) {
-            errors.push(`context file '${declared}' was refused: ${containment.reason}`);
-            continue;
-        }
-        let raw;
-        try {
-            raw = fs.readFileSync(resolvedPath, 'utf8');
-        }
-        catch (err) {
-            errors.push(`context file '${declared}' could not be read: ${err?.message || String(err)}`);
-            continue;
-        }
-        const allLines = raw.split('\n');
-        let lineRange = null;
-        let body = raw;
-        if (request.startLine !== undefined || request.endLine !== undefined) {
-            const start = Number(request.startLine ?? 1);
-            const end = Number(request.endLine ?? allLines.length);
-            if (!Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end < start) {
-                errors.push(`context file '${declared}' had an invalid line range (${request.startLine}-${request.endLine})`);
-                continue;
-            }
-            if (start > allLines.length) {
-                errors.push(`context file '${declared}' has ${allLines.length} line(s), so a range starting at ${start} does not exist`);
-                continue;
-            }
-            // An over-long end is clamped rather than refused, and the clamp is reported in the record.
-            const clampedEnd = Math.min(end, allLines.length);
-            lineRange = { start, end: clampedEnd };
-            body = allLines.slice(start - 1, clampedEnd).join('\n');
-        }
-        const bytes = Buffer.byteLength(body, 'utf8');
-        if (totalBytes + bytes > maxBytes) {
-            errors.push(`context injection would exceed its ${maxBytes}-byte budget (${totalBytes + bytes} bytes declared). ` +
-                `Narrow the line ranges or declare fewer files.`);
-            continue;
-        }
-        totalBytes += bytes;
-        const relativeName = path.relative(baseDir, resolvedPath) || declared;
-        injected.push({
-            path: resolvedPath,
-            relativeName,
-            lineRange,
-            lines: body.split('\n').length,
-            bytes,
-            sha256: crypto.createHash('sha256').update(body, 'utf8').digest('hex'),
-        });
-        sections.push(`--- ${relativeName}${lineRange ? ` (lines ${lineRange.start}-${lineRange.end})` : ''} ---\n${body}`);
-    }
-    // Any error refuses the whole injection, and the caller refuses the delegation. A partial view is
-    // worse than none: the worker would be asked to edit a file it had only partly been shown.
-    if (errors.length > 0)
-        return { injected: [], text: '', errors };
-    const text = sections.length > 0 ? `Declared Context:\n${sections.join('\n\n')}` : '';
-    return { injected, text, errors };
-}
-/**
  * Status precedence, as a pure function so the ordering is testable without a server. Tampering
  * outranks everything: a modified contract voids the run even when verification passed, because
  * what passed was no longer the contract.
@@ -436,7 +357,7 @@ async function delegateWorker(params = {}, tracker) {
     // Resolved before the worker runs: the contract hashes have to describe the tree as it was handed
     // over, and context has to be read while the architect is still blind to it.
     const workspaceBase = params.workspaceDir || process.cwd();
-    const context = resolveContextFiles(params.contextFiles, workspaceBase);
+    const context = (0, context_1.resolveContextFiles)(params.contextFiles, workspaceBase);
     if (params.contextFiles && params.contextFiles.length > 0) {
         if (context.errors.length > 0) {
             return {
@@ -2238,11 +2159,11 @@ const pluginExport = {
     runSandboxVerification: verification_1.runSandboxVerification,
     parseTestOutput: verification_1.parseTestOutput,
     sha256File: contracts_1.sha256File,
-    resolveContextFiles,
+    resolveContextFiles: context_1.resolveContextFiles,
     parseSearchReplaceBlocks,
     applySearchReplaceBlocks,
     MIN_SEARCH_CHARS: exports.MIN_SEARCH_CHARS,
-    DEFAULT_CONTEXT_MAX_BYTES: exports.DEFAULT_CONTEXT_MAX_BYTES,
+    DEFAULT_CONTEXT_MAX_BYTES: context_1.DEFAULT_CONTEXT_MAX_BYTES,
     resolveContractFiles: contracts_1.resolveContractFiles,
     contractFileHashes: contracts_1.contractFileHashes,
     contractViolations: contracts_1.contractViolations,

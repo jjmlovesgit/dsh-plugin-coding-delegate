@@ -3,11 +3,13 @@ import { SavingsTracker, RouteType, StepUsage } from './savings-tracker';
 import { PROFILES, ProfileConfig } from './profiles';
 import { extractAndEmitFiles } from './emission';
 import { VerificationPolicy, parseTestOutput, runSandboxVerification } from './verification';
+import { ContextRequest, resolveContextFiles } from './context';
 import { contractFileHashes, contractViolations, loadDelegatedRegistry, mergeDelegatedRecords, parseDelegatedRegistry, pruneDelegatedRecords, rememberDelegated, resolveContractFiles, resolveDelegatedRegistryPath, saveDelegatedRegistry, sha256File } from './contracts';
 export { PROFILES, ProfileConfig, SavingsTracker, RouteType, StepUsage };
 export { resolveDataDir, trace } from './logging';
 export { isPathWithin } from './paths';
 export { evaluateEmissionPath, extractAndEmitFiles } from './emission';
+export { ContextInjection, ContextRequest, ContextResolution, DEFAULT_CONTEXT_MAX_BYTES, resolveContextFiles, } from './context';
 export { contractFileHashes, contractViolations, loadDelegatedRegistry, mergeDelegatedRecords, parseDelegatedRegistry, pruneDelegatedRecords, rememberDelegated, resolveContractFiles, resolveDelegatedRegistryPath, saveDelegatedRegistry, sha256File, } from './contracts';
 export { DEFAULT_VERIFICATION_POLICY, commandProgram, describeFailures, evaluateVerificationPolicy, parseTestOutput, redactVerificationOutput, runInProcessFallback, runSandboxVerification, } from './verification';
 export declare const inject: string[];
@@ -390,45 +392,6 @@ export declare function parseSearchReplaceBlocks(body: string): SearchReplaceBlo
  * which a wrong edit lands silently.
  */
 export declare function applySearchReplaceBlocks(content: string, blocks: SearchReplaceBlock[]): PatchResult;
-/** One file the architect wants the worker to see. Names and ranges only, never contents. */
-export interface ContextRequest {
-    path: string;
-    startLine?: number;
-    endLine?: number;
-}
-/**
- * What the architect is told about an injection. Deliberately has no `content` field — the whole
- * point is that the code travels to the worker and does not travel back.
- */
-export interface ContextInjection {
-    path: string;
-    relativeName: string;
-    lineRange: {
-        start: number;
-        end: number;
-    } | null;
-    lines: number;
-    bytes: number;
-    sha256: string;
-}
-export interface ContextResolution {
-    injected: ContextInjection[];
-    text: string;
-    errors: string[];
-}
-/**
- * Injected context competes with the instruction for the worker's input window, so the budget is a
- * safety bound rather than a caller preference. Over budget refuses; it never truncates quietly,
- * because a worker given half a file answers confidently about a file it only half saw.
- */
-export declare const DEFAULT_CONTEXT_MAX_BYTES = 32768;
-/**
- * Read the files the architect named and render them for the worker's prompt. Containment matches
- * emission exactly: the same resolution, and the same refusal of escapes and absolute paths outside
- * the root, because reading a file in order to transmit it is an egress route and deserves the same
- * scepticism as writing one.
- */
-export declare function resolveContextFiles(requests: ContextRequest[] | undefined, baseDir: string, allowedRoots?: string[], maxBytes?: number): ContextResolution;
 /**
  * Status precedence, as a pure function so the ordering is testable without a server. Tampering
  * outranks everything: a modified contract voids the run even when verification passed, because
