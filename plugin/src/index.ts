@@ -223,6 +223,21 @@ export interface PluginConfig {
    */
   verificationTimeoutMs?: number
   /**
+   * The project's own check — a build, a full suite — run after each unit's contract, with the power to
+   * void an otherwise passing unit. This is what catches two units disagreeing: a unit can pass the tests
+   * written for it and still break every caller of what it changed.
+   *
+   * Operator configuration, not model input, which is why it is absent from the tool schema and not
+   * approval-gated — the operator wrote this string here, exactly as they would in CI. It runs as an
+   * ordinary subprocess under `verificationTimeoutMs`, and a denied spawn is a failure rather than a
+   * pass. It is skipped when the unit wrote no files, since a delegation that changed nothing cannot
+   * have broken coherence.
+   *
+   * A failure is reported as `INCOHERENT` rather than `VERIFICATION_FAILED`: the unit is fine and the
+   * project is not, which is a different instruction to the architect.
+   */
+  coherenceVerification?: string
+  /**
    * Extra directories a delegated worker may write into besides the resolved session
    * workspace. Absolute worker paths and `..` escapes outside every allowed root are
    * refused and reported rather than written.
@@ -846,11 +861,18 @@ export async function requestApprovalForWrite(
 }
 
 export function resolveVerificationPolicy(options: PluginConfig = {}): VerificationPolicy {
+  // A blank or non-string coherence command is absent, not an empty command: an empty string would run
+  // as a no-op subprocess and report success, which is a project check that checks nothing.
+  const coherence =
+    typeof options.coherenceVerification === 'string' && options.coherenceVerification.trim()
+      ? options.coherenceVerification.trim()
+      : undefined
   return {
     mode: options.verificationApproval ?? 'ask',
     allowlist: Array.isArray(options.verificationAllowlist) ? options.verificationAllowlist : [],
     allowInProcessFallback: options.allowInProcessFallback === true,
     timeoutMs: resolveVerificationTimeoutMs(options.verificationTimeoutMs),
+    ...(coherence ? { coherenceVerification: coherence } : {}),
   }
 }
 
