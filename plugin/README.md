@@ -259,6 +259,8 @@ When you call `predictRoute` directly, its decision output is
 | `leadProviders` | `[]` | Provider ids that are **not** the architect. Their requests are left exactly as configured |
 | `leadTier` | `false` | Derive `leadProviders` from the `LEAD` profile instead of naming providers |
 | `delegateReadPolicy` | `'ask'` | `ask`, `allow` or `deny` for reading a file a worker wrote. `allow` weakens rule 3 |
+| `sourceEgress` | `'deny'` | `deny`, `ask` or `allow` for a cloud-bound request carrying source (rule 8) |
+| `sourceEgressMinLines` | `3` | Lines a fenced source block needs before it counts. Lower is more false positives |
 
 `guardAskPaths` **replaces** the built-in default rather than adding to it. Setting it to
 `["plugin/src/"]` therefore makes `tests/` and `tools/` hard denies: list every path you want to
@@ -297,6 +299,34 @@ tier in one place — a local thinking model on the worker's endpoint, deliberat
 The other half — a DSH agent preset that gives the lead its instruction and repository-read tools — is
 the operator's to write. `presets/lead.md` at the repository root documents the shape and is explicit
 about which half is verified and which is not.
+
+## Rule 8: source may not reach the cloud
+
+The other gates cover the tool routes: the read guard stops delegated code coming back, and
+`contextFiles` injects into the worker rather than the cloud. What is left is the blunt route — source
+sitting in the outbound payload because it was typed into a cloud-bound conversation.
+
+Before a request leaves for the cloud, the payload is scanned for fenced blocks carrying a source
+language tag and at least `sourceEgressMinLines` lines (default 3). `sourceEgress` then decides:
+`deny` (default) refuses the request, `ask` puts it to the approval seam, `allow` transmits it. A
+request bound for the local worker is not egress and is never affected — which is the whole reason the
+lead tier runs locally.
+
+**The detector is a heuristic, and its limits are worth knowing before you rely on it.** Prose about
+code does not trip it, and neither does an **untagged** fenced block. That second one is a real false
+negative, asserted in `tests/oracles/source-egress.test.cjs` so that it cannot later be mistaken for a
+proof. Like the rest of the guard, this is a deterrent rather than a boundary.
+
+Because it is the one rule here that can refuse a request you typed yourself, the refusal names the
+setting that resolves it. The gate reads every user message the session has sent, so a block from an
+earlier turn keeps it closed until the session is restarted — the same behaviour as the DLP firewall,
+and for the same reason: the host re-sends the conversation, so a clean latest message is not evidence
+of a clean payload.
+
+`ask` needs a reachable approval service. If none is available it **refuses** rather than transmitting,
+which is the same fail-closed direction as `verificationApproval`. That path has not been verified live
+from `agent/request` — `deny` is the default precisely so the unverified path is not the one you get by
+default.
 
 ## The `delegate_worker` tool
 

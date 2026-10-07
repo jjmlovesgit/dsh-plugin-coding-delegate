@@ -93,6 +93,20 @@ export interface PluginConfig {
      * guard cannot yet tell the architect from a lead, so `allow` relaxes the rule for every agent.
      */
     delegateReadPolicy?: DelegateReadPolicy;
+    /**
+     * Rule 8: what happens when a cloud-bound request carries source code in its own payload.
+     *
+     * `deny` (default) refuses the request, `ask` puts it to the operator, `allow` transmits it. A
+     * request bound for the local worker is not egress and is never affected.
+     *
+     * This is the one rule here that can refuse a request the operator typed themselves, so it is worth
+     * knowing the detector: fenced blocks with a source language tag, at least
+     * `sourceEgressMinLines` lines long. Prose about code does not trip it, and neither does an
+     * untagged block — a real false negative, documented rather than hidden.
+     */
+    sourceEgress?: SourceEgressPolicy;
+    /** Lines a fenced source block needs before it counts (default 3). Lower is more false positives. */
+    sourceEgressMinLines?: number;
 }
 export interface RouterMetadata {
     provider: string;
@@ -578,6 +592,34 @@ export declare function hasCommandDeleteSignal(text: string): boolean;
  * Pure and exported so it can be unit-tested without a running server.
  * Returns null when the call has nothing to do with code authoring.
  */
+export type SourceEgressPolicy = 'deny' | 'ask' | 'allow';
+/** Blocks shorter than this are treated as quotations rather than as code being handed over. */
+export declare const DEFAULT_SOURCE_EGRESS_MIN_LINES = 3;
+export interface SourceEgressDetection {
+    found: boolean;
+    blocks: number;
+    languages: string[];
+}
+/**
+ * Look for source being handed to a cloud provider.
+ *
+ * Only fenced blocks with a source language tag and at least `minLines` lines count. Prose about code
+ * does not, and neither does an untagged block — that is a real false negative and the oracle asserts
+ * it, so this is never mistaken for a proof that source cannot leave. Like the rest of the guard it is
+ * a deterrent, pointed at the one route the other gates do not cover: source sitting in the outbound
+ * payload because it was typed into a cloud-bound conversation.
+ */
+export declare function detectSourceEgress(text: string, options?: {
+    minLines?: number;
+}): SourceEgressDetection;
+/**
+ * Rule 8: source may not reach the cloud. A request bound for the local worker is not egress at all,
+ * so the policy never applies to it — which is the entire reason the lead tier runs locally.
+ */
+export declare function evaluateSourceEgress(action: SourceEgressPolicy, detection: SourceEgressDetection, destination: 'cloud' | 'local'): {
+    kind: 'allow' | 'ask' | 'deny';
+    reason: string;
+};
 export type DelegateReadPolicy = 'ask' | 'allow' | 'deny';
 /**
  * What happens when an agent reads a file a delegated worker wrote.
@@ -698,6 +740,9 @@ declare const pluginExport: {
     resolveDelegateStatus: typeof resolveDelegateStatus;
     resolveLeadProviders: typeof resolveLeadProviders;
     evaluateDelegatedReadPolicy: typeof evaluateDelegatedReadPolicy;
+    detectSourceEgress: typeof detectSourceEgress;
+    evaluateSourceEgress: typeof evaluateSourceEgress;
+    DEFAULT_SOURCE_EGRESS_MIN_LINES: number;
     resolveAgentRole: typeof resolveAgentRole;
     applyArchitectConfig: typeof applyArchitectConfig;
     applyAgentRole: typeof applyAgentRole;

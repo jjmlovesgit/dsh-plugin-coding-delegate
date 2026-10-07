@@ -102,6 +102,20 @@ export interface PluginConfig {
    * guard cannot yet tell the architect from a lead, so `allow` relaxes the rule for every agent.
    */
   delegateReadPolicy?: DelegateReadPolicy
+  /**
+   * Rule 8: what happens when a cloud-bound request carries source code in its own payload.
+   *
+   * `deny` (default) refuses the request, `ask` puts it to the operator, `allow` transmits it. A
+   * request bound for the local worker is not egress and is never affected.
+   *
+   * This is the one rule here that can refuse a request the operator typed themselves, so it is worth
+   * knowing the detector: fenced blocks with a source language tag, at least
+   * `sourceEgressMinLines` lines long. Prose about code does not trip it, and neither does an
+   * untagged block — a real false negative, documented rather than hidden.
+   */
+  sourceEgress?: SourceEgressPolicy
+  /** Lines a fenced source block needs before it counts (default 3). Lower is more false positives. */
+  sourceEgressMinLines?: number
 }
 
 export interface RouterMetadata {
@@ -2515,6 +2529,101 @@ function findWriteViaScript(
  * Pure and exported so it can be unit-tested without a running server.
  * Returns null when the call has nothing to do with code authoring.
  */
+export type SourceEgressPolicy = 'deny' | 'ask' | 'allow'
+
+/**
+ * Fenced-block languages that count as source. Scripts are included: a deployment script is source,
+ * and it is exactly the sort of thing that should not be typed into a metered cloud conversation.
+ */
+const SOURCE_LANGUAGES = new Set([
+  'ts', 'typescript', 'tsx', 'js', 'javascript', 'jsx', 'mjs', 'cjs',
+  'py', 'python', 'rb', 'ruby', 'php', 'java', 'kt', 'kotlin', 'scala', 'swift', 'dart',
+  'cs', 'csharp', 'fs', 'fsharp', 'vb', 'go', 'rs', 'rust',
+  'c', 'h', 'cpp', 'c++', 'hpp', 'cc', 'mm',
+  'ps1', 'powershell', 'sh', 'bash', 'zsh', 'fish', 'bat', 'cmd',
+  'sql', 'html', 'css', 'scss', 'less', 'vue', 'svelte', 'lua', 'pl', 'perl', 'r',
+  'ex', 'exs', 'erl', 'hs', 'clj', 'asm', 'sol',
+])
+
+/** Blocks shorter than this are treated as quotations rather than as code being handed over. */
+export const DEFAULT_SOURCE_EGRESS_MIN_LINES = 3
+
+export interface SourceEgressDetection {
+  found: boolean
+  blocks: number
+  languages: string[]
+}
+
+/**
+ * Look for source being handed to a cloud provider.
+ *
+ * Only fenced blocks with a source language tag and at least `minLines` lines count. Prose about code
+ * does not, and neither does an untagged block — that is a real false negative and the oracle asserts
+ * it, so this is never mistaken for a proof that source cannot leave. Like the rest of the guard it is
+ * a deterrent, pointed at the one route the other gates do not cover: source sitting in the outbound
+ * payload because it was typed into a cloud-bound conversation.
+ */
+export function detectSourceEgress(
+  text: string,
+  options: { minLines?: number } = {}
+): SourceEgressDetection {
+  if (typeof text !== 'string' || !text) return { found: false, blocks: 0, languages: [] }
+
+  const minLines = Math.max(1, Number(options.minLines ?? DEFAULT_SOURCE_EGRESS_MIN_LINES))
+  const languages: string[] = []
+  let blocks = 0
+
+  const fenced = /```([a-zA-Z0-9_+#-]+)[ \t]*\n([\s\S]*?)```/g
+  let match: RegExpExecArray | null
+  while ((match = fenced.exec(text)) !== null) {
+    const language = match[1].toLowerCase()
+    if (!SOURCE_LANGUAGES.has(language)) continue
+    const body = match[2].replace(/\n$/, '')
+    if (body.split('\n').length < minLines) continue
+    blocks += 1
+    languages.push(language)
+  }
+
+  return { found: blocks > 0, blocks, languages }
+}
+
+/**
+ * Rule 8: source may not reach the cloud. A request bound for the local worker is not egress at all,
+ * so the policy never applies to it — which is the entire reason the lead tier runs locally.
+ */
+export function evaluateSourceEgress(
+  action: SourceEgressPolicy,
+  detection: SourceEgressDetection,
+  destination: 'cloud' | 'local'
+): { kind: 'allow' | 'ask' | 'deny'; reason: string } {
+  if (destination === 'local') {
+    return {
+      kind: 'allow',
+      reason: 'the request is bound for the local worker, so nothing is leaving the machine',
+    }
+  }
+  if (!detection.found) {
+    return { kind: 'allow', reason: 'no fenced source block was found in the outbound payload' }
+  }
+
+  const summary =
+    `${detection.blocks} fenced source block(s) in the outbound payload ` +
+    `(${detection.languages.join(', ')})`
+
+  if (action === 'allow') {
+    return { kind: 'allow', reason: `sourceEgress is allow, so ${summary} will be transmitted` }
+  }
+  if (action === 'ask') {
+    return { kind: 'ask', reason: `${summary} needs an operator decision (sourceEgress is ask)` }
+  }
+  return {
+    kind: 'deny',
+    reason:
+      `rule 8 refuses this request: ${summary}. Set sourceEgress: 'ask' to approve case by case, or ` +
+      `'allow' to send source to the cloud deliberately.`,
+  }
+}
+
 export type DelegateReadPolicy = 'ask' | 'allow' | 'deny'
 
 /**
@@ -3229,6 +3338,66 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
         workerTool: DELEGATE_WORKER_OPENAI_SCHEMA,
       })
 
+      // Rule 8: source may not reach the cloud. The read guard covers pulling delegated code back, and
+      // contextFiles injects into the worker; this covers the blunt route — source sitting in the
+      // outbound payload because it was typed into a cloud-bound conversation.
+      const destination: 'cloud' | 'local' =
+        rerouteLocal ||
+        String(mutatedConfig.provider || '').toLowerCase() ===
+          String(config.localProvider || '').toLowerCase()
+          ? 'local'
+          : 'cloud'
+
+      const egressDetection = detectSourceEgress(dlpSubject, {
+        minLines: options?.sourceEgressMinLines,
+      })
+      const egress = evaluateSourceEgress(
+        options?.sourceEgress ?? 'deny',
+        egressDetection,
+        destination
+      )
+
+      if (egress.kind !== 'allow') {
+        let permitted = false
+        if (egress.kind === 'ask') {
+          try {
+            const approvalService =
+              typeof (ctx as any)?.get === 'function' ? (ctx as any).get('approval') : undefined
+            if (approvalService && typeof approvalService.request === 'function' && agent) {
+              const outcome = await approvalService.request({
+                agent,
+                toolName: 'agent/request',
+                reason:
+                  `This cloud-bound request carries source: ${egress.reason} Source is not supposed ` +
+                  `to reach the cloud (rule 8). Approve only if you mean to transmit it.`,
+                ...(payload?.signal ? { signal: payload.signal } : {}),
+              })
+              permitted = outcome === 'allowed-once'
+            }
+          } catch (err: any) {
+            console.warn(
+              '[SOURCE_EGRESS] approval request failed; failing closed:',
+              err?.message || err
+            )
+            permitted = false
+          }
+        }
+
+        if (!permitted) {
+          trace('SOURCE_EGRESS_BLOCKED', {
+            blocks: egressDetection.blocks,
+            languages: egressDetection.languages,
+            destination,
+            action: options?.sourceEgress ?? 'deny',
+          })
+          throw new Error(
+            `Source may not reach the cloud (rule 8): ${egress.reason} Nothing was transmitted. ` +
+              `This gate reads every user message the session has sent, so a block from an earlier ` +
+              `turn keeps it closed until the session is restarted.`
+          )
+        }
+      }
+
       trace(
         role.role === 'lead'
           ? 'HOOK_EXIT: LEAD_LEFT_AS_CONFIGURED (agent/request)'
@@ -3336,6 +3505,9 @@ const pluginExport = {
   resolveDelegateStatus,
   resolveLeadProviders,
   evaluateDelegatedReadPolicy,
+  detectSourceEgress,
+  evaluateSourceEgress,
+  DEFAULT_SOURCE_EGRESS_MIN_LINES,
   resolveAgentRole,
   applyArchitectConfig,
   applyAgentRole,

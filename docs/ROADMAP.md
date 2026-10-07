@@ -63,14 +63,14 @@ Gated. Nothing here starts until the host gap and two decisions clear.
 | --- | --- | --- |
 | 2a | **`agent/request` respects a lead provider** — a request the host resolved to a declared lead provider is left as configured, so a local lead is not repinned to the cloud or told it is the architect | **Built.** `tests/oracles/agent-role.test.cjs`, 8 assertions, failing 8 of 8 before implementation. `leadProviders` is empty by default, so this is a no-op until an operator opts in |
 | 2b | **`LEAD` profile and the `leadTier` opt-in** — the lead as a local thinking model, with the provider list derived from the profile so it is declared once | **Built.** `tests/oracles/lead-tier.test.cjs`, 7 assertions, failing 7 of 7 before implementation |
-| 2c | **Rule 8 — source may not reach the cloud, approval-gated** | Not started |
+| 2c | **Rule 8 — source may not reach the cloud** (this is item 9 below; same work, one row each) | **Built.** `tests/oracles/source-egress.test.cjs`, 9 assertions, failing 9 of 9 before implementation. `deny` by default; `ask` routes to the approval seam and fails closed without one |
 | 3 | **`delegateReadPolicy`** — the interim escape hatch for rule 3, with its cost documented | **Built.** `tests/oracles/delegate-read-policy.test.cjs`, 8 assertions, 5 failing before implementation; the other 3 are controls asserting the write guard is untouched |
 | 1 | Read-guard scoping: distinguish architect from lead | **Blocked on the host** — see `SECURITY-REVIEW.md`, "Blocked on the host: agent lineage". The interim escape hatch is now **built**: `delegateReadPolicy`, documented as weakening rule 3 |
 | 2 | Choose the lead model | **Decided:** the local model already configured for the worker, thinking enabled, as `PROFILES.LEAD`. No new download, no metered spend, source never leaves the machine |
 | 4 | Delivery: documented subagent preset, or plugin support | **Decided:** documented preset. The plugin enforces boundaries; owning DSH's agent lifecycle would duplicate the host and break when it changes. Guide at `presets/lead.md` |
 | 3 | `LEAD` profile — thinking on, repository access, authors each unit's contract | **Built.** `PROFILES.LEAD` plus `leadTier`. The host half that grants repository access is guided in `presets/lead.md` and is not yet verified |
 | 5 | Fresh lead per workstream | Not started; gated on 2 and 4 |
-| 9 | Rule 8: source may not reach the cloud, approval-gated | Not started |
+| 9 | Rule 8: source may not reach the cloud, approval-gated | **Built** as 2c above, and it is rule 8 in the policy table |
 | 10 | Per-tier read/write matrix | Not started |
 | 11–12 | Three-tier premise section and extended policy table | Superseded: the decision to describe only what ships. The README leads with the two-tier loop and lists the lead under "What the loop does not close yet" |
 

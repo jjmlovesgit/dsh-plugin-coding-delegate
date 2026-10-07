@@ -84,10 +84,11 @@ Stated plainly, because these limits decide whether it fits your work:
 ## The policy
 
 **The architect may reason but not author. The worker may author but not stray. Neither may execute
-without consent.**
+without consent. And source does not leave the machine.**
 
-Every rule here is an instance of that sentence, and every one fails closed — if a rule cannot be
-evaluated, or the approval service cannot be reached, the answer is no.
+Every rule here is an instance of that sentence — except rule 8, which is about where source may travel
+— and every one fails closed: if a rule cannot be evaluated, or the approval service cannot be reached,
+the answer is no.
 
 | # | Rule | Enforced by |
 | --- | --- | --- |
@@ -98,6 +99,7 @@ evaluated, or the approval service cannot be reached, the answer is no.
 | 5 | The worker's code may not run inside the server | subprocess only; in-process fallback off |
 | 6 | A command the architect proposes may not run unchecked | approval seam |
 | 7 | A delegated result is a verdict, not a claim | files written without verification report `UNVERIFIED` |
+| 8 | Source may not reach the cloud | cloud-bound requests carrying fenced source are refused by default; `sourceEgress` decides |
 
 ## What it does
 
@@ -215,6 +217,10 @@ npm run test:all       # both
   `delegateReadPolicy: 'allow'` is the only way to let a lead read the code it writes contracts about,
   and it grants that to every agent. That is a deliberate weakening of rule 3 with the cost written
   down, not a boundary.
+- **Rule 8 is a heuristic, and it has a hole.** It looks for fenced blocks with a source language tag of
+  at least three lines. Source pasted without a language tag, described in prose, or split across short
+  blocks is not detected. It is also the one rule that can refuse a request you typed yourself, which is
+  why `sourceEgress` exists: `deny` (default), `ask`, or `allow`.
 - The guard sees tool calls and shell text, not intent. Runtime-computed paths and library-mediated
   writes are invisible to it; configuration files are out of scope.
 - The DLP gate scans the user messages the plugin has seen — not assistant output or tool results —
