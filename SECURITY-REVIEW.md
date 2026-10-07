@@ -173,6 +173,51 @@ is a feature that silently never runs. Add a container only when execution must 
 tightly than the user account already bounds it; the README gives the flags that matter if you do
 have a runtime.
 
+## Blocked on the host: agent lineage
+
+The architecture this plugin is built for has three tiers: a cloud architect that specifies, a
+thinking *coding lead* that reads the repository and authors each unit's contract, and a local worker
+that implements. Tiers 1 and 3 exist. **Tier 2 cannot be built yet, and the reason is a host
+capability rather than missing plugin work.**
+
+Two features need the same answer -- *is this agent the architect, or a subagent?* -- and neither can
+get it:
+
+- The read guard should gate reads of delegated files for the **architect** while allowing the **lead**
+  to read, since reading the whole is the lead's job. It currently gates every agent, because it cannot
+  tell them apart.
+- The `agent/request` hook pins **every** agent to the configured cloud provider and model
+  (`provider: rerouteLocal ? localProvider : cloudProvider`). A lead configured to a local model would
+  be forced onto the cloud, so it could never run where the architecture needs it.
+
+What the plugin can actually see, verified against the installed packages:
+
+| Question | Answer | Evidence |
+| --- | --- | --- |
+| Does `Agent` expose a role or preset? | No — only `id` | `dsh-agent/lib/types.d.ts:11` |
+| Is `ToolRunContext.parent` an agent relationship? | No — a PTC transport token | `dsh-tools/lib/types/index.d.ts:209` |
+| Is `parentAgent` on the live agent? | No — a `CreateAgentOptions` input | `dsh-agent/lib/types/index.d.ts:52` |
+| Does session metadata carry lineage? | **Yes** — `origin: 'subagent'`, `delegationDepth`, `agentPreset` | `dsh-agent/lib/types/index.d.ts:64` |
+
+The last row is the fix. Those fields are exactly the discriminator both features need, and they sit
+behind the session store the plugin cannot reach — the same wall already documented for the workspace
+path.
+
+Options considered:
+
+1. **Infer the role from behaviour** (first agent seen is the architect; anything spawned mid-turn is a
+   subagent). Works today. A heuristic in a security control, which is the class of thing this plugin
+   has spent its history removing.
+2. **Require the operator to declare metered agents.** Precise, but asks for session ids.
+3. **Fail closed for every agent, with an explicit escape hatch** (`delegateReadPolicy`) for operators
+   running a local lead.
+4. **Ask the host to expose lineage** on the agent or the tool-run context.
+
+**Recommendation: option 3 now, option 4 as the real answer.** The guard keeps failing closed, a lead's
+reads become an explicit operator decision rather than a silent allowance, and nothing claims precision
+the API cannot provide. Tier 2 lands properly when DSH exposes agent lineage to plugins — or when the
+guard and the routing hook can key on something other than an opaque id.
+
 ## What this does not claim
 
 The guard remains a deterrent at the tool layer, not an airtight boundary. Still open:
