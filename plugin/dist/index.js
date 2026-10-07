@@ -33,22 +33,14 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.DELEGATE_WORKER_SCHEMA = exports.DELEGATE_WORKER_OPENAI_SCHEMA = exports.name = exports.using = exports.inject = exports.runSandboxVerification = exports.runInProcessFallback = exports.redactVerificationOutput = exports.parseTestOutput = exports.evaluateVerificationPolicy = exports.describeFailures = exports.commandProgram = exports.DEFAULT_VERIFICATION_POLICY = exports.sha256File = exports.saveDelegatedRegistry = exports.resolveDelegatedRegistryPath = exports.resolveContractFiles = exports.rememberDelegated = exports.pruneDelegatedRecords = exports.parseDelegatedRegistry = exports.mergeDelegatedRecords = exports.loadDelegatedRegistry = exports.contractViolations = exports.contractFileHashes = exports.resolveContextFiles = exports.DEFAULT_CONTEXT_MAX_BYTES = exports.roleForAgent = exports.resolveLeadProviders = exports.resolveAgentRole = exports.resetAgentRoles = exports.rememberAgentRole = exports.evaluateSourceEgress = exports.detectSourceEgress = exports.describeSourceRead = exports.applyArchitectConfig = exports.applyAgentRole = exports.DEFAULT_SOURCE_EGRESS_MIN_LINES = exports.AGENT_ROLE_LIMIT = exports.hasCommandWriteSignal = exports.hasCommandDeleteSignal = exports.evaluateDelegatedReadPolicy = exports.evaluateCodeWriteGuard = exports.DELETE_PRIMITIVES = exports.extractAndEmitFiles = exports.evaluateEmissionPath = exports.isPathWithin = exports.trace = exports.resolveDataDir = exports.SavingsTracker = exports.PROFILES = void 0;
-exports.LocalRouter = exports.MIN_SEARCH_CHARS = exports.DEFAULT_LOCAL_ENDPOINT = void 0;
+exports.applySearchReplaceBlocks = exports.MIN_SEARCH_CHARS = exports.DEFAULT_LOCAL_ENDPOINT = exports.DELEGATE_WORKER_SCHEMA = exports.DELEGATE_WORKER_OPENAI_SCHEMA = exports.runSandboxVerification = exports.runInProcessFallback = exports.redactVerificationOutput = exports.parseTestOutput = exports.evaluateVerificationPolicy = exports.describeFailures = exports.commandProgram = exports.DEFAULT_VERIFICATION_POLICY = exports.sha256File = exports.saveDelegatedRegistry = exports.resolveDelegatedRegistryPath = exports.resolveContractFiles = exports.rememberDelegated = exports.pruneDelegatedRecords = exports.parseDelegatedRegistry = exports.mergeDelegatedRecords = exports.loadDelegatedRegistry = exports.contractViolations = exports.contractFileHashes = exports.resolveContextFiles = exports.DEFAULT_CONTEXT_MAX_BYTES = exports.roleForAgent = exports.resolveLeadProviders = exports.resolveAgentRole = exports.resetAgentRoles = exports.rememberAgentRole = exports.evaluateSourceEgress = exports.detectSourceEgress = exports.describeSourceRead = exports.applyArchitectConfig = exports.applyAgentRole = exports.DEFAULT_SOURCE_EGRESS_MIN_LINES = exports.AGENT_ROLE_LIMIT = exports.hasCommandWriteSignal = exports.hasCommandDeleteSignal = exports.evaluateDelegatedReadPolicy = exports.evaluateCodeWriteGuard = exports.DELETE_PRIMITIVES = exports.extractAndEmitFiles = exports.evaluateEmissionPath = exports.isPathWithin = exports.trace = exports.resolveDataDir = exports.SavingsTracker = exports.PROFILES = void 0;
+exports.LocalRouter = exports.name = exports.using = exports.inject = exports.resolveDelegateStatus = exports.resolveChatCompletionsUrl = exports.parseSearchReplaceBlocks = exports.extractPromptText = exports.estimateTokenCount = exports.delegateWorker = void 0;
 exports.scanDLP = scanDLP;
-exports.resolveChatCompletionsUrl = resolveChatCompletionsUrl;
-exports.parseSearchReplaceBlocks = parseSearchReplaceBlocks;
-exports.applySearchReplaceBlocks = applySearchReplaceBlocks;
-exports.resolveDelegateStatus = resolveDelegateStatus;
-exports.delegateWorker = delegateWorker;
-exports.extractPromptText = extractPromptText;
-exports.estimateTokenCount = estimateTokenCount;
 exports.requestApprovalForWrite = requestApprovalForWrite;
 exports.resolveVerificationPolicy = resolveVerificationPolicy;
 exports.requestApprovalForVerification = requestApprovalForVerification;
 exports.apply = apply;
 const fs = __importStar(require("fs"));
-const path = __importStar(require("path"));
 const savings_tracker_1 = require("./savings-tracker");
 Object.defineProperty(exports, "SavingsTracker", { enumerable: true, get: function () { return savings_tracker_1.SavingsTracker; } });
 const profiles_1 = require("./profiles");
@@ -61,6 +53,7 @@ const verification_1 = require("./verification");
 const context_1 = require("./context");
 const guard_1 = require("./guard");
 const roles_1 = require("./roles");
+const delegation_1 = require("./delegation");
 const contracts_1 = require("./contracts");
 var logging_2 = require("./logging");
 Object.defineProperty(exports, "resolveDataDir", { enumerable: true, get: function () { return logging_2.resolveDataDir; } });
@@ -113,6 +106,18 @@ Object.defineProperty(exports, "parseTestOutput", { enumerable: true, get: funct
 Object.defineProperty(exports, "redactVerificationOutput", { enumerable: true, get: function () { return verification_2.redactVerificationOutput; } });
 Object.defineProperty(exports, "runInProcessFallback", { enumerable: true, get: function () { return verification_2.runInProcessFallback; } });
 Object.defineProperty(exports, "runSandboxVerification", { enumerable: true, get: function () { return verification_2.runSandboxVerification; } });
+var delegation_2 = require("./delegation");
+Object.defineProperty(exports, "DELEGATE_WORKER_OPENAI_SCHEMA", { enumerable: true, get: function () { return delegation_2.DELEGATE_WORKER_OPENAI_SCHEMA; } });
+Object.defineProperty(exports, "DELEGATE_WORKER_SCHEMA", { enumerable: true, get: function () { return delegation_2.DELEGATE_WORKER_SCHEMA; } });
+Object.defineProperty(exports, "DEFAULT_LOCAL_ENDPOINT", { enumerable: true, get: function () { return delegation_2.DEFAULT_LOCAL_ENDPOINT; } });
+Object.defineProperty(exports, "MIN_SEARCH_CHARS", { enumerable: true, get: function () { return delegation_2.MIN_SEARCH_CHARS; } });
+Object.defineProperty(exports, "applySearchReplaceBlocks", { enumerable: true, get: function () { return delegation_2.applySearchReplaceBlocks; } });
+Object.defineProperty(exports, "delegateWorker", { enumerable: true, get: function () { return delegation_2.delegateWorker; } });
+Object.defineProperty(exports, "estimateTokenCount", { enumerable: true, get: function () { return delegation_2.estimateTokenCount; } });
+Object.defineProperty(exports, "extractPromptText", { enumerable: true, get: function () { return delegation_2.extractPromptText; } });
+Object.defineProperty(exports, "parseSearchReplaceBlocks", { enumerable: true, get: function () { return delegation_2.parseSearchReplaceBlocks; } });
+Object.defineProperty(exports, "resolveChatCompletionsUrl", { enumerable: true, get: function () { return delegation_2.resolveChatCompletionsUrl; } });
+Object.defineProperty(exports, "resolveDelegateStatus", { enumerable: true, get: function () { return delegation_2.resolveDelegateStatus; } });
 exports.inject = ['tools'];
 exports.using = ['tools'];
 /**
@@ -152,59 +157,7 @@ function resolveWorkspaceDir(ctx) {
 exports.name = 'dsh-plugin-coding-delegate';
 // resolveDataDir and trace moved to ./logging.ts and are imported above. The re-export beside the other
 // module re-exports keeps `resolveDataDir` on the public surface, where callers already depend on it.
-exports.DELEGATE_WORKER_OPENAI_SCHEMA = {
-    type: 'function',
-    function: {
-        name: 'delegate_worker',
-        description: 'Dispatches a discrete implementation, testing, or code-generation task to the configured local execution worker -- any OpenAI-compatible server (LM Studio, Ollama, vLLM, llama.cpp) -- with an isolated context window. The worker has no repository read: declare contextFiles for the code it must see, since it cannot discover anything itself.',
-        parameters: {
-            type: 'object',
-            properties: {
-                taskName: {
-                    type: 'string',
-                    description: 'A short descriptive identifier for the subtask',
-                },
-                instruction: {
-                    type: 'string',
-                    description: 'The complete technical prompt and specifications for the local worker',
-                },
-                targetFiles: {
-                    type: 'array',
-                    items: { type: 'string' },
-                    description: 'Optional file paths to target or modify',
-                },
-                runVerification: {
-                    type: 'string',
-                    description: 'Optional shell command to verify the output. It executes with the authority of the DSH process and requires operator approval unless verificationApproval is set to allow.',
-                },
-                contractFiles: {
-                    type: 'array',
-                    items: { type: 'string' },
-                    description: 'Paths to the tests that constitute this unit contract. They are hashed before the worker runs, the worker is forbidden to write them, and they are re-hashed afterwards: any change voids the verdict. The architect owns these files.',
-                },
-                contextFiles: {
-                    type: 'array',
-                    description: 'Existing files the worker needs to see, as { path, startLine?, endLine? }. The plugin reads them into the worker prompt; you receive a record of what was injected and never the contents. Paths outside the workspace are refused, and context carrying a credential is refused rather than transmitted.',
-                    items: {
-                        type: 'object',
-                        properties: {
-                            path: { type: 'string' },
-                            startLine: { type: 'number' },
-                            endLine: { type: 'number' },
-                        },
-                        required: ['path'],
-                    },
-                },
-                workspaceDir: {
-                    type: 'string',
-                    description: 'Absolute path of the directory the worker may write into. Defaults to the session workspace; destinations outside it are refused.',
-                },
-            },
-            required: ['taskName', 'instruction'],
-        },
-    },
-};
-exports.DELEGATE_WORKER_SCHEMA = exports.DELEGATE_WORKER_OPENAI_SCHEMA;
+// The delegate_worker schemas moved to ./delegation.ts and are re-exported below.
 function scanDLP(text, options = {}) {
     if (!text)
         return { hasSensitiveData: false, violations: [], highConfidence: false };
@@ -230,509 +183,6 @@ function scanDLP(text, options = {}) {
             violations.push('High-entropy string');
     }
     return { hasSensitiveData: violations.length > 0, violations, highConfidence };
-}
-/** Where the local worker is assumed to live when nothing else is configured. */
-exports.DEFAULT_LOCAL_ENDPOINT = 'http://127.0.0.1:1234/v1';
-/**
- * Accept either a base URL or a full chat-completions URL and return the full one, so
- * `localEndpoint: 'http://127.0.0.1:11434/v1'` (Ollama, vLLM, llama.cpp, …) works exactly as
- * written without the operator having to know this plugin appends the path.
- */
-function resolveChatCompletionsUrl(base) {
-    const trimmed = String(base || '').trim().replace(/\/+$/, '');
-    if (!trimmed)
-        return `${exports.DEFAULT_LOCAL_ENDPOINT}/chat/completions`;
-    return /\/chat\/completions$/i.test(trimmed) ? trimmed : `${trimmed}/chat/completions`;
-}
-/**
- * A one- or two-character search is unique by accident rather than by intent, so it is refused even
- * when the exactly-once rule would allow it. The property that matters is exactness, not cleverness.
- */
-exports.MIN_SEARCH_CHARS = 8;
-const SEARCH_MARKER = '<<<<<<< SEARCH';
-const REPLACE_MARKER = '>>>>>>> REPLACE';
-const DIVIDER_MARKER = '=======';
-/**
- * Recognise a search/replace body. The fenced header is shared with whole-file emission, so the body
- * decides the mode and the worker does not have to know which of the two it is producing.
- *
- * Returns null when there is no delta here, which tells the caller to treat the body as a whole file.
- * A body that *starts* a search/replace block but never finishes it returns an empty list instead --
- * never null -- so a malformed patch cannot fall through and be written over a real file.
- */
-function parseSearchReplaceBlocks(body) {
-    if (typeof body !== 'string' || !body.includes(SEARCH_MARKER))
-        return null;
-    const blocks = [];
-    let search = null;
-    let replace = null;
-    let state = 'idle';
-    for (const line of body.split(/\r?\n/)) {
-        const trimmed = line.trim();
-        if (trimmed === SEARCH_MARKER) {
-            search = [];
-            replace = [];
-            state = 'search';
-            continue;
-        }
-        if (state === 'search' && trimmed === DIVIDER_MARKER) {
-            state = 'replace';
-            continue;
-        }
-        if (trimmed === REPLACE_MARKER) {
-            if (search && replace)
-                blocks.push({ search: search.join('\n'), replace: replace.join('\n') });
-            search = null;
-            replace = null;
-            state = 'idle';
-            continue;
-        }
-        if (state === 'search' && search)
-            search.push(line);
-        else if (state === 'replace' && replace)
-            replace.push(line);
-    }
-    return blocks;
-}
-/**
- * Apply every block, or none. A partially applied change is worse than no change: it leaves the tree
- * in a state that no contract was written against.
- *
- * Everything is normalised to LF for matching and the file's own ending is restored at the end.
- * Nothing else is normalised -- indentation is bytes -- because a near miss must fail loudly rather
- * than be massaged into a match. Fuzzy patching is not a tuning choice here; it is the mechanism by
- * which a wrong edit lands silently.
- */
-function applySearchReplaceBlocks(content, blocks) {
-    if (!Array.isArray(blocks) || blocks.length === 0) {
-        return { ok: false, reason: 'the patch contained no complete search/replace block' };
-    }
-    const usesCrlf = content.includes('\r\n');
-    let work = content.split('\r\n').join('\n');
-    for (const block of blocks) {
-        const search = String(block?.search ?? '').split('\r\n').join('\n');
-        const replace = String(block?.replace ?? '').split('\r\n').join('\n');
-        if (!search.trim()) {
-            return { ok: false, reason: 'a search block was empty' };
-        }
-        if (search.trim().length < exports.MIN_SEARCH_CHARS) {
-            return {
-                ok: false,
-                reason: `a search block was too short to be unambiguous (${search.trim().length} characters, ` +
-                    `minimum ${exports.MIN_SEARCH_CHARS})`,
-            };
-        }
-        const occurrences = work.split(search).length - 1;
-        if (occurrences === 0) {
-            return {
-                ok: false,
-                reason: `no exact match for a search block (${search.trim().slice(0, 60)})`,
-            };
-        }
-        if (occurrences > 1) {
-            return {
-                ok: false,
-                reason: `a search block matched more than once (${occurrences} times), so the edit is ambiguous`,
-            };
-        }
-        work = work.replace(search, () => replace);
-    }
-    return { ok: true, content: usesCrlf ? work.split('\n').join('\r\n') : work };
-}
-/**
- * Status precedence, as a pure function so the ordering is testable without a server. Tampering
- * outranks everything: a modified contract voids the run even when verification passed, because
- * what passed was no longer the contract.
- */
-function resolveDelegateStatus(input) {
-    if (input.contractViolations.length > 0)
-        return 'CONTRACT_MODIFIED';
-    if (input.verificationGate)
-        return 'VERIFICATION_NOT_APPROVED';
-    if (input.unverified)
-        return 'UNVERIFIED';
-    return input.isSuccess ? 'SUCCESS' : 'VERIFICATION_FAILED';
-}
-async function delegateWorker(params = {}, tracker) {
-    const endpoint = resolveChatCompletionsUrl(params.endpoint || profiles_1.PROFILES.WORKER.endpoint || exports.DEFAULT_LOCAL_ENDPOINT);
-    const model = params.model || profiles_1.PROFILES.WORKER.model;
-    const fileInstruction = 'To change part of an existing file, emit a patch block instead of the whole file:\n' +
-        '```patch file="src/thing.ts"\n<<<<<<< SEARCH\n<the exact existing lines>\n=======\n<the replacement lines>\n>>>>>>> REPLACE\n```\n' +
-        'The SEARCH text must match the file exactly and occur exactly once, and there is no fuzzy matching.\n' +
-        'To create a file, or replace one wholesale, wrap it in a code block with the target file path in the header or first line, e.g. ```typescript file="src/math-helper.ts"\n...code...\n``` or // FILE: tests/math-helper.test.ts';
-    const systemPrompt = params.systemPrompt || `You are a fast, accurate local coding worker executing a discrete task. ${fileInstruction}`;
-    const taskText = params.instruction || params.taskPrompt || params.prompt || '';
-    // Resolved before the worker runs: the contract hashes have to describe the tree as it was handed
-    // over, and context has to be read while the architect is still blind to it.
-    const workspaceBase = params.workspaceDir || process.cwd();
-    const context = (0, context_1.resolveContextFiles)(params.contextFiles, workspaceBase);
-    if (params.contextFiles && params.contextFiles.length > 0) {
-        if (context.errors.length > 0) {
-            return {
-                success: false,
-                status: 'CONTEXT_REFUSED',
-                message: `Context injection refused:\n${context.errors.map((e) => `  - ${e}`).join('\n')}`,
-                contextErrors: context.errors,
-                resolvedWorkspace: workspaceBase,
-                filesWritten: [],
-                testResults: { passed: 0, failed: 0, output: 'The worker was not called.' },
-                tokens: { prompt: 0, completion: 0 },
-            };
-        }
-        // The declared context is about to travel to `endpoint`, which may be a vLLM port on another
-        // machine rather than this one. A "local" endpoint that is remote is a cloud, so a credential in
-        // the context is refused rather than transmitted: rule 1 does not care which port it is.
-        const contextDlp = scanDLP(context.text);
-        if (contextDlp.hasSensitiveData && contextDlp.highConfidence) {
-            const refusal = `declared context carries a credential (${contextDlp.violations.join(', ')}), so it will not ` +
-                `be sent to the worker endpoint. Narrow the range to exclude it, or remove it from the file.`;
-            return {
-                success: false,
-                status: 'CONTEXT_REFUSED',
-                message: `Context injection refused:\n  - ${refusal}`,
-                contextErrors: [refusal],
-                resolvedWorkspace: workspaceBase,
-                filesWritten: [],
-                testResults: { passed: 0, failed: 0, output: 'The worker was not called.' },
-                tokens: { prompt: 0, completion: 0 },
-            };
-        }
-    }
-    let fileContextText = '';
-    if (Array.isArray(params.targetFiles)) {
-        fileContextText = `Target Files:\n${params.targetFiles.join('\n')}`;
-    }
-    else if (typeof params.targetFiles === 'string') {
-        fileContextText = `Target Files:\n${params.targetFiles}`;
-    }
-    else if (typeof params.fileContext === 'string') {
-        fileContextText = params.fileContext;
-    }
-    // Appended rather than chosen by an else-if. A unit normally has both targetFiles and context, and
-    // the earlier shape meant a declared context was silently dropped whenever targetFiles was present.
-    if (context.text) {
-        fileContextText += `${fileContextText ? '\n\n' : ''}${context.text}`;
-    }
-    if (params.runVerification) {
-        fileContextText += `\nVerification Command:\n${params.runVerification}`;
-    }
-    const combinedPrompt = fileContextText
-        ? `Task: ${params.taskName || 'Subtask'}\n${taskText}\n\n${fileContextText}`
-        : `Task: ${params.taskName || 'Subtask'}\n${taskText}`;
-    const turnId = params.turnId ?? Math.floor(Math.random() * 1000000);
-    const timeoutMs = params.timeoutMs ?? 300000;
-    const contractPaths = (0, contracts_1.resolveContractFiles)(params.contractFiles, workspaceBase);
-    const contractBefore = (0, contracts_1.contractFileHashes)(contractPaths);
-    const requestStartedAt = Date.now();
-    try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-        const response = await fetch(endpoint, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                model,
-                messages: [
-                    { role: 'system', content: systemPrompt },
-                    { role: 'user', content: combinedPrompt },
-                ],
-                temperature: profiles_1.PROFILES.WORKER.temperature ?? 0.2,
-                max_tokens: profiles_1.PROFILES.WORKER.max_tokens ?? 2048,
-                stop: profiles_1.PROFILES.WORKER.stop ?? ['<|im_end|>', '<|endoftext|>'],
-                enable_thinking: profiles_1.PROFILES.WORKER.enable_thinking ?? false,
-                reasoning_effort: profiles_1.PROFILES.WORKER.reasoning_effort ?? 'none',
-            }),
-            signal: controller.signal,
-        }).finally(() => clearTimeout(timeoutId));
-        if (!response.ok) {
-            const errText = await response.text();
-            return {
-                success: false,
-                status: 'ERROR',
-                message: `LM Studio returned HTTP ${response.status}: ${errText}`,
-                filesWritten: [],
-                testResults: { passed: 0, failed: 0, output: 'Request failed.' },
-                tokens: { prompt: 0, completion: 0 },
-            };
-        }
-        const elapsedMs = Date.now() - requestStartedAt;
-        const data = await response.json();
-        const content = data.choices?.[0]?.message?.content || '';
-        const promptTokens = data.usage?.prompt_tokens ?? estimateTokenCount(combinedPrompt);
-        const completionTokens = data.usage?.completion_tokens ?? estimateTokenCount(content);
-        const totalTokens = data.usage?.total_tokens ?? (promptTokens + completionTokens);
-        if (tracker) {
-            tracker.recordUsage({
-                turn: turnId,
-                route: 'WORKER_LOCAL',
-                model,
-                reason: `SUBAGENT_DELEGATION (${params.taskName || 'subtask'})`,
-                promptTokens,
-                completionTokens,
-                totalTokens,
-                elapsedMs,
-            });
-        }
-        if (!fs.existsSync(workspaceBase)) {
-            try {
-                fs.mkdirSync(workspaceBase, { recursive: true });
-            }
-            catch (err) {
-                return {
-                    success: false,
-                    status: 'ERROR',
-                    message: `Resolved workspace directory '${workspaceBase}' does not exist and could not be created: ${err?.message || String(err)}`,
-                    resolvedWorkspace: workspaceBase,
-                    filesWritten: [],
-                    testResults: { passed: 0, failed: 0, output: 'No files written.' },
-                    tokens: { prompt: promptTokens, completion: completionTokens },
-                };
-            }
-        }
-        const emission = (0, emission_1.extractAndEmitFiles)(content, params.targetFiles, workspaceBase, params.emitAllowlist ?? [], contractPaths);
-        const filesWritten = emission.filesWritten;
-        // Remember what we wrote on the architect's behalf, so reading it back can be gated -- distinguishing
-        // files the worker created, which the architect never saw, from files it patched, which it did.
-        const createdPaths = filesWritten.filter((f) => f.mode !== 'patch').map((f) => f.path);
-        const patchedPaths = filesWritten.filter((f) => f.mode === 'patch').map((f) => f.path);
-        if (createdPaths.length > 0)
-            (0, contracts_1.rememberDelegated)(createdPaths, 'created');
-        if (patchedPaths.length > 0)
-            (0, contracts_1.rememberDelegated)(patchedPaths, 'patched');
-        let testResults = undefined;
-        let verificationGate = undefined;
-        if (params.runVerification) {
-            const policy = params.verificationPolicy ?? verification_1.DEFAULT_VERIFICATION_POLICY;
-            const decision = (0, verification_1.evaluateVerificationPolicy)(params.runVerification, policy);
-            let permitted = decision.kind === 'allow';
-            if (decision.kind === 'ask') {
-                // No approver means no consent. A missing approval seam must never degrade to a
-                // silent yes for a command that runs with the host process's authority.
-                permitted = params.verificationApproval
-                    ? await params.verificationApproval(params.runVerification)
-                    : false;
-            }
-            if (permitted) {
-                testResults = (0, verification_1.runSandboxVerification)(params.runVerification, workspaceBase, {
-                    redact: params.redactVerification ?? process.env.DSH_LOCAL_ROUTER_RAW_VERIFICATION !== '1',
-                    rawLogPath: path.join((0, logging_1.resolveDataDir)(), 'last-verification.log'),
-                    allowInProcessFallback: policy.allowInProcessFallback,
-                });
-            }
-            else {
-                verificationGate =
-                    decision.kind === 'deny'
-                        ? decision.reason
-                        : `approval was not granted (${decision.reason})`;
-            }
-        }
-        // A result is a verdict on a contract, and the contract is the verification command. Code
-        // produced without one has an unchecked contract: reporting SUCCESS there would be the same
-        // false green as counting unrecognised test output as a pass, which this plugin has already
-        // been caught doing twice.
-        const wroteFiles = filesWritten.length > 0 && emission.errors.length === 0;
-        const unverified = !verificationGate && !params.runVerification && wroteFiles;
-        // Re-hash once the worker has finished and verification has run. A violation voids the verdict
-        // regardless of what the tests reported, because the tests are no longer the contract.
-        const contractAfter = (0, contracts_1.contractFileHashes)(contractPaths);
-        const contractViolationsFound = (0, contracts_1.contractViolations)(contractBefore, contractAfter);
-        const isSuccess = contractViolationsFound.length === 0 &&
-            !verificationGate &&
-            !unverified &&
-            (!testResults || testResults.failed === 0) &&
-            emission.errors.length === 0;
-        let summaryText = '';
-        if (filesWritten.length > 0) {
-            summaryText =
-                `Task '${params.taskName || 'Subtask'}' completed. Wrote ${filesWritten.length} file(s):\n` +
-                    filesWritten
-                        .map((f) => `  - ${f.path} (${f.lines} lines, ${f.bytes} bytes${f.mode === 'patch' ? `, patched in place with ${f.hunks} hunk(s)` : ''})`)
-                        .join('\n');
-        }
-        else {
-            summaryText = `Task '${params.taskName || 'Subtask'}' completed. Worker returned ${content.split('\n').length} line(s) of output.`;
-        }
-        summaryText += `\nWorkspace: ${workspaceBase}${params.workspaceSource ? ` (resolved via ${params.workspaceSource})` : ''}`;
-        if (params.workspaceSource && /FALLBACK/.test(params.workspaceSource) && filesWritten.length > 0) {
-            summaryText += `\nWARNING: the Session workspace could not be resolved, so files were written relative to ${workspaceBase}. Pass absolute paths in targetFiles, or set DSH_WORKSPACE_ROOT, to be certain of the destination.`;
-        }
-        if (emission.errors.length > 0) {
-            summaryText += `\nFILE WRITE ERRORS:\n${emission.errors.map((e) => `  - ${e}`).join('\n')}`;
-        }
-        if (verificationGate) {
-            summaryText += `\nVerification was NOT run: ${verificationGate}`;
-        }
-        if (unverified) {
-            summaryText +=
-                `\nUNVERIFIED: no verification command was supplied, so the contract was never checked. ` +
-                    `Files were written; nothing was proven.`;
-        }
-        if (testResults) {
-            summaryText += `\nVerification Results: Passed ${testResults.passed}, Failed ${testResults.failed}.`;
-            if (testResults.errorSummary) {
-                summaryText += `\nFailures: ${testResults.errorSummary}`;
-            }
-        }
-        if (contractPaths.length > 0) {
-            summaryText +=
-                contractViolationsFound.length > 0
-                    ? `\nCONTRACT MODIFIED, verdict void: ${contractViolationsFound.join('; ')}.`
-                    : `\nContract: ${contractPaths.length} declared file(s), unchanged.`;
-        }
-        return {
-            success: isSuccess,
-            filesWritten: filesWritten.map((f) => f.path),
-            filesWrittenRelative: filesWritten.map((f) => f.relativeName || f.path),
-            resolvedWorkspace: workspaceBase,
-            workspaceSource: params.workspaceSource,
-            testResults: testResults ||
-                {
-                    passed: 0,
-                    failed: 0,
-                    output: verificationGate
-                        ? `Verification not run: ${verificationGate}`
-                        : unverified
-                            ? 'No verification command was supplied; the contract is unchecked.'
-                            : 'No verification requested.',
-                },
-            ...(verificationGate ? { verificationSkipped: verificationGate } : {}),
-            // Metadata only. The architect learns what the worker was shown, never what it says.
-            ...(context.injected.length > 0
-                ? {
-                    contextInjected: context.injected.map((c) => ({
-                        path: c.path,
-                        relativeName: c.relativeName,
-                        lineRange: c.lineRange,
-                        lines: c.lines,
-                        bytes: c.bytes,
-                        sha256: c.sha256,
-                    })),
-                }
-                : {}),
-            // Metadata only. The architect learns what the contract did, never what the code says.
-            ...(contractPaths.length > 0
-                ? {
-                    contractFiles: contractPaths.map((p) => ({
-                        path: p,
-                        relativeName: path.relative(workspaceBase, p) || p,
-                        sha256: contractAfter[(0, paths_1.canonicalisePath)(p)] ?? null,
-                        unchanged: contractBefore[(0, paths_1.canonicalisePath)(p)] === contractAfter[(0, paths_1.canonicalisePath)(p)],
-                    })),
-                    contractViolations: contractViolationsFound,
-                }
-                : {}),
-            tokens: {
-                prompt: promptTokens,
-                completion: completionTokens,
-            },
-            summary: summaryText,
-            status: resolveDelegateStatus({
-                verificationGate,
-                unverified,
-                contractViolations: contractViolationsFound,
-                isSuccess,
-            }),
-            taskName: params.taskName || 'Subtask',
-            tokensUsed: totalTokens,
-        };
-    }
-    catch (err) {
-        const errMsg = err?.message || String(err);
-        return {
-            success: false,
-            status: 'ERROR',
-            message: `LM Studio at 127.0.0.1:1234 was unreachable or failed: ${errMsg}`,
-            filesWritten: [],
-            testResults: { passed: 0, failed: 0, output: errMsg },
-            tokens: { prompt: 0, completion: 0 },
-        };
-    }
-}
-function extractPromptText(session) {
-    if (!session)
-        return '';
-    const messages = session.messages ||
-        session.options?.messages ||
-        session.requestOptions?.messages ||
-        session.session?.messages;
-    if (Array.isArray(messages) && messages.length > 0) {
-        for (let i = messages.length - 1; i >= 0; i--) {
-            const msg = messages[i];
-            if (msg?.role === 'user') {
-                if (typeof msg.content === 'string') {
-                    const text = msg.content.trim();
-                    if (text.startsWith('[model changed:') || text.startsWith('Current runtime context.')) {
-                        continue;
-                    }
-                    if (text.length > 0)
-                        return text;
-                }
-                if (Array.isArray(msg.content)) {
-                    const textPart = msg.content.find((p) => p.type === 'text');
-                    if (textPart?.text?.trim()) {
-                        const text = textPart.text.trim();
-                        if (!text.startsWith('[model changed:') && !text.startsWith('Current runtime context.')) {
-                            return text;
-                        }
-                    }
-                }
-            }
-        }
-        for (let i = messages.length - 1; i >= 0; i--) {
-            const content = messages[i]?.content;
-            if (typeof content === 'string') {
-                const text = content.trim();
-                if (text.startsWith('[model changed:') || text.startsWith('Current runtime context.')) {
-                    continue;
-                }
-                if (text.length > 0)
-                    return text;
-            }
-        }
-    }
-    try {
-        const inbox = session.inbox || session.session?.inbox;
-        if (inbox && Array.isArray(inbox['next-turn']) && inbox['next-turn'].length > 0) {
-            const item = inbox['next-turn'][inbox['next-turn'].length - 1];
-            if (typeof item?.prompt === 'string') {
-                const text = item.prompt.trim();
-                if (!text.startsWith('[model changed:') && !text.startsWith('Current runtime context.')) {
-                    if (text.length > 0)
-                        return text;
-                }
-            }
-            if (typeof item?.content === 'string') {
-                const text = item.content.trim();
-                if (!text.startsWith('[model changed:') && !text.startsWith('Current runtime context.')) {
-                    if (text.length > 0)
-                        return text;
-                }
-            }
-        }
-    }
-    catch (e) { }
-    if (typeof session.input === 'string') {
-        const text = session.input.trim();
-        if (!text.startsWith('[model changed:') && !text.startsWith('Current runtime context.')) {
-            if (text.length > 0)
-                return text;
-        }
-    }
-    if (typeof session.prompt === 'string' && session.prompt.trim().length > 0) {
-        const clean = session.prompt
-            .replace(/^\[model changed:.*?\]\s*/i, '')
-            .replace(/^Current runtime context\..*?\n\n/is, '')
-            .trim();
-        if (clean.length > 0 && !clean.startsWith('[model changed:') && !clean.startsWith('Current runtime context.')) {
-            return clean;
-        }
-    }
-    return '';
-}
-function estimateTokenCount(text) {
-    if (!text)
-        return 0;
-    return Math.ceil(text.length / 4);
 }
 class LocalRouter {
     config;
@@ -767,7 +217,7 @@ class LocalRouter {
                 dlpViolations: dlpResult.violations,
             };
         }
-        const tokens = estimateTokenCount(promptText);
+        const tokens = (0, delegation_1.estimateTokenCount)(promptText);
         if (tokens > this.config.contextThreshold) {
             return {
                 provider: this.config.cloudProvider,
@@ -797,7 +247,7 @@ class LocalRouter {
     async handleBeforeRequest(session) {
         if (!session)
             return session;
-        const fullText = extractPromptText(session);
+        const fullText = (0, delegation_1.extractPromptText)(session);
         if (!fullText || fullText.trim().length === 0) {
             return {
                 ...session,
@@ -816,11 +266,11 @@ class LocalRouter {
             latencyMs: decision.latencyMs,
             dlpViolations: decision.dlpViolations,
             tier: decision.route === 'ARCHITECT_CLOUD' ? 'Cloud Tier (Cloud Architect)' : 'Local Tier (Local Worker)',
-            estimatedTokens: estimateTokenCount(fullText),
+            estimatedTokens: (0, delegation_1.estimateTokenCount)(fullText),
         };
         (0, logging_1.trace)('ROUTER_DECISION', {
             prompt: fullText.slice(0, 100).replace(/\n/g, ' '),
-            tokens: estimateTokenCount(fullText),
+            tokens: (0, delegation_1.estimateTokenCount)(fullText),
             gate: decision.gate,
             selectedProvider: decision.provider,
             selectedModel: decision.model,
@@ -1184,7 +634,7 @@ function apply(ctx, options = {}) {
                     // delegateWorker would otherwise POST the task to whatever URL a caller named.
                     const { endpoint: _ignoredEndpoint, ...callerArgs } = args || {};
                     const policy = resolveVerificationPolicy(options);
-                    return await delegateWorker({
+                    return await (0, delegation_1.delegateWorker)({
                         ...callerArgs,
                         // Operator settings, not caller arguments. The local endpoint and model are
                         // trusted configuration; a caller-supplied `endpoint` was dropped just above.
@@ -1225,7 +675,7 @@ function apply(ctx, options = {}) {
             // `endpoint: options.localProvider` used to sit here, which set the POST URL to the
             // provider *id* ('lm-studio') rather than a URL. delegateWorker's default is correct.
             const { endpoint: _ignoredEndpoint, ...callerArgs } = args || {};
-            return await delegateWorker({
+            return await (0, delegation_1.delegateWorker)({
                 ...callerArgs,
                 // Same operator settings as the registered tool path above.
                 ...(options?.localEndpoint ? { endpoint: options.localEndpoint } : {}),
@@ -1337,11 +787,11 @@ function apply(ctx, options = {}) {
             catch { }
         }
         if (!prompt && agent?.session)
-            prompt = extractPromptText(agent.session);
+            prompt = (0, delegation_1.extractPromptText)(agent.session);
         if (!prompt && payload?.session)
-            prompt = extractPromptText(payload.session);
+            prompt = (0, delegation_1.extractPromptText)(payload.session);
         if (!prompt && payload)
-            prompt = extractPromptText(payload);
+            prompt = (0, delegation_1.extractPromptText)(payload);
         // Pre-flight DLP Firewall. This is a GATE, not a log line: a payload carrying
         // credentials is either refused outright or pinned to the local worker, but it
         // is never transmitted to the cloud. (Earlier versions logged "Blocking WAN
@@ -1400,7 +850,7 @@ function apply(ctx, options = {}) {
             localModel: config.localModel,
             rerouteLocal,
             architectInstruction: profiles_1.PROFILES.ARCHITECT.systemInstruction,
-            workerTool: exports.DELEGATE_WORKER_OPENAI_SCHEMA,
+            workerTool: delegation_1.DELEGATE_WORKER_OPENAI_SCHEMA,
         });
         // Rule 8: source may not reach the cloud. The read guard covers pulling delegated code back, and
         // contextFiles injects into the worker; this covers the blunt route — source sitting in the
@@ -1515,12 +965,7 @@ function apply(ctx, options = {}) {
         }
     });
 }
-// The delta machinery still lives in this file (it moves to ./delegation.ts later), and ./emission.ts
-// must not import this module back, so the two halves are joined here, at the composition root.
-(0, emission_1.configurePatchEngine)({
-    parse: parseSearchReplaceBlocks,
-    apply: applySearchReplaceBlocks,
-});
+// The patch engine is configured inside ./delegation.ts, where both halves now live.
 const pluginExport = {
     name: exports.name,
     inject: exports.inject,
@@ -1529,20 +974,20 @@ const pluginExport = {
     LocalRouter,
     SavingsTracker: savings_tracker_1.SavingsTracker,
     scanDLP,
-    delegateWorker,
+    delegateWorker: delegation_1.delegateWorker,
     extractAndEmitFiles: emission_1.extractAndEmitFiles,
     runSandboxVerification: verification_1.runSandboxVerification,
     parseTestOutput: verification_1.parseTestOutput,
     sha256File: contracts_1.sha256File,
     resolveContextFiles: context_1.resolveContextFiles,
-    parseSearchReplaceBlocks,
-    applySearchReplaceBlocks,
-    MIN_SEARCH_CHARS: exports.MIN_SEARCH_CHARS,
+    parseSearchReplaceBlocks: delegation_1.parseSearchReplaceBlocks,
+    applySearchReplaceBlocks: delegation_1.applySearchReplaceBlocks,
+    MIN_SEARCH_CHARS: delegation_1.MIN_SEARCH_CHARS,
     DEFAULT_CONTEXT_MAX_BYTES: context_1.DEFAULT_CONTEXT_MAX_BYTES,
     resolveContractFiles: contracts_1.resolveContractFiles,
     contractFileHashes: contracts_1.contractFileHashes,
     contractViolations: contracts_1.contractViolations,
-    resolveDelegateStatus,
+    resolveDelegateStatus: delegation_1.resolveDelegateStatus,
     resolveLeadProviders: roles_1.resolveLeadProviders,
     evaluateDelegatedReadPolicy: guard_1.evaluateDelegatedReadPolicy,
     rememberAgentRole: roles_1.rememberAgentRole,
@@ -1563,8 +1008,8 @@ const pluginExport = {
     resolveAgentRole: roles_1.resolveAgentRole,
     applyArchitectConfig: roles_1.applyArchitectConfig,
     applyAgentRole: roles_1.applyAgentRole,
-    DELEGATE_WORKER_SCHEMA: exports.DELEGATE_WORKER_SCHEMA,
-    DELEGATE_WORKER_OPENAI_SCHEMA: exports.DELEGATE_WORKER_OPENAI_SCHEMA,
+    DELEGATE_WORKER_SCHEMA: delegation_1.DELEGATE_WORKER_SCHEMA,
+    DELEGATE_WORKER_OPENAI_SCHEMA: delegation_1.DELEGATE_WORKER_OPENAI_SCHEMA,
     PROFILES: profiles_1.PROFILES,
     default: apply,
 };

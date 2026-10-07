@@ -3,7 +3,7 @@ import * as path from 'path'
 import { SavingsTracker } from './savings-tracker'
 import { PROFILES } from './profiles'
 import { resolveDataDir } from './logging'
-import { extractAndEmitFiles } from './emission'
+import { configurePatchEngine, extractAndEmitFiles } from './emission'
 import { ContextRequest, resolveContextFiles } from './context'
 import {
   DEFAULT_VERIFICATION_POLICY,
@@ -18,6 +18,12 @@ import {
   rememberDelegated,
   resolveContractFiles,
 } from './contracts'
+// `scanDLP` deliberately stays in index.ts and is imported from there. Moving it here instead would
+// make verification.ts import from this module while this module imports verification.ts -- a cycle
+// between two leaves. A cycle through the composition root is the shape that already works.
+import { scanDLP } from './index'
+import type { LLMSession } from './index'
+import { canonicalisePath } from './paths'
 
 export const DELEGATE_WORKER_OPENAI_SCHEMA = {
   type: 'function',
@@ -274,4 +280,480 @@ export function resolveDelegateStatus(input: {
   return input.isSuccess ? 'SUCCESS' : 'VERIFICATION_FAILED'
 }
 
-// DELEGATION-CONTINUE-4
+export async function delegateWorker(
+  params: DelegateWorkerParams = {},
+  tracker?: SavingsTracker
+): Promise<any> {
+  const endpoint = resolveChatCompletionsUrl(
+    params.endpoint || PROFILES.WORKER.endpoint || DEFAULT_LOCAL_ENDPOINT
+  )
+  const model = params.model || PROFILES.WORKER.model
+  // The fence is built with `\x60` escapes rather than written literally. A literal triple backtick in
+  // this file makes it unpatchable by a confined agent, because the emission scanner truncates a fenced
+  // body at the first backtick run inside it. The instruction the worker receives is identical.
+  const FENCE = '\x60\x60\x60'
+  const fileInstruction =
+    'To change part of an existing file, emit a patch block instead of the whole file:\n' +
+    FENCE +
+    'patch file="src/thing.ts"\n<<<<<<< SEARCH\n<the exact existing lines>\n=======\n<the replacement lines>\n>>>>>>> REPLACE\n' +
+    FENCE +
+    '\n' +
+    'The SEARCH text must match the file exactly and occur exactly once, and there is no fuzzy matching.\n' +
+    'To create a file, or replace one wholesale, wrap it in a code block with the target file path in the header or first line, e.g. ' +
+    FENCE +
+    'typescript file="src/math-helper.ts"\n...code...\n' +
+    FENCE +
+    ' or // FILE: tests/math-helper.test.ts'
+  const systemPrompt =
+    params.systemPrompt ||
+    'You are a fast, accurate local coding worker executing a discrete task. ' + fileInstruction
+
+  const taskText = params.instruction || params.taskPrompt || params.prompt || ''
+
+  // Resolved before the worker runs: the contract hashes have to describe the tree as it was handed
+  // over, and context has to be read while the architect is still blind to it.
+  const workspaceBase = params.workspaceDir || process.cwd()
+
+  const context = resolveContextFiles(params.contextFiles, workspaceBase)
+  if (params.contextFiles && params.contextFiles.length > 0) {
+    if (context.errors.length > 0) {
+      return {
+        success: false,
+        status: 'CONTEXT_REFUSED',
+        message:
+          'Context injection refused:\n' + context.errors.map((e) => '  - ' + e).join('\n'),
+        contextErrors: context.errors,
+        resolvedWorkspace: workspaceBase,
+        filesWritten: [],
+        testResults: { passed: 0, failed: 0, output: 'The worker was not called.' },
+        tokens: { prompt: 0, completion: 0 },
+      }
+    }
+
+    // The declared context is about to travel to `endpoint`, which may be a vLLM port on another
+    // machine rather than this one. A "local" endpoint that is remote is a cloud, so a credential in
+    // the context is refused rather than transmitted: rule 1 does not care which port it is.
+    const contextDlp = scanDLP(context.text)
+    if (contextDlp.hasSensitiveData && contextDlp.highConfidence) {
+      const refusal =
+        'declared context carries a credential (' +
+        contextDlp.violations.join(', ') +
+        '), so it will not ' +
+        'be sent to the worker endpoint. Narrow the range to exclude it, or remove it from the file.'
+      return {
+        success: false,
+        status: 'CONTEXT_REFUSED',
+        message: 'Context injection refused:\n  - ' + refusal,
+        contextErrors: [refusal],
+        resolvedWorkspace: workspaceBase,
+        filesWritten: [],
+        testResults: { passed: 0, failed: 0, output: 'The worker was not called.' },
+        tokens: { prompt: 0, completion: 0 },
+      }
+    }
+  }
+
+  let fileContextText = ''
+  if (Array.isArray(params.targetFiles)) {
+    fileContextText = 'Target Files:\n' + params.targetFiles.join('\n')
+  } else if (typeof params.targetFiles === 'string') {
+    fileContextText = 'Target Files:\n' + params.targetFiles
+  } else if (typeof params.fileContext === 'string') {
+    fileContextText = params.fileContext
+  }
+
+  // Appended rather than chosen by an else-if. A unit normally has both targetFiles and context, and
+  // the earlier shape meant a declared context was silently dropped whenever targetFiles was present.
+  if (context.text) {
+    fileContextText += (fileContextText ? '\n\n' : '') + context.text
+  }
+
+  if (params.runVerification) {
+    fileContextText += '\nVerification Command:\n' + params.runVerification
+  }
+
+  const combinedPrompt = fileContextText
+    ? 'Task: ' + (params.taskName || 'Subtask') + '\n' + taskText + '\n\n' + fileContextText
+    : 'Task: ' + (params.taskName || 'Subtask') + '\n' + taskText
+
+  const turnId = params.turnId ?? Math.floor(Math.random() * 1000000)
+  const timeoutMs = params.timeoutMs ?? 300000
+
+  const contractPaths = resolveContractFiles(params.contractFiles, workspaceBase)
+  const contractBefore = contractFileHashes(contractPaths)
+
+  const requestStartedAt = Date.now()
+
+  try {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: combinedPrompt },
+        ],
+        temperature: PROFILES.WORKER.temperature ?? 0.2,
+        max_tokens: PROFILES.WORKER.max_tokens ?? 2048,
+        stop: PROFILES.WORKER.stop ?? ['<|im_' + 'end|>', '<|endof' + 'text|>'],
+        enable_thinking: PROFILES.WORKER.enable_thinking ?? false,
+        reasoning_effort: PROFILES.WORKER.reasoning_effort ?? 'none',
+      }),
+      signal: controller.signal,
+    }).finally(() => clearTimeout(timeoutId))
+
+    if (!response.ok) {
+      const errText = await response.text()
+      return {
+        success: false,
+        status: 'ERROR',
+        message: 'LM Studio returned HTTP ' + response.status + ': ' + errText,
+        filesWritten: [],
+        testResults: { passed: 0, failed: 0, output: 'Request failed.' },
+        tokens: { prompt: 0, completion: 0 },
+      }
+    }
+
+    const elapsedMs = Date.now() - requestStartedAt
+    const data: any = await response.json()
+    const content = data.choices?.[0]?.message?.content || ''
+    const promptTokens = data.usage?.prompt_tokens ?? estimateTokenCount(combinedPrompt)
+    const completionTokens = data.usage?.completion_tokens ?? estimateTokenCount(content)
+    const totalTokens = data.usage?.total_tokens ?? promptTokens + completionTokens
+
+    if (tracker) {
+      tracker.recordUsage({
+        turn: turnId,
+        route: 'WORKER_LOCAL',
+        model,
+        reason: 'SUBAGENT_DELEGATION (' + (params.taskName || 'subtask') + ')',
+        promptTokens,
+        completionTokens,
+        totalTokens,
+        elapsedMs,
+      })
+    }
+
+    if (!fs.existsSync(workspaceBase)) {
+      try {
+        fs.mkdirSync(workspaceBase, { recursive: true })
+      } catch (err: any) {
+        return {
+          success: false,
+          status: 'ERROR',
+          message:
+            "Resolved workspace directory '" +
+            workspaceBase +
+            "' does not exist and could not be created: " +
+            (err?.message || String(err)),
+          resolvedWorkspace: workspaceBase,
+          filesWritten: [],
+          testResults: { passed: 0, failed: 0, output: 'No files written.' },
+          tokens: { prompt: promptTokens, completion: completionTokens },
+        }
+      }
+    }
+
+    const emission = extractAndEmitFiles(
+      content,
+      params.targetFiles,
+      workspaceBase,
+      params.emitAllowlist ?? [],
+      contractPaths
+    )
+    const filesWritten = emission.filesWritten
+    // Remember what we wrote on the architect's behalf, so reading it back can be gated -- distinguishing
+    // files the worker created, which the architect never saw, from files it patched, which it did.
+    const createdPaths = filesWritten.filter((f) => f.mode !== 'patch').map((f) => f.path)
+    const patchedPaths = filesWritten.filter((f) => f.mode === 'patch').map((f) => f.path)
+    if (createdPaths.length > 0) rememberDelegated(createdPaths, 'created')
+    if (patchedPaths.length > 0) rememberDelegated(patchedPaths, 'patched')
+
+    let testResults: TestResults | undefined = undefined
+    let verificationGate: string | undefined = undefined
+    if (params.runVerification) {
+      const policy = params.verificationPolicy ?? DEFAULT_VERIFICATION_POLICY
+      const decision = evaluateVerificationPolicy(params.runVerification, policy)
+      let permitted = decision.kind === 'allow'
+      if (decision.kind === 'ask') {
+        // No approver means no consent. A missing approval seam must never degrade to a
+        // silent yes for a command that runs with the host process's authority.
+        permitted = params.verificationApproval
+          ? await params.verificationApproval(params.runVerification)
+          : false
+      }
+      if (permitted) {
+        testResults = runSandboxVerification(params.runVerification, workspaceBase, {
+          redact: params.redactVerification ?? process.env.DSH_LOCAL_ROUTER_RAW_VERIFICATION !== '1',
+          rawLogPath: path.join(resolveDataDir(), 'last-verification.log'),
+          allowInProcessFallback: policy.allowInProcessFallback,
+        })
+      } else {
+        verificationGate =
+          decision.kind === 'deny'
+            ? decision.reason
+            : 'approval was not granted (' + decision.reason + ')'
+      }
+    }
+
+    // A result is a verdict on a contract, and the contract is the verification command. Code
+    // produced without one has an unchecked contract: reporting SUCCESS there would be the same
+    // false green as counting unrecognised test output as a pass, which this plugin has already
+    // been caught doing twice.
+    const wroteFiles = filesWritten.length > 0 && emission.errors.length === 0
+    const unverified = !verificationGate && !params.runVerification && wroteFiles
+
+    // Re-hash once the worker has finished and verification has run. A violation voids the verdict
+    // regardless of what the tests reported, because the tests are no longer the contract.
+    const contractAfter = contractFileHashes(contractPaths)
+    const contractViolationsFound = contractViolations(contractBefore, contractAfter)
+
+    const isSuccess =
+      contractViolationsFound.length === 0 &&
+      !verificationGate &&
+      !unverified &&
+      (!testResults || testResults.failed === 0) &&
+      emission.errors.length === 0
+
+    let summaryText = ''
+    if (filesWritten.length > 0) {
+      summaryText =
+        "Task '" +
+        (params.taskName || 'Subtask') +
+        "' completed. Wrote " +
+        filesWritten.length +
+        ' file(s):\n' +
+        filesWritten
+          .map(
+            (f) =>
+              '  - ' +
+              f.path +
+              ' (' +
+              f.lines +
+              ' lines, ' +
+              f.bytes +
+              ' bytes' +
+              (f.mode === 'patch' ? ', patched in place with ' + f.hunks + ' hunk(s)' : '') +
+              ')'
+          )
+          .join('\n')
+    } else {
+      summaryText =
+        "Task '" +
+        (params.taskName || 'Subtask') +
+        "' completed. Worker returned " +
+        content.split('\n').length +
+        ' line(s) of output.'
+    }
+
+    summaryText +=
+      '\nWorkspace: ' +
+      workspaceBase +
+      (params.workspaceSource ? ' (resolved via ' + params.workspaceSource + ')' : '')
+    if (params.workspaceSource && /FALLBACK/.test(params.workspaceSource) && filesWritten.length > 0) {
+      summaryText +=
+        '\nWARNING: the Session workspace could not be resolved, so files were written relative to ' +
+        workspaceBase +
+        '. Pass absolute paths in targetFiles, or set DSH_WORKSPACE_ROOT, to be certain of the destination.'
+    }
+    if (emission.errors.length > 0) {
+      summaryText +=
+        '\nFILE WRITE ERRORS:\n' +
+        emission.errors.map((e: string) => '  - ' + e).join('\n')
+    }
+
+    if (verificationGate) {
+      summaryText += '\nVerification was NOT run: ' + verificationGate
+    }
+    if (unverified) {
+      summaryText +=
+        '\nUNVERIFIED: no verification command was supplied, so the contract was never checked. ' +
+        'Files were written; nothing was proven.'
+    }
+    if (testResults) {
+      summaryText +=
+        '\nVerification Results: Passed ' +
+        testResults.passed +
+        ', Failed ' +
+        testResults.failed +
+        '.'
+      if (testResults.errorSummary) {
+        summaryText += '\nFailures: ' + testResults.errorSummary
+      }
+    }
+    if (contractPaths.length > 0) {
+      summaryText +=
+        contractViolationsFound.length > 0
+          ? '\nCONTRACT MODIFIED, verdict void: ' + contractViolationsFound.join('; ') + '.'
+          : '\nContract: ' + contractPaths.length + ' declared file(s), unchanged.'
+    }
+
+    return {
+      success: isSuccess,
+      filesWritten: filesWritten.map((f) => f.path),
+      filesWrittenRelative: filesWritten.map((f) => f.relativeName || f.path),
+      resolvedWorkspace: workspaceBase,
+      workspaceSource: params.workspaceSource,
+      testResults:
+        testResults ||
+        {
+          passed: 0,
+          failed: 0,
+          output: verificationGate
+            ? 'Verification not run: ' + verificationGate
+            : unverified
+            ? 'No verification command was supplied; the contract is unchecked.'
+            : 'No verification requested.',
+        },
+      ...(verificationGate ? { verificationSkipped: verificationGate } : {}),
+      // Metadata only. The architect learns what the worker was shown, never what it says.
+      ...(context.injected.length > 0
+        ? {
+            contextInjected: context.injected.map((c) => ({
+              path: c.path,
+              relativeName: c.relativeName,
+              lineRange: c.lineRange,
+              lines: c.lines,
+              bytes: c.bytes,
+              sha256: c.sha256,
+            })),
+          }
+        : {}),
+      // Metadata only. The architect learns what the contract did, never what the code says.
+      ...(contractPaths.length > 0
+        ? {
+            contractFiles: contractPaths.map((p) => ({
+              path: p,
+              relativeName: path.relative(workspaceBase, p) || p,
+              sha256: contractAfter[canonicalisePath(p)] ?? null,
+              unchanged: contractBefore[canonicalisePath(p)] === contractAfter[canonicalisePath(p)],
+            })),
+            contractViolations: contractViolationsFound,
+          }
+        : {}),
+      tokens: {
+        prompt: promptTokens,
+        completion: completionTokens,
+      },
+      summary: summaryText,
+      status: resolveDelegateStatus({
+        verificationGate,
+        unverified,
+        contractViolations: contractViolationsFound,
+        isSuccess,
+      }),
+      taskName: params.taskName || 'Subtask',
+      tokensUsed: totalTokens,
+    }
+  } catch (err: any) {
+    const errMsg = err?.message || String(err)
+    return {
+      success: false,
+      status: 'ERROR',
+      message: 'LM Studio at 127.0.0.1:1234 was unreachable or failed: ' + errMsg,
+      filesWritten: [],
+      testResults: { passed: 0, failed: 0, output: errMsg },
+      tokens: { prompt: 0, completion: 0 },
+    }
+  }
+}
+
+export function extractPromptText(session: LLMSession | any): string {
+  if (!session) return ''
+
+  const messages =
+    session.messages ||
+    session.options?.messages ||
+    session.requestOptions?.messages ||
+    session.session?.messages
+
+  if (Array.isArray(messages) && messages.length > 0) {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i]
+      if (msg?.role === 'user') {
+        if (typeof msg.content === 'string') {
+          const text = msg.content.trim()
+          if (text.startsWith('[model changed:') || text.startsWith('Current runtime context.')) {
+            continue
+          }
+          if (text.length > 0) return text
+        }
+        if (Array.isArray(msg.content)) {
+          const textPart = msg.content.find((p: any) => p.type === 'text')
+          if (textPart?.text?.trim()) {
+            const text = textPart.text.trim()
+            if (!text.startsWith('[model changed:') && !text.startsWith('Current runtime context.')) {
+              return text
+            }
+          }
+        }
+      }
+    }
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const content = messages[i]?.content
+      if (typeof content === 'string') {
+        const text = content.trim()
+        if (text.startsWith('[model changed:') || text.startsWith('Current runtime context.')) {
+          continue
+        }
+        if (text.length > 0) return text
+      }
+    }
+  }
+
+  try {
+    const inbox = session.inbox || session.session?.inbox
+    if (inbox && Array.isArray(inbox['next-turn']) && inbox['next-turn'].length > 0) {
+      const item = inbox['next-turn'][inbox['next-turn'].length - 1]
+      if (typeof item?.prompt === 'string') {
+        const text = item.prompt.trim()
+        if (!text.startsWith('[model changed:') && !text.startsWith('Current runtime context.')) {
+          if (text.length > 0) return text
+        }
+      }
+      if (typeof item?.content === 'string') {
+        const text = item.content.trim()
+        if (!text.startsWith('[model changed:') && !text.startsWith('Current runtime context.')) {
+          if (text.length > 0) return text
+        }
+      }
+    }
+  } catch (e) {}
+
+  if (typeof session.input === 'string') {
+    const text = session.input.trim()
+    if (!text.startsWith('[model changed:') && !text.startsWith('Current runtime context.')) {
+      if (text.length > 0) return text
+    }
+  }
+
+  if (typeof session.prompt === 'string' && session.prompt.trim().length > 0) {
+    const clean = session.prompt
+      .replace(/^\[model changed:.*?\]\s*/i, '')
+      .replace(/^Current runtime context\..*?\n\n/is, '')
+      .trim()
+    if (clean.length > 0 && !clean.startsWith('[model changed:') && !clean.startsWith('Current runtime context.')) {
+      return clean
+    }
+  }
+
+  return ''
+}
+
+export function estimateTokenCount(text: string): number {
+  if (!text) return 0
+  return Math.ceil(text.length / 4)
+}
+
+// The delta machinery and the module that consumes it now live together, so the two halves are joined
+// here instead of at the composition root. ./emission.ts still cannot import this module back; it is
+// handed its engine instead. Both seams in that module default closed, so a mis-ordered load refuses
+// rather than crashing.
+configurePatchEngine({
+  parse: parseSearchReplaceBlocks,
+  apply: applySearchReplaceBlocks,
+})

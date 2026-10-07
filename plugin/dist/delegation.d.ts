@@ -1,5 +1,7 @@
+import { SavingsTracker } from './savings-tracker';
 import { ContextRequest } from './context';
 import { VerificationPolicy } from './verification';
+import type { LLMSession } from './index';
 export declare const DELEGATE_WORKER_OPENAI_SCHEMA: {
     type: string;
     function: {
@@ -218,3 +220,6 @@ export declare function resolveDelegateStatus(input: {
     contractViolations: string[];
     isSuccess: boolean;
 }): string;
+export declare function delegateWorker(params?: DelegateWorkerParams, tracker?: SavingsTracker): Promise<any>;
+export declare function extractPromptText(session: LLMSession | any): string;
+export declare function estimateTokenCount(text: string): number;
