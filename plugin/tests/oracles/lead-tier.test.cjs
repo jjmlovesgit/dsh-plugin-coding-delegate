@@ -66,27 +66,9 @@ test("an explicit provider list wins over the leadTier shortcut", () => {
   assert.deepEqual(resolveLeadProviders({ leadProviders: ["ollama"] }), ["ollama"]);
 });
 
-test("the reference persona and the agent preset have not drifted apart", () => {
-  // PROFILES.LEAD.systemInstruction is never injected -- the plugin leaves lead requests alone -- so
-  // the preset is what actually runs. That makes the profile documentation, and documentation that
-  // can drift is documentation that lies. This holds the two to the same requirements.
-  const fs = require("node:fs");
-  const path = require("node:path");
-  const preset = fs.readFileSync(
-    path.resolve(PLUGIN, "..", "presets", "lead", "agent.cordis.yml"),
-    "utf8"
-  );
-  const reference = require(DIST).PROFILES.LEAD.systemInstruction;
-
-  // Phrases that must appear in BOTH. Deliberately role-level only: the preset carries the contract
-  // FORMAT because that is what the architect consumes, and the profile is not supposed to duplicate
-  // it. What must not drift is what the lead IS.
-  for (const phrase of ["contract", "do not write implementation", "dispatch the worker"]) {
-    const pattern = new RegExp(phrase.replace(/ /g, "\\s+"), "i");
-    assert.match(reference, pattern, `the profile forgot: ${phrase}`);
-    assert.match(preset, pattern, `the preset forgot: ${phrase}`);
-  }
-});
+// A drift guard lived here, comparing PROFILES.LEAD against the lead agent preset. The preset was
+// retired and removed, so there are no longer two sides to compare and the guard's subject is gone with
+// it. Deleted rather than left skipping: a guard that cannot fail is decoration.
 
 test("switching the lead tier on is what makes a lead request a lead request", () => {
   // The composition the hook performs, end to end: the profile feeds the provider list, which feeds
