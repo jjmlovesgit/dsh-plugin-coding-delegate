@@ -47,25 +47,41 @@ agent that spawns the rest.
 
 ## Why it was retired
 
-- **The window does not fit.** The lead's configured context was 32,768 tokens. `plugin/src/index.ts` is
-  147 KB — roughly **40,900 tokens**. One file, larger than the whole window; `plugin/src` together is
-  ~46,700. The plugin cannot be engineered by its own lead.
-- **The reasoning budget is not ours to set.** LM Studio's per-model setting is authoritative. Four
-  variants of one request — server default, `enable_thinking: false`, `true`, and `reasoning_effort: high`
-  — returned byte-identical results: 64 completion tokens, the same 183-character reasoning field, the same
-  answer. Nothing the plugin or DSH sends changes it. Reproduce with `scripts/probe-thinking.mjs`.
-- **The saving was on the wrong side.** Offloading typing is worth ~159,000 tokens across this project's
-  entire history. Reading one 41,000-token file once and carrying it for fifty turns costs ~2,046,000 input
-  tokens. Adding a tier to avoid reading gives up the larger saving to capture the smaller.
-- **Nothing was ever proven.** No lead-authored contract was dispatched and verified. The failure mode is
-  an under-specified contract producing a confident wrong patch — worse than the frontier model writing the
-  code itself.
+- **The window does not fit.** *Re-measured; this ground no longer holds for a single module.* At
+  retirement the lead's configured context was 32,768 tokens and `plugin/src/index.ts` was 147 KB —
+  roughly **40,900 tokens**: one file, larger than the whole window, with `plugin/src` together at
+  ~46,700. The refactor in [`refactor.md`](refactor.md) has since split it. Measured now: `index.ts` is
+  **~13,400 tokens**, the largest module (`delegation.ts`) is **~7,300**, and `plugin/src` together is
+  **~45,700**. Any one module therefore fits the lead's window with room to spare, and only the whole of
+  `src` does not. The objection as originally written — "the plugin cannot be engineered by its own
+  lead" — is dead.
+- **The reasoning budget is not ours to set.** *Unchanged.* LM Studio's per-model setting is
+  authoritative. Four variants of one request — server default, `enable_thinking: false`, `true`, and
+  `reasoning_effort: high` — returned byte-identical results: 64 completion tokens, the same 183-character
+  reasoning field, the same answer. Nothing the plugin or DSH sends changes it. Reproduce with
+  `scripts/probe-thinking.mjs`.
+- **The saving was on the wrong side.** *Re-measured; weaker, still true.* Offloading typing is worth
+  ~159,000 tokens across this project's entire history. At retirement the arithmetic was one 41,000-token
+  file carried for fifty turns: ~2,046,000 input tokens. With the split, the largest module is ~7,300
+  tokens, so the same fifty turns cost **~365,000** — an order of magnitude less, and still more than
+  twice the entire typing history. Reading still dominates typing; the margin is simply smaller than
+  recorded.
+- **Nothing was ever proven.** *Unchanged.* No lead-authored contract was dispatched and verified. The
+  failure mode is an under-specified contract producing a confident wrong patch — worse than the frontier
+  model writing the code itself.
+
+**The decision stands, and this is what it now rests on.** Grounds 2 and 4 are unchanged, and each is
+sufficient on its own: the reasoning budget is not the plugin's to set, and nothing was ever proven.
+Grounds 1 and 3 were re-measured after the refactor and both weakened — a module can now be read by a
+lead, but the reading still costs more than the typing it saves.
 
 ## What would have to change
 
-1. **A codebase that fits.** The tier is only viable if a unit's relevant code fits in roughly 20K tokens.
-   That is a property of the repository, not the model: `index.ts` accumulated because the architect has
-   been editing it directly. Split it and the arithmetic changes.
+1. **A codebase that fits.** *Largely satisfied.* The tier is only viable if a unit's relevant code fits
+   in roughly 20K tokens. That is a property of the repository, not the model: `index.ts` accumulated
+   because the architect had been editing it directly. Split it and the arithmetic changes. It has now
+   been split — every module is under ~13,400 tokens, and the largest is ~7,300 — so this is the one
+   precondition that has been met since the retirement was recorded.
 2. **A way to control reasoning** where the model is served, or a separate non-reasoning model for the
    worker so the two tiers do not contend for one server setting.
 3. **Evidence that a local model writes a discriminating contract.** The shape is now known and written

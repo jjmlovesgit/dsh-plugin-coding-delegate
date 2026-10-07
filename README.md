@@ -71,15 +71,17 @@ Stated plainly, because these limits decide whether it fits your work:
   missing is **cross-unit coherence**: nothing decides which files a unit needs, and nothing checks that
   two units agree.
 - **The architect is not blind, and claiming otherwise was wrong.** It reads source to engineer, and
-  every read is re-sent on every later turn. One 41,000-token file read once costs roughly **2,046,000
-  input tokens** across fifty turns — an order of magnitude more than all the typing in this project's
-  history, which is about 159,000. The plugin does not gate that reading; it **records** it, in the
-  `SOURCE_READ` trace, so the choice is visible rather than assumed.
+  every read is re-sent on every later turn. Reading is what costs: a 7,300-token module read once and
+  carried for fifty turns is roughly **365,000 input tokens** — more than twice all the typing in this
+  project's history, which is about 159,000. The plugin does not gate that reading; it **records** it, in
+  the `SOURCE_READ` trace, so the choice is visible rather than assumed.
 - **A third tier was built, measured, and retired.** A local thinking model was meant to read the
-  repository and author each contract, keeping the architect out of the code entirely. It does not fit:
-  this plugin's own `src/index.ts` is ~40,900 tokens against the lead's 32,768-token window, LM Studio's
-  per-model reasoning setting is authoritative so the tier could not be made to think, and offloading
-  typing recovers far less than the reading it gives back. The measurements are in
+  repository and author each contract, keeping the architect out of the code entirely. It was retired on
+  four measurements: the tier's window did not fit, LM Studio's per-model reasoning setting is
+  authoritative so it could not be made to think, offloading typing recovers far less than the reading it
+  gives back, and no lead-authored contract was ever dispatched and verified. The split of `src/index.ts`
+  has since retired the *first* of those four — every module now fits that window — so the decision now
+  rests on the other three. The measurements, and which of them still hold, are in
   [`docs/ROADMAP.md`](docs/ROADMAP.md).
 - **The contract is signed, and the worker cannot touch it.** `contractFiles` are hashed before the
   worker runs, refused as emission targets, and re-hashed afterwards, so a change voids the verdict. A

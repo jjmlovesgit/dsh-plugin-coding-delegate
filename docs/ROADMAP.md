@@ -66,22 +66,34 @@ Kept as a record, not a plan. The tier was built — `leadTier`, the role decisi
 preset that mounted and ran — and then measured. The measurements say a 27B local model cannot carry this
 role against this codebase:
 
-- **The window does not fit.** The lead's configured context is 32,768 tokens. `plugin/src/index.ts` is
-  147 KB — roughly **40,900 tokens**. One file, larger than the whole window. The plugin cannot be
-  engineered by its own lead, and `plugin/src` together is ~46,700.
+- **The window does not fit.** *Re-measured after the refactor; this ground no longer holds for a single
+  module.* At retirement the lead's configured context was 32,768 tokens and `plugin/src/index.ts` was
+  147 KB — roughly **40,900 tokens**: one file, larger than the whole window, with `plugin/src` together
+  at ~46,700. It has since been split (see [`refactor.md`](refactor.md),
+  [`refactor-complete.md`](refactor-complete.md)). Measured now: `index.ts` is **~13,400 tokens**, the
+  largest module (`delegation.ts`) is **~7,300**, and `plugin/src` together is **~45,700**. Any one module
+  fits the lead's window; only the whole of `src` does not.
 - **The reasoning budget is not ours to set.** LM Studio's per-model setting is authoritative. Four
   variants of one request — server default, `enable_thinking: false`, `true`, and `reasoning_effort:
   high` — returned byte-identical results: 64 completion tokens and the same 183-character reasoning
   field. Nothing the plugin or DSH sends changes it. Reproduce with `scripts/probe-thinking.mjs`.
   A corollary worth keeping: `PROFILES.WORKER.enable_thinking: false` is sent on every delegation and
   **ignored**, so the worker is not as unthinking as its profile claims either.
-- **The saving was on the wrong side.** Offloading typing is worth ~159,000 tokens across this project's
-  entire history. Reading one 41,000-token file once and carrying it for fifty turns costs ~2,046,000
-  input tokens. Letting the architect read code to engineer gives up the larger saving to capture the
-  smaller one.
+- **The saving was on the wrong side.** *Re-measured; weaker, still true.* Offloading typing is worth
+  ~159,000 tokens across this project's entire history. At retirement the arithmetic was one 41,000-token
+  file carried for fifty turns: ~2,046,000 input tokens. With the split, the largest module is ~7,300
+  tokens, so the same fifty turns cost **~365,000** — an order of magnitude less, and still more than
+  twice the entire typing history. Letting the architect read code to engineer still gives up the larger
+  saving to capture the smaller one; the margin is simply smaller than recorded.
 - **Nothing was ever proven.** No lead-authored contract was ever dispatched and verified. The tier's
   failure mode is an under-specified contract producing a confident wrong patch — worse than the frontier
   model writing the code itself.
+
+**The decision stands, and this is what it now rests on.** Grounds 2 and 4 are unchanged, and each is
+sufficient alone: the reasoning budget is not the plugin's to set, and nothing was ever proven. Grounds 1
+and 3 were re-measured after the refactor and both weakened. Ground 1 in particular is now dead as
+written — the refactor met the one precondition this section said would change the arithmetic — so the
+retirement should be read as resting on **2 and 4**, not on the file being unreadable.
 
 So the two-tier loop stands, and its honest claim is **"your GPU does the typing"**, not "the architect's
 window stays clean". The architect reads code to engineer. The discipline that replaces the lead tier is:

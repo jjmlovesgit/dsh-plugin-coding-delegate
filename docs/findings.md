@@ -19,7 +19,7 @@ mutation from a test run, which is the same category as the config that claimed 
 for `durable-registry.test.cjs`, which is the one that already does it. `resolveDataDir()` honours that
 variable and reads it at call time, so an env assignment in the oracle is sufficient.
 
-## `enable_thinking: false` on the worker does nothing
+## `enable_thinking: false` on the worker does nothing — documented as advisory
 
 `delegateWorker` sends `enable_thinking: false` and `reasoning_effort: 'none'` on every request. The
 local server ignores both: LM Studio's per-model setting is authoritative. Measured with
@@ -27,16 +27,30 @@ local server ignores both: LM Studio's per-model setting is authoritative. Measu
 `reasoning_effort: 'high'`, returned byte-identical results.
 
 So the worker reasons a little whether or not it is asked not to, and `PROFILES.WORKER.enable_thinking`
-reads as a control that works. It should either be removed or documented as advisory.
+read as a control that works.
 
-## `PROFILES.LEAD` is almost entirely inert
+**Resolved by documenting, not removing.** The two keys are still transmitted and still state the intent,
+so `PROFILES.WORKER` now carries a doc comment saying they are **advisory only** and must not be read as
+a control — `plugin/src/profiles.ts`. Removal was the alternative and was not taken: it would change the
+request payload and the unit test that pins it, to express the same fact less clearly. The limit is now
+stated where the configuration is read, which is the place it was misleading.
+
+## `PROFILES.LEAD` is almost entirely inert — marked reference-only
 
 Only `PROFILES.LEAD.provider` is read — one line, by `resolveLeadProviders`. `model`, `endpoint`,
 `contextWindow`, `temperature`, `max_tokens`, `enable_thinking`, `reasoning_effort` and `systemInstruction`
 are never applied, because the plugin leaves lead requests exactly as the host configured them.
 
-`systemInstruction` is already documented as reference-only. The rest are not, and they currently read as
-though they configure the tier.
+`systemInstruction` was already documented as reference-only. **Resolved by extending that marking to
+every field**, in `plugin/src/profiles.ts`: the doc comment now names each unapplied field, says plainly
+that changing one has no effect on any request, and frames the object as the record of what the tier was
+configured to be rather than as configuration.
+
+The fields were **not** deleted. `lead-tier.test.cjs` is a contract oracle that asserts the tier's shape —
+`enable_thinking`, `reasoning_effort`, `endpoint`, `provider`, `contextWindow`, `systemInstruction` — and
+the tier is retired, not removed. Deleting the fields would leave that oracle asserting nothing about a
+capability the plugin still exposes through `leadTier`/`leadProviders`, which is a worse outcome than a
+clearly-labelled record.
 
 ## The fence scanner truncates a block whose body contains a fence
 

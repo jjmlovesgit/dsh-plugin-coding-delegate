@@ -43,10 +43,20 @@ export const PROFILES: Profiles = {
    * metered allowance this plugin exists to protect. It is deliberately not given `delegate_worker`:
    * the lead authors contracts, the architect dispatches them.
    *
-   * `systemInstruction` below is REFERENCE ONLY, and deliberately so. A lead request is left exactly
-   * as the host configured it, which means this plugin never injects this text into anything — the
-   * agent preset is what actually runs (see `docs/lead-tier.md`). It is kept here because the profile is
-   * where the lead tier is declared, and because a test asserts it has not drifted from the preset.
+   * RETIRED, and almost entirely REFERENCE ONLY. The tier was built, measured, and retired; the
+   * measurements are in `docs/ROADMAP.md`. What matters for reading this object is that **only
+   * `provider` is ever read** — `resolveLeadProviders` derives the `leadTier` allowlist from it, and
+   * that is the whole of the plugin's use.
+   *
+   * Every other field here (`model`, `endpoint`, `contextWindow`, `temperature`, `max_tokens`,
+   * `enable_thinking`, `reasoning_effort`, `systemInstruction`) is NEVER APPLIED, and deliberately so:
+   * a request the host resolved to a lead provider is left exactly as the host configured it, because
+   * the plugin enforces boundaries rather than reinventing a preset it did not write. The agent preset
+   * is what actually runs (see `docs/lead-tier.md`).
+   *
+   * They are kept as the record of what the tier was configured to be, and `lead-tier.test.cjs` asserts
+   * that record has not drifted. Read them as documentation, not as configuration: changing one has no
+   * effect on any request.
    */
   LEAD: {
     name: 'LEAD_LOCAL',
@@ -66,6 +76,14 @@ export const PROFILES: Profiles = {
       'you are changing exactly as it appears, because a patch that does not match byte-for-byte is ' +
       'refused rather than approximated.',
   },
+  /**
+   * The worker. `enable_thinking` and `reasoning_effort` below are ADVISORY ONLY, and are documented
+   * as such rather than removed: the plugin does transmit both on every delegation, but LM Studio's
+   * per-model setting is authoritative and ignores them — four variants of one request, including
+   * `enable_thinking: false` and `reasoning_effort: 'high'`, returned byte-identical output. See
+   * `docs/findings.md`. Do not read either as a control that works, and do not expect the worker to be
+   * as unthinking as `false` suggests.
+   */
   WORKER: {
     name: 'WORKER_LOCAL',
     provider: 'lm-studio',
