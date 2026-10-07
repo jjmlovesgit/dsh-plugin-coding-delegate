@@ -146,6 +146,13 @@ export declare const DELEGATE_WORKER_OPENAI_SCHEMA: {
                     type: string;
                     description: string;
                 };
+                contractFiles: {
+                    type: string;
+                    items: {
+                        type: string;
+                    };
+                    description: string;
+                };
                 workspaceDir: {
                     type: string;
                     description: string;
@@ -180,6 +187,13 @@ export declare const DELEGATE_WORKER_SCHEMA: {
                 };
                 runVerification: {
                     type: string;
+                    description: string;
+                };
+                contractFiles: {
+                    type: string;
+                    items: {
+                        type: string;
+                    };
                     description: string;
                 };
                 workspaceDir: {
@@ -217,7 +231,7 @@ export declare function evaluateEmissionPath(resolvedPath: string, baseDir: stri
     allowed: boolean;
     reason?: string;
 };
-export declare function extractAndEmitFiles(content: string, targetFilesHint?: string[] | string, baseDir?: string, allowedRoots?: string[]): {
+export declare function extractAndEmitFiles(content: string, targetFilesHint?: string[] | string, baseDir?: string, allowedRoots?: string[], protectedPaths?: string[]): {
     filesWritten: FileEmissionResult[];
     errors: string[];
     cleanContent: string;
@@ -302,6 +316,13 @@ export interface DelegateWorkerParams {
     timeoutMs?: number;
     workspaceDir?: string;
     workspaceSource?: string;
+    /**
+     * Paths to the tests that constitute this unit's contract. They are hashed before the worker
+     * runs, refused as worker emission targets, and re-hashed afterwards: any change voids the
+     * verdict. The architect owns these files and the executor never may, which is what stops a
+     * unit from certifying itself.
+     */
+    contractFiles?: string[];
     /** Set false to return raw verification output. Raw output can carry source. */
     redactVerification?: boolean;
     /** Policy for the model-supplied `runVerification` command. */
@@ -322,6 +343,35 @@ export declare const DEFAULT_LOCAL_ENDPOINT = "http://127.0.0.1:1234/v1";
  * written without the operator having to know this plugin appends the path.
  */
 export declare function resolveChatCompletionsUrl(base: string): string;
+/**
+ * sha256 of a file, or null when it cannot be read. Callers treat null as a failure rather than as
+ * absence: a contract file that vanished is a violation, not an empty string.
+ */
+export declare function sha256File(filePath: string): string | null;
+/**
+ * Resolve the architect's declared contract paths against the workspace. Names only: the architect
+ * never supplies contents, and the resolved list is what the worker is forbidden to write.
+ */
+export declare function resolveContractFiles(files: string[] | undefined, baseDir: string): string[];
+/** Keyed by canonical path so two spellings of one file cannot pass as two files. */
+export declare function contractFileHashes(paths: Iterable<string>): Record<string, string | null>;
+/**
+ * Anything that changed a declared file during a unit invalidates the verdict, whatever the tests
+ * then reported. A missing declaration is reported too, because failing closed is the only safe
+ * reading of "the architect declared a contract file that is not there".
+ */
+export declare function contractViolations(before: Record<string, string | null>, after: Record<string, string | null>): string[];
+/**
+ * Status precedence, as a pure function so the ordering is testable without a server. Tampering
+ * outranks everything: a modified contract voids the run even when verification passed, because
+ * what passed was no longer the contract.
+ */
+export declare function resolveDelegateStatus(input: {
+    verificationGate?: string | null;
+    unverified: boolean;
+    contractViolations: string[];
+    isSuccess: boolean;
+}): string;
 export declare function delegateWorker(params?: DelegateWorkerParams, tracker?: SavingsTracker): Promise<any>;
 export declare function extractPromptText(session: LLMSession | any): string;
 export declare function estimateTokenCount(text: string): number;
@@ -420,6 +470,11 @@ declare const pluginExport: {
     extractAndEmitFiles: typeof extractAndEmitFiles;
     runSandboxVerification: typeof runSandboxVerification;
     parseTestOutput: typeof parseTestOutput;
+    sha256File: typeof sha256File;
+    resolveContractFiles: typeof resolveContractFiles;
+    contractFileHashes: typeof contractFileHashes;
+    contractViolations: typeof contractViolations;
+    resolveDelegateStatus: typeof resolveDelegateStatus;
     DELEGATE_WORKER_SCHEMA: {
         type: string;
         function: {
@@ -445,6 +500,13 @@ declare const pluginExport: {
                     };
                     runVerification: {
                         type: string;
+                        description: string;
+                    };
+                    contractFiles: {
+                        type: string;
+                        items: {
+                            type: string;
+                        };
                         description: string;
                     };
                     workspaceDir: {
@@ -481,6 +543,13 @@ declare const pluginExport: {
                     };
                     runVerification: {
                         type: string;
+                        description: string;
+                    };
+                    contractFiles: {
+                        type: string;
+                        items: {
+                            type: string;
+                        };
                         description: string;
                     };
                     workspaceDir: {

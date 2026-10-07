@@ -40,13 +40,14 @@ No host dependency, no decision pending. **This is the actionable track.**
 
 | # | Unit | Status |
 | --- | --- | --- |
-| C | **Contract-path integrity** — declare the contract's test files, hash them before the worker runs, refuse worker emissions targeting them, re-hash after verification and fail the verdict if they changed | Contract authored; implementation next |
+| C | **Contract-path integrity** — declare the contract's test files, hash them before the worker runs, refuse worker emissions targeting them, re-hash after verification and fail the verdict if they changed | **Built.** `tests/oracles/contract-integrity.test.cjs`, 9 assertions, failing 8 of 9 before implementation |
 | A | **Architect-blind context injection** — `contextFiles` names and ranges, contained, DLP-scanned, reported as metadata only | Designed, not built |
 | B | **Search/replace delta emission** — exact-match, no fuzz, all-or-nothing | Designed, not built; depends on A |
 | 18 | `Select-String <file>.js` read-detection false positive | Not started |
 
-C ships first because it is small, independent, and it is the unit that makes a passing verdict mean
-*the architect's tests, unmodified, passed against the worker's code*.
+C shipped first because it is small, independent, and it is the unit that makes a passing verdict mean
+*the architect's tests, unmodified, passed against the worker's code*. **A is next**: the worker is
+still blind, so the loop still closes only on new files.
 
 ## Track 2 — the lead tier
 

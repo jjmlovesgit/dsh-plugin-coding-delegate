@@ -47,6 +47,11 @@ exports.commandProgram = commandProgram;
 exports.evaluateVerificationPolicy = evaluateVerificationPolicy;
 exports.runSandboxVerification = runSandboxVerification;
 exports.resolveChatCompletionsUrl = resolveChatCompletionsUrl;
+exports.sha256File = sha256File;
+exports.resolveContractFiles = resolveContractFiles;
+exports.contractFileHashes = contractFileHashes;
+exports.contractViolations = contractViolations;
+exports.resolveDelegateStatus = resolveDelegateStatus;
 exports.delegateWorker = delegateWorker;
 exports.extractPromptText = extractPromptText;
 exports.estimateTokenCount = estimateTokenCount;
@@ -61,6 +66,7 @@ const fs = __importStar(require("fs"));
 const os = __importStar(require("os"));
 const path = __importStar(require("path"));
 const child_process = __importStar(require("child_process"));
+const crypto = __importStar(require("crypto"));
 const savings_tracker_1 = require("./savings-tracker");
 Object.defineProperty(exports, "SavingsTracker", { enumerable: true, get: function () { return savings_tracker_1.SavingsTracker; } });
 const profiles_1 = require("./profiles");
@@ -154,6 +160,11 @@ exports.DELEGATE_WORKER_OPENAI_SCHEMA = {
                     type: 'string',
                     description: 'Optional shell command to verify the output. It executes with the authority of the DSH process and requires operator approval unless verificationApproval is set to allow.',
                 },
+                contractFiles: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Paths to the tests that constitute this unit contract. They are hashed before the worker runs, the worker is forbidden to write them, and they are re-hashed afterwards: any change voids the verdict. The architect owns these files.',
+                },
                 workspaceDir: {
                     type: 'string',
                     description: 'Absolute path of the directory the worker may write into. Defaults to the session workspace; destinations outside it are refused.',
@@ -245,7 +256,7 @@ function evaluateEmissionPath(resolvedPath, baseDir, allowedRoots = []) {
             `. A delegated worker may only write inside its workspace; add the directory to emitAllowlist to permit it.`,
     };
 }
-function extractAndEmitFiles(content, targetFilesHint, baseDir = process.cwd(), allowedRoots = []) {
+function extractAndEmitFiles(content, targetFilesHint, baseDir = process.cwd(), allowedRoots = [], protectedPaths = []) {
     if (!content)
         return { filesWritten: [], errors: [], cleanContent: '' };
     const filesWritten = [];
@@ -263,6 +274,16 @@ function extractAndEmitFiles(content, targetFilesHint, baseDir = process.cwd(), 
         if (!containment.allowed) {
             emissionErrors.push(String(containment.reason));
             console.warn(`[EMIT_FILE_BLOCKED] ${containment.reason}`);
+            return;
+        }
+        // Contract files belong to the architect. This is checked before anything is written, and it
+        // covers every emission route -- the fenced header, the `// FILE:` marker, and the fallback --
+        // because they all funnel through here.
+        const protectedHit = protectedPaths.find((p) => canonicalisePath(String(p)) === canonicalisePath(resolvedPath));
+        if (protectedHit) {
+            emissionErrors.push(`Refused to write ${resolvedPath}: it is a contract file declared by the architect, and the ` +
+                `executor may not modify the test that judges it.`);
+            console.warn(`[EMIT_FILE_BLOCKED] contract file: ${resolvedPath}`);
             return;
         }
         if (seenPaths.has(resolvedPath))
@@ -827,6 +848,77 @@ function resolveChatCompletionsUrl(base) {
         return `${exports.DEFAULT_LOCAL_ENDPOINT}/chat/completions`;
     return /\/chat\/completions$/i.test(trimmed) ? trimmed : `${trimmed}/chat/completions`;
 }
+/**
+ * sha256 of a file, or null when it cannot be read. Callers treat null as a failure rather than as
+ * absence: a contract file that vanished is a violation, not an empty string.
+ */
+function sha256File(filePath) {
+    try {
+        return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
+    }
+    catch (err) {
+        return null;
+    }
+}
+/**
+ * Resolve the architect's declared contract paths against the workspace. Names only: the architect
+ * never supplies contents, and the resolved list is what the worker is forbidden to write.
+ */
+function resolveContractFiles(files, baseDir) {
+    const resolved = [];
+    for (const file of files ?? []) {
+        const name = String(file || '').trim();
+        if (!name)
+            continue;
+        const full = path.isAbsolute(name) ? name : path.resolve(baseDir, name);
+        if (!resolved.some((seen) => canonicalisePath(seen) === canonicalisePath(full))) {
+            resolved.push(full);
+        }
+    }
+    return resolved;
+}
+/** Keyed by canonical path so two spellings of one file cannot pass as two files. */
+function contractFileHashes(paths) {
+    const hashes = {};
+    for (const p of paths)
+        hashes[canonicalisePath(p)] = sha256File(p);
+    return hashes;
+}
+/**
+ * Anything that changed a declared file during a unit invalidates the verdict, whatever the tests
+ * then reported. A missing declaration is reported too, because failing closed is the only safe
+ * reading of "the architect declared a contract file that is not there".
+ */
+function contractViolations(before, after) {
+    const violations = [];
+    for (const [key, beforeHash] of Object.entries(before)) {
+        const afterHash = Object.prototype.hasOwnProperty.call(after, key) ? after[key] : null;
+        if (beforeHash === null) {
+            violations.push(`'${key}' was declared as a contract file but does not exist`);
+        }
+        else if (afterHash === null) {
+            violations.push(`'${key}' was deleted while the unit ran`);
+        }
+        else if (afterHash !== beforeHash) {
+            violations.push(`'${key}' was modified while the unit ran`);
+        }
+    }
+    return violations;
+}
+/**
+ * Status precedence, as a pure function so the ordering is testable without a server. Tampering
+ * outranks everything: a modified contract voids the run even when verification passed, because
+ * what passed was no longer the contract.
+ */
+function resolveDelegateStatus(input) {
+    if (input.contractViolations.length > 0)
+        return 'CONTRACT_MODIFIED';
+    if (input.verificationGate)
+        return 'VERIFICATION_NOT_APPROVED';
+    if (input.unverified)
+        return 'UNVERIFIED';
+    return input.isSuccess ? 'SUCCESS' : 'VERIFICATION_FAILED';
+}
 async function delegateWorker(params = {}, tracker) {
     const endpoint = resolveChatCompletionsUrl(params.endpoint || profiles_1.PROFILES.WORKER.endpoint || exports.DEFAULT_LOCAL_ENDPOINT);
     const model = params.model || profiles_1.PROFILES.WORKER.model;
@@ -851,6 +943,11 @@ async function delegateWorker(params = {}, tracker) {
         : `Task: ${params.taskName || 'Subtask'}\n${taskText}`;
     const turnId = params.turnId ?? Math.floor(Math.random() * 1000000);
     const timeoutMs = params.timeoutMs ?? 300000;
+    // Resolved before the worker runs, not after: the contract hashes have to describe the tree as it
+    // was handed over, or they prove nothing about what the worker did to it.
+    const workspaceBase = params.workspaceDir || process.cwd();
+    const contractPaths = resolveContractFiles(params.contractFiles, workspaceBase);
+    const contractBefore = contractFileHashes(contractPaths);
     const requestStartedAt = Date.now();
     try {
         const controller = new AbortController();
@@ -901,7 +998,6 @@ async function delegateWorker(params = {}, tracker) {
                 elapsedMs,
             });
         }
-        const workspaceBase = params.workspaceDir || process.cwd();
         if (!fs.existsSync(workspaceBase)) {
             try {
                 fs.mkdirSync(workspaceBase, { recursive: true });
@@ -918,7 +1014,7 @@ async function delegateWorker(params = {}, tracker) {
                 };
             }
         }
-        const emission = extractAndEmitFiles(content, params.targetFiles, workspaceBase, params.emitAllowlist ?? []);
+        const emission = extractAndEmitFiles(content, params.targetFiles, workspaceBase, params.emitAllowlist ?? [], contractPaths);
         const filesWritten = emission.filesWritten;
         // Remember what we wrote on the architect's behalf, so reading it back can be gated.
         rememberDelegated(filesWritten.map((f) => f.path));
@@ -955,7 +1051,12 @@ async function delegateWorker(params = {}, tracker) {
         // been caught doing twice.
         const wroteFiles = filesWritten.length > 0 && emission.errors.length === 0;
         const unverified = !verificationGate && !params.runVerification && wroteFiles;
-        const isSuccess = !verificationGate &&
+        // Re-hash once the worker has finished and verification has run. A violation voids the verdict
+        // regardless of what the tests reported, because the tests are no longer the contract.
+        const contractAfter = contractFileHashes(contractPaths);
+        const contractViolationsFound = contractViolations(contractBefore, contractAfter);
+        const isSuccess = contractViolationsFound.length === 0 &&
+            !verificationGate &&
             !unverified &&
             (!testResults || testResults.failed === 0) &&
             emission.errors.length === 0;
@@ -989,6 +1090,12 @@ async function delegateWorker(params = {}, tracker) {
                 summaryText += `\nFailures: ${testResults.errorSummary}`;
             }
         }
+        if (contractPaths.length > 0) {
+            summaryText +=
+                contractViolationsFound.length > 0
+                    ? `\nCONTRACT MODIFIED, verdict void: ${contractViolationsFound.join('; ')}.`
+                    : `\nContract: ${contractPaths.length} declared file(s), unchanged.`;
+        }
         return {
             success: isSuccess,
             filesWritten: filesWritten.map((f) => f.path),
@@ -1006,18 +1113,29 @@ async function delegateWorker(params = {}, tracker) {
                             : 'No verification requested.',
                 },
             ...(verificationGate ? { verificationSkipped: verificationGate } : {}),
+            // Metadata only. The architect learns what the contract did, never what the code says.
+            ...(contractPaths.length > 0
+                ? {
+                    contractFiles: contractPaths.map((p) => ({
+                        path: p,
+                        relativeName: path.relative(workspaceBase, p) || p,
+                        sha256: contractAfter[canonicalisePath(p)] ?? null,
+                        unchanged: contractBefore[canonicalisePath(p)] === contractAfter[canonicalisePath(p)],
+                    })),
+                    contractViolations: contractViolationsFound,
+                }
+                : {}),
             tokens: {
                 prompt: promptTokens,
                 completion: completionTokens,
             },
             summary: summaryText,
-            status: verificationGate
-                ? 'VERIFICATION_NOT_APPROVED'
-                : unverified
-                    ? 'UNVERIFIED'
-                    : isSuccess
-                        ? 'SUCCESS'
-                        : 'VERIFICATION_FAILED',
+            status: resolveDelegateStatus({
+                verificationGate,
+                unverified,
+                contractViolations: contractViolationsFound,
+                isSuccess,
+            }),
             taskName: params.taskName || 'Subtask',
             tokensUsed: totalTokens,
         };
@@ -1873,6 +1991,11 @@ function apply(ctx, options = {}) {
                             type: 'string',
                             description: 'Optional shell command to verify the output. It executes with the authority of the DSH process and requires operator approval unless verificationApproval is set to allow.',
                         },
+                        contractFiles: {
+                            type: 'array',
+                            items: { type: 'string' },
+                            description: 'Paths to the tests that constitute this unit contract. They are hashed before the worker runs, the worker is forbidden to write them, and they are re-hashed afterwards: any change voids the verdict. The architect owns these files.',
+                        },
                         workspaceDir: {
                             type: 'string',
                             description: 'Absolute path of the directory the worker may write into. Defaults to the session workspace; destinations outside it are refused.',
@@ -2196,6 +2319,11 @@ const pluginExport = {
     extractAndEmitFiles,
     runSandboxVerification,
     parseTestOutput,
+    sha256File,
+    resolveContractFiles,
+    contractFileHashes,
+    contractViolations,
+    resolveDelegateStatus,
     DELEGATE_WORKER_SCHEMA: exports.DELEGATE_WORKER_SCHEMA,
     DELEGATE_WORKER_OPENAI_SCHEMA: exports.DELEGATE_WORKER_OPENAI_SCHEMA,
     PROFILES: profiles_1.PROFILES,

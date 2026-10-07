@@ -265,7 +265,8 @@ stay approval-eligible, e.g. `["plugin/src/", "tests/", "tools/"]`.
 
 Dispatches a discrete implementation task to the local worker and returns a structured
 receipt: `{ success, status, filesWritten, filesWrittenRelative, resolvedWorkspace,
-workspaceSource, testResults, tokens, summary }`.
+workspaceSource, testResults, tokens, summary }`, plus `contractFiles` and `contractViolations`
+when the unit declared a contract.
 
 The worker receives the `instruction`, the `targetFiles` **paths**, and the verification command —
 and nothing else. It has no repository read and is never handed file contents, so it cannot modify
@@ -281,6 +282,12 @@ files the case this closes cleanly today, and editing an existing file a problem
   cannot see the DSH session workspace (the Cordis `Agent` exposes only an id, and the path
   lives in session metadata behind a store the plugin cannot reach), so omitting it resolves
   to the server's working directory and says so in `summary`.
+- **`contractFiles` declares the contract's tests, and the architect owns them.** Each is hashed
+  before the worker runs, refused as a worker emission target, and re-hashed afterwards. Any change
+  voids the verdict and reports `status: 'CONTRACT_MODIFIED'`, which outranks even a passing
+  verification — because what passed was no longer the contract. A declared file that does not exist
+  is a violation too, so a typo fails closed rather than passing quietly. The receipt carries paths,
+  hashes and an `unchanged` flag, never contents.
 - **Verification** runs `runVerification` with the resolved workspace as cwd, and the
   command's **exit code is authoritative** — unrecognised output can never be scored a pass,
   because `tsc`-style failures would otherwise report success.
