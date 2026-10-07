@@ -103,9 +103,38 @@ output and tool results are assembled by the host after the hook and are not sca
 - **`commandProgram` mis-parsed a quoted program path containing a space** (`"C:\Program
   Files\nodejs\node.exe"` read as `program`). Fail-closed, but wrong; found by the new test.
 
+## Defects found after the review
+
+The review covered the state at `7c5d635`. Six further defects surfaced while remediating, and by
+testing against the real host rather than the unit suite alone. All are fixed and covered by tests.
+
+- **The in-process fallback inverted a control.** Worse than the report described: a sandbox
+  *denial* of a piped spawn was answered by `require`-ing the module into the server process. Now
+  opt-in (`allowInProcessFallback`, default `false`), and a refused spawn fails closed.
+- **Verification never worked in the default configuration.** Output was captured through a pipe,
+  and DSH's confined sandbox modes refuse a piped spawn outright (`spawn EPERM`). That made the
+  ordinary subprocess path unusable for sandboxed users and left the dangerous fallback as the only
+  path that worked. Capture now goes through file descriptors, so verification needs no opt-in and
+  no container runtime.
+- **`guardAskPaths` replaces the built-in default rather than extending it.** Setting it to one
+  path silently made `tests/` and `tools/` hard denies. Documented in the README; the shipped
+  profile lists all three explicitly.
+- **The write-verb regex was unanchored.** `Move-Item` matched as a substring of `Remove-Item`, so
+  a plain delete was classified as a write signal. Only live testing could find this: the unit
+  suite only ever tested the verbs the regex was meant to catch.
+- **Deletion was not gated at all.** `Remove-Item src/x.ts` passed silently. Deletion verbs are now
+  a second, word-anchored list checked in both the command line and script bodies, and the verdict
+  reports deletion as deletion.
+- **Reading a file was treated as invoking it.** Any `.js` token made the guard read the whole file
+  and — since any sizeable program contains a write primitive — ask for approval to *read* it. The
+  body scan now skips tokens that are arguments to a read-only inspector (`Select-String`, `grep`,
+  `Get-Content`, `Test-Path`, `diff`, …). A related cosmetic defect went with it: the reported
+  target was the *first* source-extension match, so extension-shaped prose displaced the real path;
+  it is now the longest match.
+
 ## Tests
 
-200 tests pass: 179 in the workspace oracle suites, 21 in the plugin's vitest suite.
+213 tests pass: 182 in the workspace oracle suites, 31 in the plugin's vitest suite.
 
 The review's own remediation suggestions were implemented as tests, including "feed a TAP failure
 label containing a synthetic secret and assert it is absent from all returned fields" and
@@ -116,15 +145,44 @@ the pre-remediation build. Two existing tests were updated rather than deleted: 
 verification through the in-process fallback, which is now opt-in, so they enable it explicitly
 and a new test asserts the fail-closed default.
 
+## Verification record
+
+Beyond the unit suites, the plugin was exercised against a live DSH host — the desktop app, a
+separate profile from the CLI one — with the local worker running:
+
+| Check | Result |
+| --- | --- |
+| Plugin loads and registers `delegate_worker` | pass |
+| Delegation round trip to the local model | pass |
+| Guard denies a cloud-authored source write | pass |
+| Write containment refuses absolute and `..` escapes | pass — and declines to write the raw blob as a fallback |
+| Verification gate prompts, then captures output as a subprocess | pass — no in-process fallback involved |
+| Deleting a source path asks; deleting a non-source file does not | pass |
+| Reading a `.js` file does not ask; invoking a script does | pass |
+
+Approvals were confirmed to be genuine human decisions rather than auto-admitted: each ask/decision
+pair in the session audit is separated by 1.9–3.1 s, and no `permission/preset` event switched the
+session to the `auto` preset. That matters, because a fail-closed gate is worth nothing if the
+approver is never actually asked.
+
+## Containers are optional
+
+Verification runs as an ordinary child process and **does not require a container runtime**. Most
+operators have no Docker, Podman or WSL, and guidance they cannot follow is not a safe default — it
+is a feature that silently never runs. Add a container only when execution must be bounded more
+tightly than the user account already bounds it; the README gives the flags that matter if you do
+have a runtime.
+
 ## What this does not claim
 
 The guard remains a deterrent at the tool layer, not an airtight boundary. Still open:
 
-- A write target computed at runtime (`f = 'src/' + name`) cannot be matched by a text scan.
-- Writes performed indirectly through a library are invisible.
-- Config files (`.yaml`, `.json`, `.env`) are out of scope of the guard.
+- The guard sees tool calls and shell text, not intent. A target computed at runtime
+  (`f = 'src/' + name`) cannot be matched, and a mutation performed inside a library is invisible.
+- Config files (`.yaml`, `.json`, `.env`) are out of scope — only source extensions are gated.
 - Code in prose is not mediated.
-- The DLP gate scans user messages the plugin has seen, not assistant output or tool results.
+- The DLP gate scans the user messages the plugin has seen, not assistant output or tool results, and
+  pattern plus entropy matching cannot recognise confidential material that looks ordinary.
 - Provider transport, schema enforcement and session storage live in DSH, outside this repository.
 
 The durable fix for findings 1, 2 and 4 is a capability boundary in the host: one scoped write and

@@ -33,6 +33,9 @@ package.)
 - A local OpenAI-compatible server if you want local routing or `delegate_worker`
 - A cloud API key (e.g. `DEEPSEEK_API_KEY`) if you route to a cloud provider
 
+No container runtime is required. Verification runs as an ordinary child process, and the
+in-process fallback is off by default; a container is optional hardening, not a prerequisite.
+
 ## Install
 
 ```bash
