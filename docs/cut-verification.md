@@ -2,6 +2,11 @@
 
 Round 2 record. Written before the cut, so the decisions are checkable against the diffs.
 
+**Landed** as `7502d77` (module + dist) and `928559a` (this record and the golden evidence), both with
+the full gate green in the same command. `index.ts` 141,211 → 122,305 bytes. `verification.ts` is 561
+lines. Behaviour equivalence is measured, not asserted: `docs/verification-golden.before.txt` and
+`.after.txt` are identical across 24 cases.
+
 ## What moves
 
 `plugin/src/index.ts` lines 333–870, the whole verification block:
