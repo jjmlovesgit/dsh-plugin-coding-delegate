@@ -16,6 +16,36 @@ see [What this does not claim](#what-this-does-not-claim).
 > the honest limits are documented rather than glossed. See
 > [What this does not claim](#what-this-does-not-claim).
 
+## Why it helps long-running work
+
+An agentic session degrades as its context fills, and the degradation is specific:
+
+- **Attention dilutes.** Design intent ends up competing with thousands of lines that have nothing to
+  do with the next decision.
+- **Compaction is lossy.** When the window fills, the harness summarises — and it summarises away
+  precisely the specifics that mattered. Keeping code out is prevention where compaction is cure, and
+  cure arrives after the budget is spent.
+- **The session drifts.** A context that is mostly code starts contradicting decisions it made when it
+  was mostly design.
+- **Restarts lose state.** Window exhaustion forces a new session, and the accumulated design goes
+  with it.
+
+The plugin addresses all four with one move: implementation never enters the architect's context. Code
+is written locally, and only a contract and a verdict travel back. **The architect's window fills with
+decisions, not with diffs** — flat in size whether it is turn five or turn five hundred — while the
+local tier takes a fresh context per unit, which costs nothing.
+
+Segmentation is not sufficient on its own. Something has to hold the design coherent across the units,
+or the result is work that is locally correct and globally inconsistent — the usual failure mode of
+splitting work up. That coherence has to come from somewhere: from the architect, or from a thinking
+model with repository access when the architect is deliberately kept blind to code. **The plugin
+enforces the boundaries between the roles; it does not supply the judgement.**
+
+> The mechanism above is well established — attention dilution and lossy compaction are properties of
+> how these models and harnesses behave. What the plugin does *not* yet do is measure context quality;
+> it measures tokens. The observable proxies would be frontier tokens in the window per turn,
+> compactions per session, and turns completed before a restart.
+
 ## The policy
 
 **The architect may reason but not author. The worker may author but not stray. Neither may execute
