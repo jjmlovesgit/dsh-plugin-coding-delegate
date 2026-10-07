@@ -105,6 +105,28 @@ spawn, emission under unit scope and `session/event` in one go, it is also the c
 integration test this project has. [`dsh-0.2-upgrade.md`](dsh-0.2-upgrade.md) uses it as the post-update
 check for exactly that reason.
 
+## The contract-injection fix, verified live
+
+`536dfe1` closed a leak the item 15 experiment found: retry-context fed a failure's location back as the
+next attempt's context, and a failing contract names itself, so the implementer was shown the very file
+`contractFiles` exists to withhold. The full account is in [`experiment.md`](experiment.md).
+
+The running process held the pre-fix `dist`, so the leak stayed observable during the experiment itself and
+a restart was needed before the fix could be judged. After the restart the leak was reproduced
+deliberately in a scratch workspace — a contract whose own failure names it, seeding the retry set, then a
+call declaring that file as `contractFiles` and declaring **no** context of its own, so any injection could
+only have come from the retry path.
+
+| | `contextInjected` |
+| --- | --- |
+| before the fix | `SPEC.md` **plus the contract, lines 65–178, 114 lines, 4,701 bytes** |
+| after the fix, live | **absent entirely** |
+
+`contractFiles` reported `unchanged: true` with its sha256 on both sides. That is the useful detail: the
+integrity check was never broken and is not what was fixed — the retry path was, and the retry path is
+therefore where the verification had to happen. A green integrity report would have been consistent with
+the leak still being open.
+
 ## What remains unverified live
 
 - **The compaction counters.** No compaction has occurred in any observed session, so `compaction/summary`,

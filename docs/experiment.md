@@ -107,8 +107,28 @@ what it says. That is worth knowing independently of this module.
   profile, and enabling it needs a profile edit plus a restart. "Checks from outside the contract" was
   therefore satisfied by `contractFiles` integrity only — a real outside check, since the worker cannot
   alter what judges it, but the project-level variant this item was originally framed around did not run.
-- **The fix is committed but not live.** The running DSH process still holds the pre-fix `dist`, which is
-  why the leak was still observable at step 5. Live verification of `536dfe1` needs a restart.
+- **Nothing here proves the module could ever be made to pass.** The contract was shown to discriminate;
+  reaching green was not attempted further once the mutation step failed to isolate a change.
+
+## Live verification of the fix, after a restart
+
+A restart was needed before `536dfe1` could be observed, because the running process holds the `dist` it
+loaded at startup. The leak was then reproduced deliberately in a scratch workspace and shown to be closed.
+
+The conditions were made identical to the ones that leaked: a contract file whose own failure names it,
+seeding the retry set, followed by a call that declared that file as `contractFiles` and declared **no**
+context of its own — so any injection could only have come from the retry path.
+
+| | `contextInjected` |
+| --- | --- |
+| before the fix, in this experiment | `SPEC.md` **plus `tests/ttl-cache.test.js` lines 65–178, 114 lines, 4,701 bytes** |
+| after the fix, live | **absent entirely** |
+
+`contractFiles` still reported `unchanged: true` with its sha256 in both cases, which is the point: the
+integrity check was never the thing that was broken, and it is not the thing that was fixed. The fix is in
+the retry path, and the retry path is where the verification had to happen.
+
+The scratch workspace was removed afterwards and the working tree was clean.
 
 ## Verdict on the premise
 
