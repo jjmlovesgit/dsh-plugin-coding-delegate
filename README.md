@@ -1,4 +1,4 @@
-# DSH Local Router
+# DSH Coding Delegate
 
 > **Your plan is for thinking. Your GPU does the typing.**
 
@@ -76,7 +76,7 @@ Or by hand, which is all the script does:
 
 ```bash
 dsh plugin --profile <name> add ./plugin
-# then add "dsh-plugin-codeoffload" to dsh.profile.bundles in
+# then add "dsh-plugin-coding-delegate" to dsh.profile.bundles in
 # ~/.dsh/profiles/<name>/package.json
 ```
 

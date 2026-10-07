@@ -1,4 +1,4 @@
-# dsh-plugin-codeoffload
+# dsh-plugin-coding-delegate
 
 > **Your plan is for thinking. Your GPU does the typing.**
 
@@ -67,7 +67,7 @@ in-process fallback is off by default; a container is optional hardening, not a 
 ## Install
 
 ```bash
-npm install dsh-plugin-codeoffload
+npm install dsh-plugin-coding-delegate
 ```
 
 The package has **no runtime dependencies**: routing, credential detection, the code guard
@@ -140,7 +140,7 @@ endpoint*. Prefer `'block'` unless you trust it as you would your own machine.
 Point both sides at cloud providers and set `dlpAction: 'block'`:
 
 ```yaml
-dsh-plugin-codeoffload:
+dsh-plugin-coding-delegate:
   localProvider: 'deepseek-official'
   cloudProvider: 'deepseek-official'
   localModel: 'deepseek-chat'

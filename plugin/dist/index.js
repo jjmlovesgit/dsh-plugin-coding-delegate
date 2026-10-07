@@ -102,7 +102,7 @@ function resolveWorkspaceDir(ctx) {
     }
     return { dir: process.cwd(), source: 'process.cwd() FALLBACK (not a Session workspace)' };
 }
-exports.name = 'dsh-plugin-codeoffload';
+exports.name = 'dsh-plugin-coding-delegate';
 /**
  * All plugin state (debug log, savings ledger) lives under one derived directory.
  * It must never be a hard-coded absolute path: the previous build wrote its log
@@ -1830,7 +1830,7 @@ async function requestApprovalForVerification(ctx, exec, command) {
     }
 }
 function apply(ctx, options = {}) {
-    const REGISTERED_KEY = Symbol.for('dsh-plugin-codeoffload.registered');
+    const REGISTERED_KEY = Symbol.for('dsh-plugin-coding-delegate.registered');
     const isTest = process.env.NODE_ENV === 'test';
     if (!isTest) {
         if (isPluginApplied || ctx[REGISTERED_KEY] || globalThis[REGISTERED_KEY]) {

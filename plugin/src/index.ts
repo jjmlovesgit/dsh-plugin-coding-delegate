@@ -152,7 +152,7 @@ function resolveWorkspaceDir(ctx: any): { dir: string; source: string } {
 
   return { dir: process.cwd(), source: 'process.cwd() FALLBACK (not a Session workspace)' }
 }
-export const name = 'dsh-plugin-codeoffload'
+export const name = 'dsh-plugin-coding-delegate'
 
 /**
  * All plugin state (debug log, savings ledger) lives under one derived directory.
@@ -2201,7 +2201,7 @@ export async function requestApprovalForVerification(
 }
 
 export function apply(ctx: Context, options: PluginConfig = {}) {
-  const REGISTERED_KEY = Symbol.for('dsh-plugin-codeoffload.registered')
+  const REGISTERED_KEY = Symbol.for('dsh-plugin-coding-delegate.registered')
   const isTest = process.env.NODE_ENV === 'test'
 
   if (!isTest) {
