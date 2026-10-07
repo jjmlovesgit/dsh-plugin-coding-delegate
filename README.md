@@ -5,6 +5,11 @@ go by **permission rather than preference**: a credential is not permitted to re
 cloud model is not permitted to author source code, and everything beyond those rules is the
 architect's explicit choice to delegate or not.
 
+Why it matters: on a metered plan the scarce resource is frontier tokens, and reading code is what
+spends them. Routing code work to a local model keeps that allowance for the work only a frontier
+model can do, so the plan lasts instead of timing out. That is a **capacity** claim, not a cost one —
+see [What this does not claim](#what-this-does-not-claim).
+
 > **Status: 0.1.0, a personal project.** It works and is tested, but the API is not frozen and
 > the honest limits are documented rather than glossed. See
 > [What this does not claim](#what-this-does-not-claim).
@@ -136,8 +141,11 @@ npm run test:all       # both
   writes are invisible to it; configuration files are out of scope.
 - The DLP gate scans the user messages the plugin has seen — not assistant output or tool results —
   and pattern-plus-entropy matching cannot recognise confidential material that looks ordinary.
-- Local routing saves cost and keeps data on-machine; it does not make a local model as capable as
-  a cloud one.
+- Local routing does **not** save money. The GPU is a fixed cost this plugin neither pays for nor
+  reduces, and a local card will not pay for itself against a metered plan. What is preserved is the
+  plan's allowance: metered tokens stay for the work only a frontier model can do, instead of being
+  spent reading code.
+- It does not make a local model as capable as a cloud one.
 - Provider transport, tool-schema enforcement and session storage live in DSH, not here.
 
 ## License

@@ -164,7 +164,11 @@ export class SavingsTracker {
       tokensPerSecond !== undefined && elapsedMs !== undefined
         ? ` | Rate: ${tokensPerSecond} tok/s e2e (${completionTokens} tok in ${(elapsedMs / 1000).toFixed(2)}s)`
         : ''
-    const auditMsg = `[LEDGER_AUDIT] Step ${turn} [${route.toUpperCase()}] -> Model: ${model} | Reason: ${reason} | Tokens: ${totalTokens} (Prompt: ${promptTokens}, Completion: ${completionTokens}, CacheHit: ${cacheHitTokens})${rateText} | Cost: $${costUSD.toFixed(6)} | Saved: $${savedUSD.toFixed(6)}`
+    // 'CloudEquiv', not 'Saved'. The local GPU is a fixed cost this plugin neither pays for nor
+    // reduces, so nothing here is money saved: a local card does not pay for itself against a
+    // metered plan. This figure is what those tokens would have cost at the metered tier, which
+    // measures the plan's exposure rather than a saving.
+    const auditMsg = `[LEDGER_AUDIT] Step ${turn} [${route.toUpperCase()}] -> Model: ${model} | Reason: ${reason} | Tokens: ${totalTokens} (Prompt: ${promptTokens}, Completion: ${completionTokens}, CacheHit: ${cacheHitTokens})${rateText} | Cost: $${costUSD.toFixed(6)} | CloudEquiv: $${savedUSD.toFixed(6)}`
     console.log(auditMsg)
 
     return record

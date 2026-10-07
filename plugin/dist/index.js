@@ -1390,6 +1390,9 @@ let isPluginApplied = false;
  */
 function logWorkerBenchmarks() {
     console.log(`[WORKER_BENCH] Reference throughput (${profiles_1.WORKER_BENCHMARK_SOURCE})`);
+    console.log('[WORKER_BENCH] Local work is unmetered, so the metered plan is spent on thinking rather than on reading code.');
+    console.log('[WORKER_BENCH] LEDGER_AUDIT reports CloudEquiv: what the local tokens would have cost at the metered tier.');
+    console.log('[WORKER_BENCH] That is the plan exposure you avoided, not money saved -- the GPU is a fixed cost.');
     console.log('[WORKER_BENCH]   model                     decode        ttft       note');
     for (const bench of profiles_1.WORKER_BENCHMARKS) {
         const active = bench.model === profiles_1.PROFILES.WORKER.model ? '  <- active worker' : '';

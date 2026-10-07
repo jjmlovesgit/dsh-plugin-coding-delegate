@@ -474,7 +474,10 @@ All local state derives from one directory, never a hard-coded path:
 2. otherwise `$DSH_HOME/local-router`
 3. otherwise `~/.dsh/local-router`
 
-It holds `router-debug.log` and `savings-ledger.json` (token/cost accounting).
+It holds `router-debug.log` and `savings-ledger.json` — per-step and cumulative token accounting,
+split local versus cloud, plus a cost column. The dollar figure is the **cloud-equivalent** of work
+run locally: it measures the metered plan's exposure, and it is not money saved, because the GPU is a
+fixed cost this plugin neither pays for nor reduces.
 
 ## Throughput reference
 
