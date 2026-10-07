@@ -358,7 +358,7 @@ not ok 3 - PriorityQueue isEmpty
           route: 'WORKER_LOCAL',
           gate: 'Gate 1',
           rationale: 'Local route chosen',
-          tier: 'Local Tier (RTX 5090 Worker)',
+          tier: 'Local Tier (Local Worker)',
           estimatedTokens: 100,
         },
       },

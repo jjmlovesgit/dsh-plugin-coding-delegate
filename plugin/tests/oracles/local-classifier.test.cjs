@@ -1,4 +1,4 @@
-// Oracle for the TypeScript Laya-heuristic port.
+// Oracle for the TypeScript port of the local routing heuristics.
 //
 // Python-Free by design: the reference behaviour was FROZEN into
 // tests/fixtures/classifier-goldens.json (captured from the Python daemon while it

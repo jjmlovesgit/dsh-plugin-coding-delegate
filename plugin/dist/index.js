@@ -133,7 +133,7 @@ exports.DELEGATE_WORKER_OPENAI_SCHEMA = {
     type: 'function',
     function: {
         name: 'delegate_worker',
-        description: 'Dispatches a discrete implementation, testing, or code-generation task to the local RTX 5090 execution worker (LM Studio) with an isolated context window.',
+        description: 'Dispatches a discrete implementation, testing, or code-generation task to the configured local execution worker -- any OpenAI-compatible server (LM Studio, Ollama, vLLM, llama.cpp) -- with an isolated context window. The worker has no repository read: supply everything it needs in the instruction.',
         parameters: {
             type: 'object',
             properties: {
@@ -1201,7 +1201,7 @@ class LocalRouter {
             scores: decision.scores,
             latencyMs: decision.latencyMs,
             dlpViolations: decision.dlpViolations,
-            tier: decision.route === 'ARCHITECT_CLOUD' ? 'Cloud Tier (DeepSeek Cloud Architect)' : 'Local Tier (RTX 5090 Worker)',
+            tier: decision.route === 'ARCHITECT_CLOUD' ? 'Cloud Tier (Cloud Architect)' : 'Local Tier (Local Worker)',
             estimatedTokens: estimateTokenCount(fullText),
         };
         trace('ROUTER_DECISION', {
@@ -1664,8 +1664,8 @@ function evaluateCodeWriteGuard(exec, config = {}) {
     const args = exec?.arguments;
     const askPaths = config.askPaths && config.askPaths.length > 0 ? config.askPaths : DEFAULT_GUARD_ASK_PATHS;
     const reason = (target) => `Writing source file '${target}' from the cloud context is blocked by the local-only code guard. ` +
-        `Delegate this work to the local RTX 5090 worker: call delegate_worker with targetFiles and ` +
-        `workspaceDir set to the session workspace.`;
+        `Delegate new files to the local worker with delegate_worker, passing targetFiles and workspaceDir. ` +
+        `The worker has no repository read, so it cannot modify an existing file; plan that as a delta.`;
     // Reading a file the architect delegated pulls that code straight back into its context, which
     // is precisely the noise delegation exists to keep out. Ask rather than deny: reviewing a line
     // of it is sometimes exactly what the operator wants.
@@ -1851,7 +1851,7 @@ function apply(ctx, options = {}) {
         try {
             const dshToolDef = {
                 name: 'delegate_worker',
-                description: 'Dispatches a discrete implementation, testing, or code-generation task to the local RTX 5090 execution worker (LM Studio) with an isolated context window.',
+                description: 'Dispatches a discrete implementation, testing, or code-generation task to the configured local execution worker -- any OpenAI-compatible server (LM Studio, Ollama, vLLM, llama.cpp) -- with an isolated context window. The worker has no repository read: supply everything it needs in the instruction.',
                 parameters: {
                     type: 'object',
                     properties: {
@@ -1954,7 +1954,7 @@ function apply(ctx, options = {}) {
         }
     });
     // Local-only code guard: refuse cloud-authored source writes so that all code
-    // work routes through delegate_worker to the local RTX 5090.
+    // work routes through delegate_worker to the local worker.
     if (options?.localCodeGuard !== false) {
         ctx.on('tools/pre-execute', async (exec, next) => {
             const decision = typeof next === 'function' ? await next() : { kind: 'allow' };

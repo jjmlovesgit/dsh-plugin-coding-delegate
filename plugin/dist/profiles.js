@@ -27,7 +27,8 @@ exports.PROFILES = {
         reasoning_effort: 'none',
     },
 };
-exports.WORKER_BENCHMARK_SOURCE = 'measured 2026-10-06 on RTX 5090 / LM Studio, temperature 0, single stream';
+exports.WORKER_BENCHMARK_SOURCE = "measured 2026-10-06 on the author's reference rig / LM Studio, temperature 0, single stream; " +
+    'your throughput will differ with your hardware and your model';
 exports.WORKER_BENCHMARKS = [
     {
         model: 'qwen/qwen3.8-27b',

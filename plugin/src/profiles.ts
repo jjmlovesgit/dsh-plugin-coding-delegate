@@ -47,9 +47,11 @@ export const PROFILES: Profiles = {
 } as const
 
 /**
- * Measured reference throughput for the local worker models (RTX 5090 / LM Studio,
- * temperature 0, single stream, no concurrent load). Printed once at startup for
- * operator reference; live per-call rates ride the LEDGER_AUDIT line instead.
+ * Measured reference throughput for the local worker models (author's reference rig /
+ * LM Studio, temperature 0, single stream, no concurrent load). Printed once at startup
+ * for operator reference; live per-call rates ride the LEDGER_AUDIT line instead.
+ * These are one machine's numbers: throughput is a property of the hardware and the
+ * model, not of the plugin, and a different card will produce different figures.
  */
 export interface WorkerBenchmark {
   model: string
@@ -59,7 +61,8 @@ export interface WorkerBenchmark {
 }
 
 export const WORKER_BENCHMARK_SOURCE =
-  'measured 2026-10-06 on RTX 5090 / LM Studio, temperature 0, single stream'
+  "measured 2026-10-06 on the author's reference rig / LM Studio, temperature 0, single stream; " +
+  'your throughput will differ with your hardware and your model'
 
 export const WORKER_BENCHMARKS: WorkerBenchmark[] = [
   {

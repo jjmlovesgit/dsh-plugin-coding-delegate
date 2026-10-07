@@ -154,7 +154,7 @@ export function classifyLocally(
   if (scores.is_private > 0.8) {
     route = 'local'
     gate = 'Gate 1 (Local Classifier - Privacy Protection)'
-    rationale = `Privacy threshold exceeded (P(private) = ${scores.is_private.toFixed(2)} > 0.80). Routing to local RTX 5090.`
+    rationale = `Privacy threshold exceeded (P(private) = ${scores.is_private.toFixed(2)} > 0.80). Routing to the local worker.`
   } else if (scores.complexity >= 2) {
     route = 'cloud'
     gate = 'Gate 1 (Local Classifier - High Complexity)'
@@ -166,7 +166,7 @@ export function classifyLocally(
   } else {
     route = 'local'
     gate = 'Gate 1 (Local Classifier - Local Default)'
-    rationale = 'Request fits within local 27B model capabilities. Routing to local RTX 5090.'
+    rationale = "Request fits within the configured local model's capabilities. Routing to the local worker."
   }
 
   const latencyMs = Math.round((performance.now() - start) * 100) / 100
