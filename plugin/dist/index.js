@@ -1676,8 +1676,9 @@ function evaluateCodeWriteGuard(exec, config = {}) {
                 kind: 'ask',
                 target,
                 reason: `'${target}' was written by a delegated worker, and reading it pulls that code into the ` +
-                    `cloud architect's context — the noise the delegation exists to keep out. Ask the worker ` +
-                    `to inspect it and report instead, or approve this read if you need the contents here.`,
+                    `cloud architect's context — the noise the delegation exists to keep out. The worker has no ` +
+                    `repository read, so it cannot summarise the file back either: approve only if you need the ` +
+                    `contents here, or re-plan the unit so that it does not.`,
             };
         }
         return null;
@@ -1748,8 +1749,8 @@ function evaluateCodeWriteGuard(exec, config = {}) {
                 kind: 'ask',
                 target: delegatedRead,
                 reason: `Shell command reads '${delegatedRead}', which a delegated worker wrote. Reading it pulls ` +
-                    `that code into the cloud architect's context; ask the worker to inspect it instead, or ` +
-                    `approve this read if you need the contents here.`,
+                    `that code into the cloud architect's context, and the worker has no repository read to ` +
+                    `summarise it back instead. Approve only if you need the contents here.`,
             };
         }
         return null;

@@ -111,3 +111,24 @@ test("the guard points at a delegation the worker can actually perform", () => {
   assert.match(built, /cannot modify an existing file/i);
   assert.equal(/RTX/.test(built), false);
 });
+
+test("no shipped guidance tells the architect to have the worker read a file", () => {
+  // This promise was made in five separate strings: the architect's own system instruction, the tool
+  // description, the guard's message for a blocked write, and both of the guard's reasons for asking
+  // about a delegated read. Every one described something the worker cannot do, which turned a
+  // deliberate boundary into a dead end for whoever followed the advice.
+  const IMPOSSIBLE =
+    /worker\s+to\s+inspect|inspect (it|them) and report|to inspect it instead/i;
+  const files = [
+    path.join(PLUGIN, "dist", "index.js"),
+    path.join(PLUGIN, "dist", "profiles.js"),
+    path.resolve(PLUGIN, "..", "README.md"),
+    path.join(PLUGIN, "README.md"),
+  ];
+  const offenders = files.filter((file) => IMPOSSIBLE.test(fs.readFileSync(file, "utf8")));
+  assert.deepEqual(
+    offenders,
+    [],
+    `guidance promises a repository read the worker does not have:\n${offenders.join("\n")}`
+  );
+});

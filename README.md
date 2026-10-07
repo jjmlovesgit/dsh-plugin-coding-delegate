@@ -16,30 +16,63 @@ see [What this does not claim](#what-this-does-not-claim).
 > the honest limits are documented rather than glossed. See
 > [What this does not claim](#what-this-does-not-claim).
 
-## Why it helps long-running work
+## How it works: a contract out, a verdict back
 
-An agentic session degrades as its context fills, and the degradation is specific:
+Coding needs two different jobs done, and they want two different contexts. The plugin gives each one
+its own window and lets exactly two things cross between them.
 
-- **Attention dilutes.** Design intent ends up competing with thousands of lines that have nothing to
-  do with the next decision.
-- **Compaction is lossy.** When the window fills, the harness summarises — and it summarises away
-  precisely the specifics that mattered. Keeping code out is prevention where compaction is cure, and
-  cure arrives after the budget is spent.
-- **The session drifts.** A context that is mostly code starts contradicting decisions it made when it
-  was mostly design.
-- **Restarts lose state.** Window exhaustion forces a new session, and the accumulated design goes
-  with it.
+**The architect** is the metered thinking model. It holds the design conversation, decides how the work
+decomposes, and writes a **contract** for each unit: what to build, where the worker may write, and the
+command that decides whether the unit passed. It does not write source, and it does not read source back.
 
-The plugin addresses all four with one move: implementation never enters the architect's context. Code
-is written locally, and only a contract and a verdict travel back. **The architect's window fills with
-decisions, not with diffs** — flat in size whether it is turn five or turn five hundred — while the
-local tier takes a fresh context per unit, which costs nothing.
+**The worker** is whatever your GPU is already running. It receives one unit and everything that unit
+needs — nothing else — writes the code, and is discarded. A fresh context per unit costs nothing.
 
-Segmentation is not sufficient on its own. Something has to hold the design coherent across the units,
-or the result is work that is locally correct and globally inconsistent — the usual failure mode of
-splitting work up. That coherence has to come from somewhere: from the architect, or from a thinking
-model with repository access when the architect is deliberately kept blind to code. **The plugin
-enforces the boundaries between the roles; it does not supply the judgement.**
+| Direction | What crosses | What never crosses |
+| --- | --- | --- |
+| architect → worker | the contract: instruction, permitted paths, the verification command | the design conversation, the other units |
+| worker → architect | the verdict: pass/fail counts, a redacted failure structure, the names of files written | the code |
+
+The verification command runs as an ordinary subprocess, with the operator's approval. Its raw output
+stays on the local machine; what travels back is the failure *structure*, with source stripped out.
+
+**The architect's window fills with decisions and verdicts, not with diffs.** That is the whole claim.
+Code is the only thing in a coding session that grows with the size of the work; decisions and verdicts
+stay small. So the window is roughly flat whether it is turn five or turn five hundred.
+
+### Why that matters over a long task
+
+Everything that degrades a long agentic session degrades it *because code entered the window*:
+
+- **Attention dilutes**, because design intent is left competing with thousands of lines that have
+  nothing to do with the next decision.
+- **Compaction is lossy**, and it summarises away precisely the specifics that mattered. Keeping code
+  out is prevention; compaction is cure, and cure arrives after the budget is spent.
+- **The session drifts**, as a context that is mostly code starts contradicting decisions it made when
+  it was mostly design.
+- **Restarts lose state**, because window exhaustion forces a new session and the accumulated design
+  goes with it.
+
+Typing is the highest-volume, lowest-judgement activity in coding. Segmented this way, the frontier
+model spends metered tokens on the two things only it can do: deciding what the work is, and deciding
+whether a verdict means done. That is a **capacity** claim, not a cost one — see
+[What this does not claim](#what-this-does-not-claim).
+
+### What the loop does not close yet
+
+Stated plainly, because these limits decide whether it fits your work:
+
+- **The worker is blind.** It receives file *paths*, never contents, and it has no repository read. It
+  cannot modify code it has not seen, so today the loop closes cleanly on **new** files — modules,
+  tests, scripts — and modifying existing code needs a delta path the plugin does not have yet.
+- **The architect is blind by policy**, deliberately: reading the code back is what the delegation
+  exists to prevent. That leaves nobody holding the code and the design at the same time. Supplying
+  that role is the plugin's next piece of work, not something it does today.
+- **The contract is not yet signed.** The verification command is model-authored text behind an
+  approval prompt, and nothing yet stops a worker emitting the very test its own verdict runs.
+- **Coherence is still the architect's job.** The plugin enforces the boundaries between the roles; it
+  does not supply the judgement. Work that is locally correct and globally inconsistent is the usual
+  failure mode of splitting work up, and splitting it here does not remove it.
 
 > The mechanism above is well established — attention dilution and lossy compaction are properties of
 > how these models and harnesses behave. What the plugin does *not* yet do is measure context quality;
@@ -78,10 +111,11 @@ Four things, in the order they act:
    or sent for approval — and so is reading back a file the worker wrote, since that pulls the
    delegated code into the very context the delegation kept it out of. Shell forms are covered,
    including inline program text (`python -c`, `node -e`).
-4. **`delegate_worker`.** A tool the architect calls to hand implementation to a local
-   OpenAI-compatible server (LM Studio, Ollama, vLLM, llama.cpp, a remote gateway). File writes
-   are contained to the workspace, verification output is redacted to structure before it travels,
-   and the verification command itself requires approval.
+4. **`delegate_worker`.** A tool the architect calls to hand one unit of implementation to a local
+   OpenAI-compatible server (LM Studio, Ollama, vLLM, llama.cpp, a remote gateway). File writes are
+   contained to the workspace, verification output is redacted to structure before it travels, and the
+   verification command itself requires approval. The worker is given the instruction and the target
+   *paths*, not their contents — it has no repository read, so a unit has to be self-contained.
 
 ## Requirements
 
@@ -169,6 +203,9 @@ npm run test:all       # both
 
 ## What this does not claim
 
+- **It cannot modify code it cannot show the worker.** The worker is handed target paths rather than
+  contents and has no repository read, so a unit must carry what it needs in its instruction. Creating
+  new files is the case that closes cleanly today; editing existing ones is not solved yet.
 - The guard sees tool calls and shell text, not intent. Runtime-computed paths and library-mediated
   writes are invisible to it; configuration files are out of scope.
 - The DLP gate scans the user messages the plugin has seen — not assistant output or tool results —

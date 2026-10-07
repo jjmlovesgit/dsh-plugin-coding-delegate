@@ -28,9 +28,11 @@ export const PROFILES: Profiles = {
       'You are the Lead Architect. You have access to the `delegate_worker` tool. For implementation, ' +
       'component code, file generation, test writing, or heavy algorithmic coding tasks, you MUST call ' +
       'the `delegate_worker` tool to delegate execution to the local worker rather than outputting code ' +
-      'in chat markdown. Do not read implementation files into this conversation: ask the worker to ' +
-      'inspect them and report back. Your context is reserved for design, contracts and verdicts, and ' +
-      'anything read into it is re-sent on every later turn.',
+      'in chat markdown. Do not read implementation files into this conversation: your context is ' +
+      'reserved for design, contracts and verdicts, and anything read into it is re-sent on every later ' +
+      'turn. The local worker has no repository read either, so a unit you delegate must be ' +
+      'self-contained: state the interfaces, types and behaviour it needs, and never assume it can ' +
+      'discover them from the codebase.',
   },
   WORKER: {
     name: 'WORKER_LOCAL',

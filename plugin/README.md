@@ -267,6 +267,11 @@ Dispatches a discrete implementation task to the local worker and returns a stru
 receipt: `{ success, status, filesWritten, filesWrittenRelative, resolvedWorkspace,
 workspaceSource, testResults, tokens, summary }`.
 
+The worker receives the `instruction`, the `targetFiles` **paths**, and the verification command —
+and nothing else. It has no repository read and is never handed file contents, so it cannot modify
+code it has not been shown: a delegated unit has to be self-contained. That is what makes creating new
+files the case this closes cleanly today, and editing an existing file a problem it does not solve.
+
 - **File emission** is driven by fenced code blocks whose header names the target, e.g.
   ```` ```ts file="src/thing.ts" ```` or a `// FILE: src/thing.ts` first line.
 - **Safety**: output that does not look like source code is refused rather than written, and
@@ -383,8 +388,10 @@ message directing the work to `delegate_worker`.
 The guard runs in both directions. A `read`-style tool call — or a shell command that reads through
 `Get-Content`, `cat`, `Select-String`, `grep` and the like — is **asked** when the target is a file
 this plugin wrote on a delegation's behalf. The reason is the one the delegation exists for: pulling
-that code back into the architect's context defeats the point of having delegated it. Ask the worker
-to inspect the file and report instead, or approve the read if you need the contents.
+that code back into the architect's context defeats the point of having delegated it. There is no
+route that gets the file summarised back either, because the worker has no repository read and cannot
+inspect a file it was not given. Either approve the read and accept the context cost, or re-plan the
+unit so that it does not need the contents.
 
 The registry is in-memory and process-scoped — it is a workflow guard, not durable state — and it is
 bounded at 500 paths. Only files this plugin wrote are covered; everything else reads freely, and a
