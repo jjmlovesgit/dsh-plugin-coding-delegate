@@ -193,20 +193,27 @@ demonstrates the rule better than a designed test would have.
 ### One observation that does not match the design
 
 **The delegated-read prompt did not fire.** After `delegate_worker` recorded writing `target.js`, the
-architect read that file and received its contents with no prompt. Either an approval was granted
-without reaching the operator, or the read guard is not gating reads at all. Both readings matter and
-this run cannot tell them apart.
+architect read that file and received its contents with no prompt reaching the agent.
 
-The discriminating test is `delegateReadPolicy: 'deny'`, whose refusal is visible without any approval:
-if the read still succeeds with that set, the gate is not firing.
+The operator has since confirmed that prompts *were* shown for the other approval-gated operations, so
+the leading explanation is that a read prompt was shown and approved as well. That is not established,
+and the second possibility — that the read guard is not gating reads at all — would be a rule 3 hole
+rather than a cosmetic difference.
 
-### Approval seam: open, not concluded
+**Test in progress.** `delegateReadPolicy: 'deny'` has been set in the live profile, which turns the
+question into one with a visible answer: a `deny` refuses the read outright, so no approval is involved
+and the agent either sees a refusal or sees the file. The result is recorded below.
 
-Three approval-gated operations completed — the `tests/` write and two verification commands — and no
-prompt reached the agent. That is expected if the operator was prompted and approved. It would be a
-finding against the paragraph above if they were not. **Recorded as an open question rather than a
-conclusion:** the operator has been asked to confirm, and the latency evidence above (1.9–3.1 s
-ask/decision pairs, no `auto` preset) stands until something contradicts it.
+### Approval seam: resolved
+
+The question above was put to the operator and answered: the prompts **were** shown, for the `tests/`
+write and for both verification commands. Those three operations were genuine human decisions, and the
+earlier latency evidence (1.9–3.1 s ask/decision pairs, no `auto` preset) now has a fresh confirmation
+beside it rather than resting alone.
+
+Worth stating plainly, because it is the claim the whole design leans on: a fail-closed gate is worth
+nothing if the approver is never actually asked, and for a short while this document could not say
+whether that was still true. It can now.
 
 ### Still unverified
 
