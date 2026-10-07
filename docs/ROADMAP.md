@@ -60,9 +60,36 @@ D was added after that closure, and not from design review: the live run's *inva
 exposed it. Reloading to load the test flag also emptied the in-memory registry, which is how the gap
 became visible — the guard had no way to know, after a restart, what it had been protecting.
 
-## Track 2 — the lead tier
+## Track 2 — the lead tier: **retired**
 
-Gated. Nothing here starts until the host gap and two decisions clear.
+Kept as a record, not a plan. The tier was built — `leadTier`, the role decision, the `LEAD` profile, a
+preset that mounted and ran — and then measured. The measurements say a 27B local model cannot carry this
+role against this codebase:
+
+- **The window does not fit.** The lead's configured context is 32,768 tokens. `plugin/src/index.ts` is
+  147 KB — roughly **40,900 tokens**. One file, larger than the whole window. The plugin cannot be
+  engineered by its own lead, and `plugin/src` together is ~46,700.
+- **The reasoning budget is not ours to set.** LM Studio's per-model setting is authoritative. Four
+  variants of one request — server default, `enable_thinking: false`, `true`, and `reasoning_effort:
+  high` — returned byte-identical results: 64 completion tokens and the same 183-character reasoning
+  field. Nothing the plugin or DSH sends changes it. Reproduce with `scripts/probe-thinking.mjs`.
+  A corollary worth keeping: `PROFILES.WORKER.enable_thinking: false` is sent on every delegation and
+  **ignored**, so the worker is not as unthinking as its profile claims either.
+- **The saving was on the wrong side.** Offloading typing is worth ~159,000 tokens across this project's
+  entire history. Reading one 41,000-token file once and carrying it for fifty turns costs ~2,046,000
+  input tokens. Letting the architect read code to engineer gives up the larger saving to capture the
+  smaller one.
+- **Nothing was ever proven.** No lead-authored contract was ever dispatched and verified. The tier's
+  failure mode is an under-specified contract producing a confident wrong patch — worse than the frontier
+  model writing the code itself.
+
+So the two-tier loop stands, and its honest claim is **"your GPU does the typing"**, not "the architect's
+window stays clean". The architect reads code to engineer. The discipline that replaces the lead tier is:
+**read narrowly, read late, and prefer the verdict you already have.**
+
+What stays built and load-bearing from this work: `leadTier`/`leadProviders` and `PROFILES.LEAD` (an
+operator may still run a local thinking agent alongside), `delegateReadPolicy`, rule 8, and the durable
+registry.
 
 | # | Item | Status |
 | --- | --- | --- |

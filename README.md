@@ -36,9 +36,11 @@ needs — nothing else — writes the code, and is discarded. A fresh context pe
 The verification command runs as an ordinary subprocess, with the operator's approval. Its raw output
 stays on the local machine; what travels back is the failure *structure*, with source stripped out.
 
-**The architect's window fills with decisions and verdicts, not with diffs.** That is the whole claim.
-Code is the only thing in a coding session that grows with the size of the work; decisions and verdicts
-stay small. So the window is roughly flat whether it is turn five or turn five hundred.
+**The architect does not pay for the code it delegates.** Diffs never cross back — a verdict comes
+instead — and that is the claim. It is *not* the same as a flat window, and saying so would be the wrong
+claim: the architect reads code in order to engineer a change, and anything it reads is re-sent on every
+later turn. Reading is the dominant cost of a long session, not typing. So the discipline is to read
+narrowly, read late, and prefer the verdict you already have over opening the file.
 
 ### Why that matters over a long task
 
@@ -63,15 +65,25 @@ whether a verdict means done. That is a **capacity** claim, not a cost one — s
 Stated plainly, because these limits decide whether it fits your work:
 
 - **The worker cannot discover, but it can be shown.** It has no repository read, so it will never find
-  the file it needs. Declare `contextFiles` and the plugin reads them into its prompt — so the architect
-  supplies code it never sees — and the worker answers with a whole file or a search/replace delta, so
-  it does not have to return a large file in one piece. What is still missing is **cross-unit
-  coherence**: nothing decides which files a unit needs, and nothing checks that two units agree.
-- **The architect is blind by policy**, deliberately: reading the code back is what the delegation
-  exists to prevent. That leaves nobody holding the code and the design at the same time. Supplying
-  that role is the plugin's next piece of work, not something it does today.
-- **The contract is not yet signed.** The verification command is model-authored text behind an
-  approval prompt, and nothing yet stops a worker emitting the very test its own verdict runs.
+  the file it needs. Declare `contextFiles` and the plugin reads them into its prompt — so a unit closes
+  on existing code without that code entering the architect's window — and the worker answers with a
+  whole file or a search/replace delta, so it need not return a large file in one piece. What is still
+  missing is **cross-unit coherence**: nothing decides which files a unit needs, and nothing checks that
+  two units agree.
+- **The architect is not blind, and claiming otherwise was wrong.** It reads source to engineer, and
+  every read is re-sent on every later turn. One 41,000-token file read once costs roughly **2,046,000
+  input tokens** across fifty turns — an order of magnitude more than all the typing in this project's
+  history, which is about 159,000. The plugin does not gate that reading; it **records** it, in the
+  `SOURCE_READ` trace, so the choice is visible rather than assumed.
+- **A third tier was built, measured, and retired.** A local thinking model was meant to read the
+  repository and author each contract, keeping the architect out of the code entirely. It does not fit:
+  this plugin's own `src/index.ts` is ~40,900 tokens against the lead's 32,768-token window, LM Studio's
+  per-model reasoning setting is authoritative so the tier could not be made to think, and offloading
+  typing recovers far less than the reading it gives back. The measurements are in
+  [`docs/ROADMAP.md`](docs/ROADMAP.md).
+- **The contract is signed, and the worker cannot touch it.** `contractFiles` are hashed before the
+  worker runs, refused as emission targets, and re-hashed afterwards, so a change voids the verdict. A
+  passing result therefore means the architect's tests, unmodified, passed against the worker's code.
 - **Coherence is still the architect's job.** The plugin enforces the boundaries between the roles; it
   does not supply the judgement. Work that is locally correct and globally inconsistent is the usual
   failure mode of splitting work up, and splitting it here does not remove it.
