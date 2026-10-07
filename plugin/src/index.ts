@@ -8,9 +8,11 @@ import { SavingsTracker, RouteType, StepUsage } from './savings-tracker'
 import { PROFILES, ProfileConfig, WORKER_BENCHMARKS, WORKER_BENCHMARK_SOURCE } from './profiles'
 import { classifyLocally, SECRET_PATTERN_RULES, findHighEntropyTokens } from './local-classifier'
 import { resolveDataDir, trace } from './logging'
+import { canonicalisePath, isPathWithin, CODE_EXTENSIONS } from './paths'
 
 export { PROFILES, ProfileConfig, SavingsTracker, RouteType, StepUsage }
 export { resolveDataDir, trace } from './logging'
+export { isPathWithin } from './paths'
 
 export const inject = ['tools']
 export const using = ['tools'] as const
@@ -322,38 +324,8 @@ export interface FileEmissionResult {
   hunks?: number
 }
 
-/**
- * Resolve `p` to a canonical path, following symlinks for the part of it that exists.
- * A destination that does not exist yet has no realpath of its own, so the deepest
- * existing ancestor is resolved and the remaining segments are re-appended.
- */
-function canonicalisePath(p: string): string {
-  let current = path.resolve(p)
-  const tail: string[] = []
-  for (;;) {
-    if (fs.existsSync(current)) break
-    const parent = path.dirname(current)
-    if (parent === current) break
-    tail.unshift(path.basename(current))
-    current = parent
-  }
-  try {
-    current = fs.realpathSync(current)
-  } catch {
-    // An unresolvable ancestor is not a reason to trust the path; keep it as written.
-  }
-  return tail.length > 0 ? path.join(current, ...tail) : current
-}
-
-/** True when `candidate` is `root` itself or lives beneath it. Case-insensitive on Windows. */
-export function isPathWithin(root: string, candidate: string): boolean {
-  const flatten = (value: string) => (process.platform === 'win32' ? value.toLowerCase() : value)
-  const from = flatten(path.resolve(root))
-  const to = flatten(path.resolve(candidate))
-  if (from === to) return true
-  const rel = path.relative(from, to)
-  return rel !== '' && rel !== '..' && !rel.startsWith('..' + path.sep) && !path.isAbsolute(rel)
-}
+// canonicalisePath and isPathWithin moved to ./paths.ts and are imported above. isPathWithin is
+// re-exported beside the other module re-exports because it is on the public surface.
 
 /**
  * The containment decision for one delegated write. `baseDir` is the session workspace
@@ -2233,14 +2205,8 @@ function logWorkerBenchmarks() {
   )
 }
 
-/** Extensions treated as source code: writes must come from the local worker. */
-const CODE_EXTENSIONS = new Set([
-  '.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs',
-  '.py', '.rb', '.go', '.rs', '.java', '.kt', '.kts', '.cs', '.fs', '.vb',
-  '.c', '.h', '.cc', '.cpp', '.hpp', '.swift', '.php', '.scala', '.lua', '.dart',
-  '.sh', '.bash', '.zsh', '.ps1', '.psm1', '.sql',
-  '.html', '.htm', '.css', '.scss', '.sass', '.less', '.vue', '.svelte',
-])
+// CODE_EXTENSIONS moved to ./paths.ts and is imported above. It is deliberately not re-exported: it is
+// an internal rule about what counts as source, not part of the plugin's public surface.
 
 /** Tools that write a file directly. */
 const WRITE_TOOLS = new Set([

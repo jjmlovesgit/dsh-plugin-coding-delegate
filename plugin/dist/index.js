@@ -33,9 +33,8 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.AGENT_ROLE_LIMIT = exports.DEFAULT_SOURCE_EGRESS_MIN_LINES = exports.DELETE_PRIMITIVES = exports.LocalRouter = exports.DEFAULT_CONTEXT_MAX_BYTES = exports.MIN_SEARCH_CHARS = exports.DEFAULT_LOCAL_ENDPOINT = exports.DEFAULT_VERIFICATION_POLICY = exports.DELEGATE_WORKER_SCHEMA = exports.DELEGATE_WORKER_OPENAI_SCHEMA = exports.name = exports.using = exports.inject = exports.trace = exports.resolveDataDir = exports.SavingsTracker = exports.PROFILES = void 0;
+exports.AGENT_ROLE_LIMIT = exports.DEFAULT_SOURCE_EGRESS_MIN_LINES = exports.DELETE_PRIMITIVES = exports.LocalRouter = exports.DEFAULT_CONTEXT_MAX_BYTES = exports.MIN_SEARCH_CHARS = exports.DEFAULT_LOCAL_ENDPOINT = exports.DEFAULT_VERIFICATION_POLICY = exports.DELEGATE_WORKER_SCHEMA = exports.DELEGATE_WORKER_OPENAI_SCHEMA = exports.name = exports.using = exports.inject = exports.isPathWithin = exports.trace = exports.resolveDataDir = exports.SavingsTracker = exports.PROFILES = void 0;
 exports.scanDLP = scanDLP;
-exports.isPathWithin = isPathWithin;
 exports.evaluateEmissionPath = evaluateEmissionPath;
 exports.extractAndEmitFiles = extractAndEmitFiles;
 exports.redactVerificationOutput = redactVerificationOutput;
@@ -92,9 +91,12 @@ const profiles_1 = require("./profiles");
 Object.defineProperty(exports, "PROFILES", { enumerable: true, get: function () { return profiles_1.PROFILES; } });
 const local_classifier_1 = require("./local-classifier");
 const logging_1 = require("./logging");
+const paths_1 = require("./paths");
 var logging_2 = require("./logging");
 Object.defineProperty(exports, "resolveDataDir", { enumerable: true, get: function () { return logging_2.resolveDataDir; } });
 Object.defineProperty(exports, "trace", { enumerable: true, get: function () { return logging_2.trace; } });
+var paths_2 = require("./paths");
+Object.defineProperty(exports, "isPathWithin", { enumerable: true, get: function () { return paths_2.isPathWithin; } });
 exports.inject = ['tools'];
 exports.using = ['tools'];
 /**
@@ -213,51 +215,18 @@ function scanDLP(text, options = {}) {
     }
     return { hasSensitiveData: violations.length > 0, violations, highConfidence };
 }
-/**
- * Resolve `p` to a canonical path, following symlinks for the part of it that exists.
- * A destination that does not exist yet has no realpath of its own, so the deepest
- * existing ancestor is resolved and the remaining segments are re-appended.
- */
-function canonicalisePath(p) {
-    let current = path.resolve(p);
-    const tail = [];
-    for (;;) {
-        if (fs.existsSync(current))
-            break;
-        const parent = path.dirname(current);
-        if (parent === current)
-            break;
-        tail.unshift(path.basename(current));
-        current = parent;
-    }
-    try {
-        current = fs.realpathSync(current);
-    }
-    catch {
-        // An unresolvable ancestor is not a reason to trust the path; keep it as written.
-    }
-    return tail.length > 0 ? path.join(current, ...tail) : current;
-}
-/** True when `candidate` is `root` itself or lives beneath it. Case-insensitive on Windows. */
-function isPathWithin(root, candidate) {
-    const flatten = (value) => (process.platform === 'win32' ? value.toLowerCase() : value);
-    const from = flatten(path.resolve(root));
-    const to = flatten(path.resolve(candidate));
-    if (from === to)
-        return true;
-    const rel = path.relative(from, to);
-    return rel !== '' && rel !== '..' && !rel.startsWith('..' + path.sep) && !path.isAbsolute(rel);
-}
+// canonicalisePath and isPathWithin moved to ./paths.ts and are imported above. isPathWithin is
+// re-exported beside the other module re-exports because it is on the public surface.
 /**
  * The containment decision for one delegated write. `baseDir` is the session workspace
  * and `allowedRoots` is the operator's explicit extension list. Both sides are
  * canonicalised, so a symlink inside the workspace cannot be used to escape it.
  */
 function evaluateEmissionPath(resolvedPath, baseDir, allowedRoots = []) {
-    const canonical = canonicalisePath(resolvedPath);
+    const canonical = (0, paths_1.canonicalisePath)(resolvedPath);
     const roots = [baseDir, ...allowedRoots].filter((root) => typeof root === 'string' && root.trim().length > 0);
     for (const root of roots) {
-        if (isPathWithin(canonicalisePath(root), canonical))
+        if ((0, paths_1.isPathWithin)((0, paths_1.canonicalisePath)(root), canonical))
             return { allowed: true };
     }
     return {
@@ -291,7 +260,7 @@ function extractAndEmitFiles(content, targetFilesHint, baseDir = process.cwd(), 
         // Contract files belong to the architect. This is checked before anything is written, and it
         // covers every emission route -- the fenced header, the `// FILE:` marker, and the fallback --
         // because they all funnel through here.
-        const protectedHit = protectedPaths.find((p) => canonicalisePath(String(p)) === canonicalisePath(resolvedPath));
+        const protectedHit = protectedPaths.find((p) => (0, paths_1.canonicalisePath)(String(p)) === (0, paths_1.canonicalisePath)(resolvedPath));
         if (protectedHit) {
             emissionErrors.push(`Refused to write ${resolvedPath}: it is a contract file declared by the architect, and the ` +
                 `executor may not modify the test that judges it.`);
@@ -1091,7 +1060,7 @@ function resolveContractFiles(files, baseDir) {
         if (!name)
             continue;
         const full = path.isAbsolute(name) ? name : path.resolve(baseDir, name);
-        if (!resolved.some((seen) => canonicalisePath(seen) === canonicalisePath(full))) {
+        if (!resolved.some((seen) => (0, paths_1.canonicalisePath)(seen) === (0, paths_1.canonicalisePath)(full))) {
             resolved.push(full);
         }
     }
@@ -1101,7 +1070,7 @@ function resolveContractFiles(files, baseDir) {
 function contractFileHashes(paths) {
     const hashes = {};
     for (const p of paths)
-        hashes[canonicalisePath(p)] = sha256File(p);
+        hashes[(0, paths_1.canonicalisePath)(p)] = sha256File(p);
     return hashes;
 }
 /**
@@ -1395,8 +1364,8 @@ async function delegateWorker(params = {}, tracker) {
                     contractFiles: contractPaths.map((p) => ({
                         path: p,
                         relativeName: path.relative(workspaceBase, p) || p,
-                        sha256: contractAfter[canonicalisePath(p)] ?? null,
-                        unchanged: contractBefore[canonicalisePath(p)] === contractAfter[canonicalisePath(p)],
+                        sha256: contractAfter[(0, paths_1.canonicalisePath)(p)] ?? null,
+                        unchanged: contractBefore[(0, paths_1.canonicalisePath)(p)] === contractAfter[(0, paths_1.canonicalisePath)(p)],
                     })),
                     contractViolations: contractViolationsFound,
                 }
@@ -1795,14 +1764,8 @@ function logWorkerBenchmarks() {
     }
     console.log(`[WORKER_BENCH] Active worker model: ${profiles_1.PROFILES.WORKER.model} (max_tokens: ${profiles_1.PROFILES.WORKER.max_tokens ?? 'unset'}, thinking: ${profiles_1.PROFILES.WORKER.enable_thinking === false ? 'off' : 'on'})`);
 }
-/** Extensions treated as source code: writes must come from the local worker. */
-const CODE_EXTENSIONS = new Set([
-    '.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs',
-    '.py', '.rb', '.go', '.rs', '.java', '.kt', '.kts', '.cs', '.fs', '.vb',
-    '.c', '.h', '.cc', '.cpp', '.hpp', '.swift', '.php', '.scala', '.lua', '.dart',
-    '.sh', '.bash', '.zsh', '.ps1', '.psm1', '.sql',
-    '.html', '.htm', '.css', '.scss', '.sass', '.less', '.vue', '.svelte',
-]);
+// CODE_EXTENSIONS moved to ./paths.ts and is imported above. It is deliberately not re-exported: it is
+// an internal rule about what counts as source, not part of the plugin's public surface.
 /** Tools that write a file directly. */
 const WRITE_TOOLS = new Set([
     'write', 'edit', 'str_replace_editor', 'apply_patch', 'multi_edit',
@@ -1876,7 +1839,7 @@ function mergeDelegatedRecords(existing, incoming, limit = DELEGATED_PATH_LIMIT)
     for (const entry of [...(existing ?? []), ...(incoming ?? [])]) {
         if (!entry || !entry.path)
             continue;
-        const key = canonicalisePath(entry.path);
+        const key = (0, paths_1.canonicalisePath)(entry.path);
         const prior = byPath.get(key);
         if (!prior || entry.at >= prior.at)
             byPath.set(key, entry);
@@ -1930,7 +1893,7 @@ function rememberDelegated(paths) {
     saveDelegatedRegistry(merged);
     // The in-memory index mirrors what was persisted, so the two cannot drift apart.
     for (const entry of merged)
-        delegatedPaths.add(canonicalisePath(entry.path));
+        delegatedPaths.add((0, paths_1.canonicalisePath)(entry.path));
     while (delegatedPaths.size > DELEGATED_PATH_LIMIT) {
         const oldest = delegatedPaths.values().next().value;
         if (typeof oldest === 'string')
@@ -1938,9 +1901,9 @@ function rememberDelegated(paths) {
     }
 }
 function isDelegatedPath(target, paths) {
-    const canonical = canonicalisePath(target);
+    const canonical = (0, paths_1.canonicalisePath)(target);
     for (const p of paths ?? []) {
-        if (canonicalisePath(String(p)) === canonical)
+        if ((0, paths_1.canonicalisePath)(String(p)) === canonical)
             return true;
     }
     return false;
@@ -1954,7 +1917,7 @@ function findDelegatedRead(command, paths) {
     if (typeof command !== 'string' || !command || !paths)
         return undefined;
     for (const p of paths) {
-        const canonical = canonicalisePath(String(p));
+        const canonical = (0, paths_1.canonicalisePath)(String(p));
         for (const form of [canonical, canonical.replace(/\\/g, '/')]) {
             if (command.includes(form) && isReadArgument(command, form))
                 return form;
@@ -1979,7 +1942,7 @@ function shellWriteTarget(command) {
     const match = /(?:Set-Content|Add-Content|Out-File|New-Item|tee|>>?)\s+(?:-Path\s+)?["']?([^\s"'|;>)]+\.[A-Za-z0-9]{1,6})["']?/.exec(command);
     if (!match)
         return undefined;
-    return CODE_EXTENSIONS.has(path.extname(match[1]).toLowerCase()) ? match[1] : undefined;
+    return paths_1.CODE_EXTENSIONS.has(path.extname(match[1]).toLowerCase()) ? match[1] : undefined;
 }
 /** Script kinds a shell command can invoke. */
 const SCRIPT_EXTENSIONS = new Set([
@@ -2299,7 +2262,7 @@ function describeSourceRead(input) {
     if (!target)
         return { track: false, role, reason: 'no target to attribute' };
     const extension = path.extname(target).toLowerCase();
-    if (!CODE_EXTENSIONS.has(extension)) {
+    if (!paths_1.CODE_EXTENSIONS.has(extension)) {
         return { track: false, role, target, extension, reason: 'not a source file' };
     }
     return {
@@ -2341,7 +2304,7 @@ function evaluateCodeWriteGuard(exec, config = {}) {
         const target = extractWriteTarget(args);
         if (!target)
             return null;
-        if (!CODE_EXTENSIONS.has(path.extname(target).toLowerCase()))
+        if (!paths_1.CODE_EXTENSIONS.has(path.extname(target).toLowerCase()))
             return null;
         const normalized = target.replace(/\\/g, '/').toLowerCase();
         // A contract test is the specification the worker is held to, not the implementation. Rule 2
@@ -2622,7 +2585,7 @@ function apply(ctx, options = {}) {
     // what the architect may read back — the gap a live run found, and the reason this is not merely
     // in-memory state any more.
     for (const record of loadDelegatedRegistry())
-        delegatedPaths.add(canonicalisePath(record.path));
+        delegatedPaths.add((0, paths_1.canonicalisePath)(record.path));
     const REGISTERED_KEY = Symbol.for('dsh-plugin-coding-delegate.registered');
     const isTest = process.env.NODE_ENV === 'test';
     if (!isTest) {

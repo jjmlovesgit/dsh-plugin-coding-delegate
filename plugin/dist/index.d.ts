@@ -3,6 +3,7 @@ import { SavingsTracker, RouteType, StepUsage } from './savings-tracker';
 import { PROFILES, ProfileConfig } from './profiles';
 export { PROFILES, ProfileConfig, SavingsTracker, RouteType, StepUsage };
 export { resolveDataDir, trace } from './logging';
+export { isPathWithin } from './paths';
 export declare const inject: string[];
 export declare const using: readonly ["tools"];
 export interface PluginConfig {
@@ -310,8 +311,6 @@ export interface FileEmissionResult {
     /** Search/replace blocks applied, when the emission was a patch. */
     hunks?: number;
 }
-/** True when `candidate` is `root` itself or lives beneath it. Case-insensitive on Windows. */
-export declare function isPathWithin(root: string, candidate: string): boolean;
 /**
  * The containment decision for one delegated write. `baseDir` is the session workspace
  * and `allowedRoots` is the operator's explicit extension list. Both sides are
