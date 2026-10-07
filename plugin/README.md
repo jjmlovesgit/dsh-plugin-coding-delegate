@@ -277,13 +277,24 @@ provider out of the architect role does not opt it out of the credential gate.
 ```yaml
 - id: local-router
   config:
-    leadProviders: ['lm-studio']   # anything resolved to lm-studio is left alone
+    leadTier: true                 # derive the list from the LEAD profile
+    # or name providers explicitly:
+    # leadProviders: ['lm-studio']   # anything resolved to lm-studio is left alone
 ```
 
 It is an **allowlist rather than an inference** on purpose. Guessing the role from "the provider is not
 the architect's" would stop pinning the architect the moment a profile named its provider something
 else, and the failure would be silent — and pointed at the cloud. Empty by default, which means every
 request is the architect, exactly as before this option existed.
+
+`leadTier: true` is the shortcut: it derives the list from the `LEAD` profile, which describes the lead
+tier in one place — a local thinking model on the worker's endpoint, deliberately without
+`delegate_worker`, since the lead authors contracts and the architect dispatches them. An explicit
+`leadProviders` list always wins over the shortcut.
+
+The other half — a DSH agent preset that gives the lead its instruction and repository-read tools — is
+the operator's to write. `presets/lead.md` at the repository root documents the shape and is explicit
+about which half is verified and which is not.
 
 ## The `delegate_worker` tool
 

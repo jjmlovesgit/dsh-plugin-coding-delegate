@@ -62,10 +62,12 @@ Gated. Nothing here starts until the host gap and two decisions clear.
 | # | Item | Status |
 | --- | --- | --- |
 | 2a | **`agent/request` respects a lead provider** — a request the host resolved to a declared lead provider is left as configured, so a local lead is not repinned to the cloud or told it is the architect | **Built.** `tests/oracles/agent-role.test.cjs`, 8 assertions, failing 8 of 8 before implementation. `leadProviders` is empty by default, so this is a no-op until an operator opts in |
+| 2b | **`LEAD` profile and the `leadTier` opt-in** — the lead as a local thinking model, with the provider list derived from the profile so it is declared once | **Built.** `tests/oracles/lead-tier.test.cjs`, 7 assertions, failing 7 of 7 before implementation |
+| 2c | **Rule 8 — source may not reach the cloud, approval-gated** | Not started |
 | 1 | Read-guard scoping: distinguish architect from lead | **Blocked on the host** — see `SECURITY-REVIEW.md`, "Blocked on the host: agent lineage". Interim: fail closed with an explicit `delegateReadPolicy` escape hatch |
-| 2 | Choose the lead model | **Needs a decision** |
-| 4 | Delivery: documented subagent preset, or plugin support | **Needs a decision** |
-| 3 | `LEAD` profile — thinking on, repository access, authors each unit's contract | Not started; gated on 2 |
+| 2 | Choose the lead model | **Decided:** the local model already configured for the worker, thinking enabled, as `PROFILES.LEAD`. No new download, no metered spend, source never leaves the machine |
+| 4 | Delivery: documented subagent preset, or plugin support | **Decided:** documented preset. The plugin enforces boundaries; owning DSH's agent lifecycle would duplicate the host and break when it changes. Guide at `presets/lead.md` |
+| 3 | `LEAD` profile — thinking on, repository access, authors each unit's contract | **Built.** `PROFILES.LEAD` plus `leadTier`. The host half that grants repository access is guided in `presets/lead.md` and is not yet verified |
 | 5 | Fresh lead per workstream | Not started; gated on 2 and 4 |
 | 9 | Rule 8: source may not reach the cloud, approval-gated | Not started |
 | 10 | Per-tier read/write matrix | Not started |
@@ -94,11 +96,13 @@ Also deliberate and unresolved: the plugin entry id is `local-router` while the 
 
 ## Open decisions
 
-1. **Lead model** (item 2) — or defer the lead tier and finish Track 1 first.
-2. **Delivery** (item 4) — subagent preset or plugin support.
-
+Item 2 is settled: the lead is the **local** model already running the worker, with thinking enabled.
+Item 4 is settled: **documented preset**, not plugin-managed agent lifecycle.
 Item 17 is settled: **GitHub-only**, so there is no publish step and Track 3 is about the repository
 rather than a registry.
+
+Track 2's remaining work is no longer waiting on a decision — it is waiting on the host for item 1, and
+on nobody for 2c and item 9.
 
 ## Method note: how the guard was bypassed
 

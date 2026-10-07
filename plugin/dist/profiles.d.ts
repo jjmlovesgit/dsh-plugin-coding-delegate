@@ -14,6 +14,7 @@ export interface ProfileConfig {
 }
 export interface Profiles {
     ARCHITECT: ProfileConfig;
+    LEAD: ProfileConfig;
     WORKER: ProfileConfig;
 }
 export declare const PROFILES: Profiles;

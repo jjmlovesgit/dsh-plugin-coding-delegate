@@ -64,6 +64,7 @@ exports.evaluateCodeWriteGuard = evaluateCodeWriteGuard;
 exports.requestApprovalForWrite = requestApprovalForWrite;
 exports.resolveVerificationPolicy = resolveVerificationPolicy;
 exports.requestApprovalForVerification = requestApprovalForVerification;
+exports.resolveLeadProviders = resolveLeadProviders;
 exports.resolveAgentRole = resolveAgentRole;
 exports.applyArchitectConfig = applyArchitectConfig;
 exports.applyAgentRole = applyAgentRole;
@@ -2243,6 +2244,16 @@ async function requestApprovalForVerification(ctx, exec, command) {
  * is not the architect's" would be worse than useless: a profile that named its provider anything else
  * would stop being pinned, and the failure would be silent and in the direction of the cloud.
  */
+/**
+ * Which providers are the lead tier? `leadTier` derives the list from the LEAD profile so the provider
+ * id is declared in one place; an explicit `leadProviders` list always wins.
+ */
+function resolveLeadProviders(options = {}) {
+    if (Array.isArray(options.leadProviders) && options.leadProviders.length > 0) {
+        return options.leadProviders;
+    }
+    return options.leadTier ? [profiles_1.PROFILES.LEAD.provider] : [];
+}
 function resolveAgentRole(input) {
     const host = String(input.hostProvider ?? '')
         .trim()
@@ -2597,7 +2608,7 @@ function apply(ctx, options = {}) {
         // opting a provider out of the architect role does not opt it out of the firewall.
         const role = resolveAgentRole({
             hostProvider: resolvedConfig?.provider,
-            leadProviders: options?.leadProviders,
+            leadProviders: resolveLeadProviders(options),
         });
         const mutatedConfig = applyAgentRole(resolvedConfig || {}, role, {
             cloudProvider: config.cloudProvider,
@@ -2698,6 +2709,7 @@ const pluginExport = {
     contractFileHashes,
     contractViolations,
     resolveDelegateStatus,
+    resolveLeadProviders,
     resolveAgentRole,
     applyArchitectConfig,
     applyAgentRole,

@@ -85,6 +85,14 @@ export interface PluginConfig {
    * something else, and the failure would be silent and in the direction of the cloud.
    */
   leadProviders?: string[]
+  /**
+   * Convenience switch for the lead tier: derives `leadProviders` from the LEAD profile, so the
+   * provider id is declared in exactly one place. An explicit `leadProviders` list wins over it.
+   *
+   * Do not point this at the provider your architect session uses — the hook would stop pinning it,
+   * which is the one failure direction that costs you source leaving the machine.
+   */
+  leadTier?: boolean
 }
 
 export interface RouterMetadata {
@@ -2732,6 +2740,17 @@ export async function requestApprovalForVerification(
  * is not the architect's" would be worse than useless: a profile that named its provider anything else
  * would stop being pinned, and the failure would be silent and in the direction of the cloud.
  */
+/**
+ * Which providers are the lead tier? `leadTier` derives the list from the LEAD profile so the provider
+ * id is declared in one place; an explicit `leadProviders` list always wins.
+ */
+export function resolveLeadProviders(options: PluginConfig = {}): string[] {
+  if (Array.isArray(options.leadProviders) && options.leadProviders.length > 0) {
+    return options.leadProviders
+  }
+  return options.leadTier ? [PROFILES.LEAD.provider] : []
+}
+
 export function resolveAgentRole(input: {
   hostProvider?: string
   leadProviders?: string[]
@@ -3144,7 +3163,7 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
       // opting a provider out of the architect role does not opt it out of the firewall.
       const role = resolveAgentRole({
         hostProvider: resolvedConfig?.provider,
-        leadProviders: options?.leadProviders,
+        leadProviders: resolveLeadProviders(options),
       })
 
       const mutatedConfig = applyAgentRole(resolvedConfig || {}, role, {
@@ -3262,6 +3281,7 @@ const pluginExport = {
   contractFileHashes,
   contractViolations,
   resolveDelegateStatus,
+  resolveLeadProviders,
   resolveAgentRole,
   applyArchitectConfig,
   applyAgentRole,

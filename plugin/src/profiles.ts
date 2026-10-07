@@ -15,6 +15,7 @@ export interface ProfileConfig {
 
 export interface Profiles {
   ARCHITECT: ProfileConfig
+  LEAD: ProfileConfig
   WORKER: ProfileConfig
 }
 
@@ -34,6 +35,30 @@ export const PROFILES: Profiles = {
       'declare contextFiles for the files it must see, and state the interfaces, types and behaviour it ' +
       'needs. Use contractFiles for the tests that decide the unit. Never assume the worker can ' +
       'discover anything from the codebase, and never assume it can return a large file in one piece.',
+  },
+  /**
+   * The lead tier: a thinking model with repository access that authors each unit's contract. It is
+   * deliberately local, because a cloud lead would mean source reaching the cloud and would spend the
+   * metered allowance this plugin exists to protect. It is deliberately not given `delegate_worker`:
+   * the lead authors contracts, the architect dispatches them.
+   */
+  LEAD: {
+    name: 'LEAD_LOCAL',
+    provider: 'lm-studio',
+    model: 'qwen/qwen3.8-27b',
+    endpoint: 'http://127.0.0.1:1234/v1',
+    contextWindow: 32768,
+    temperature: 0.2,
+    max_tokens: 8192,
+    enable_thinking: true,
+    reasoning_effort: 'high',
+    systemInstruction:
+      'You are the Lead. You read the repository and author the contract for each unit of work: what ' +
+      'must be built, the interfaces and behaviour it needs, the files involved, and the tests that ' +
+      'decide whether the unit passed. You do not write implementation code, and you do not dispatch ' +
+      'the worker -- the architect does that with your contract. Quote any code you are changing ' +
+      'exactly as it appears, because a patch that does not match byte-for-byte is refused rather ' +
+      'than approximated.',
   },
   WORKER: {
     name: 'WORKER_LOCAL',

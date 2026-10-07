@@ -24,6 +24,10 @@
       - 'tools/'
     # A tripped DLP firewall reroutes to the local worker rather than refusing the request.
     dlpAction: 'local'
+    # Uncomment to run a lead agent on the local endpoint. The provider list is derived from the LEAD
+    # profile, so the id is declared in one place. Do NOT point this at cloudProvider -- the hook would
+    # stop pinning the architect, and source could leave the machine.
+    # leadTier: true
 
 - id: llm-pi-ai
   name: '@deepseek-ai/dsh-llm-pi-ai'

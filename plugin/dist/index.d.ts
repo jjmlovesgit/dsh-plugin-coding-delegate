@@ -76,6 +76,14 @@ export interface PluginConfig {
      * something else, and the failure would be silent and in the direction of the cloud.
      */
     leadProviders?: string[];
+    /**
+     * Convenience switch for the lead tier: derives `leadProviders` from the LEAD profile, so the
+     * provider id is declared in exactly one place. An explicit `leadProviders` list wins over it.
+     *
+     * Do not point this at the provider your architect session uses — the hook would stop pinning it,
+     * which is the one failure direction that costs you source leaving the machine.
+     */
+    leadTier?: boolean;
 }
 export interface RouterMetadata {
     provider: string;
@@ -602,6 +610,11 @@ export declare function requestApprovalForVerification(ctx: any, exec: any, comm
  * is not the architect's" would be worse than useless: a profile that named its provider anything else
  * would stop being pinned, and the failure would be silent and in the direction of the cloud.
  */
+/**
+ * Which providers are the lead tier? `leadTier` derives the list from the LEAD profile so the provider
+ * id is declared in one place; an explicit `leadProviders` list always wins.
+ */
+export declare function resolveLeadProviders(options?: PluginConfig): string[];
 export declare function resolveAgentRole(input: {
     hostProvider?: string;
     leadProviders?: string[];
@@ -656,6 +669,7 @@ declare const pluginExport: {
     contractFileHashes: typeof contractFileHashes;
     contractViolations: typeof contractViolations;
     resolveDelegateStatus: typeof resolveDelegateStatus;
+    resolveLeadProviders: typeof resolveLeadProviders;
     resolveAgentRole: typeof resolveAgentRole;
     applyArchitectConfig: typeof applyArchitectConfig;
     applyAgentRole: typeof applyAgentRole;
