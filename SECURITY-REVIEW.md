@@ -195,14 +195,35 @@ demonstrates the rule better than a designed test would have.
 **The delegated-read prompt did not fire.** After `delegate_worker` recorded writing `target.js`, the
 architect read that file and received its contents with no prompt reaching the agent.
 
-The operator has since confirmed that prompts *were* shown for the other approval-gated operations, so
-the leading explanation is that a read prompt was shown and approved as well. That is not established,
-and the second possibility — that the read guard is not gating reads at all — would be a rule 3 hole
-rather than a cosmetic difference.
+**Resolved: the read guard fires.** Two identical reads of the same file gave opposite answers, and the
+difference was the process, not the policy.
 
-**Test in progress.** `delegateReadPolicy: 'deny'` has been set in the live profile, which turns the
-question into one with a visible answer: a `deny` refuses the read outright, so no approval is involved
-and the agent either sees a refusal or sees the file. The result is recorded below.
+The first read returned the contents. That process *had* recorded `target.js` as worker-written, so the
+guard should have gated it — and the operator confirms prompts were shown for the other approval-gated
+operations, which is consistent with a read prompt having been shown and approved.
+
+The first attempt to re-test it was **invalid**, and the reason belongs in the record. Reloading to load
+`delegateReadPolicy: 'deny'` also emptied `delegatedPaths`, because that registry is in-memory and
+process-scoped. The read then succeeded not because the gate was broken but because the plugin no longer
+knew the file had been delegated. The test could not have distinguished anything, and reporting it as a
+finding would have been wrong.
+
+The corrected test populated the registry *after* the reload and read immediately: `delegate_worker`
+wrote `probe.js`, and a read of that exact path was **refused**:
+
+> `delegateReadPolicy is deny, so reading delegated source back is refused (rule 3).`
+
+So rule 3 holds, the `deny` policy is live, and unit 3's configuration key reaches the plugin. The
+original observation is closed.
+
+### The registry does not survive a reload
+
+The invalid test did surface something real, so it was not wasted. `delegatedPaths` is documented as
+in-memory and process-scoped; the consequence is now concrete: **after a restart the plugin forgets every
+file it wrote on a delegation's behalf**, so until a new delegation repopulates the registry, the
+architect can read previously delegated source without being asked. A registry seeded from the session,
+or made durable, would close that. Until then the read guard's coverage is bounded by process lifetime —
+worth knowing before relying on it across a long-running session.
 
 ### Approval seam: resolved
 
