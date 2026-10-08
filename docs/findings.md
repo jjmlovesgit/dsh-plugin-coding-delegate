@@ -483,10 +483,13 @@ did not touch. **The class was not fixed; one instance of it was**, which is the
 forward — and it is the third time this session that a relative-versus-absolute comparison has silently
 disabled a check.
 
-**Fix direction, not yet applied.** `isDelegatedPath` needs the workspace root: `evaluateCodeWriteGuard`'s
-config gains a `workspaceRoot`, the pre-execute call site passes the resolved session workspace, and the
-target is resolved against it before comparison — the same `locate()` shape used in `delegation.ts`. It
-needs an oracle that fails first: a relative target that names a delegated path must be recognised.
+**Fixed, but not the way this note predicted.** The direction sketched above assumed the guard could be
+handed the workspace root. It cannot: `index.ts` is 62KB, a worker has to emit a whole file to rewrite one,
+and context injection is capped at 32KB — so the call site could not be touched at all. `isDelegatedPath`
+now infers the base instead, testing the target against every ancestor directory of each delegated file. A
+delegated file always lives beneath its workspace, so the workspace is one of those ancestors and the answer
+is recovered without being told it; the search can only over-ask, never under-ask. The oracle was written
+first and fails 4 of its 5 tests against the previous implementation.
 
 ## The architect reads source constantly, and that is the job — not the problem
 
@@ -528,4 +531,50 @@ A note on "valid reason": intent cannot be enforced and should not be guessed at
 the record is what would eventually justify narrowing the access — if the reads turn out to be mostly
 "checking one signature while planning", the answer is a better way to ask that question, not a stricter
 gate.
+
+## The join landed, and the live check found the branch open for a different reason
+
+**Phase 2 is done.** `DelegatedRecord` now carries `outcome`, `succeeded` and `verdictAt`, and
+`recordDelegatedOutcome` stamps them at the verdict site — the same expression feeds the ledger and the
+registry, so the two cannot disagree about what happened. The live registry shows the ordering the design
+exists for: the record was written at `…782347`, when the file was emitted, and the verdict landed at
+`…796506`, **14.2 seconds later**. The verdict could not have been in the original record, because the
+registry is written before the verification runs.
+
+**Then the fix was checked live, and it did not fire.** A relative read of a file a delegated worker had
+just written — `scripts/check-dist-in-sync.cjs`, registered `mode: 'created'` and therefore in
+`delegatedPaths` — passed silently. The old bug, apparently untouched.
+
+It is not. The trace discriminates: the guard's approve path returns early, and the `SOURCE_READ`
+observation sits *after* that return, so a trace naming the target means the branch was never taken. The
+trace was there. The predicate, run in a fresh process against the real registry, returns `{kind:'ask'}` for
+the same target. The registry-derived set is right, the target is right, the predicate is right — and none
+of it was consulted, because the active profile sets:
+
+```yaml
+delegateReadPolicy: 'allow'
+```
+
+`evaluateDelegatedReadPolicy` is a pure function of the *setting*, and on `allow` it returns before any path
+comparison happens. The hatch was added deliberately during the lead-tier work, for a reason its own comment
+records: once the registry covered files the worker had **patched** as well as created, the default `ask`
+would have stopped the architect reading any file that had ever had a patch delegated to it, which makes
+iterating on an existing file impossible.
+
+**The earlier fail-open was real, and this is how we know.**
+`cordis.patch.yml.pre-leadtier-backup` does not contain `delegateReadPolicy`. The hatch postdates the
+observation, so the silent read recorded above happened under the default `ask`, and relative-path blindness
+was the whole cause. Both things are true at once: the defect was live when it was measured, and the fix
+that closes it is currently unreachable in this configuration.
+
+**The failure class is new and worth naming: the oracle tested a configuration nobody runs.** Every guard
+test supplies its own config object, so `delegateReadPolicy` was absent and defaulted to `ask` — the branch
+this operator has switched off. A green oracle over the default configuration says nothing about the
+configuration in use, and no amount of contract discipline catches that, because the oracle's own config is
+part of the contract and nothing had pinned it to the live one.
+
+Two things follow. The fix stays: it is correct, it is the plugin's documented default, and it is what any
+other operator gets. And the open question is narrower and answerable — with `allow` in place the
+relative-path match does nothing at all, and it starts mattering the moment the hatch is closed, which is
+the decision the hatch exists to defer and the `SOURCE_READ` trace is what keeps answerable.
 
