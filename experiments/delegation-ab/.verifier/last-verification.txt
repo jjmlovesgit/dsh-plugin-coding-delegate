@@ -1,0 +1,33 @@
+none (reference)              pass=27 fail=0  [green]
+evicts newest                 pass=21 fail=6  [red]
+      caught by: SPEC-2: capacity discards the OLDEST sample and the aggregate excludes it
+      caught by: SPEC-2: oldest-first discarding holds when the values are unordered
+      caught by: SPEC-2: the aggregate is order- and discard-sensitive, step by step
+      caught by: SPEC-2: repeated accepts past capacity keep exactly the newest samples
+      caught by: SPEC-2: an old sample does not expel a newer one that is still inside the window
+      caught by: SPEC-2: the injected clock is the only source of time
+never expires for age         pass=21 fail=6  [red]
+      caught by: SPEC-2: the boundary moment is expired, not retained (window is half-open)
+      caught by: SPEC-2: a sample is expired against the current moment, not against the newest sample
+      caught by: SPEC-2: a query at a later moment sees a window that has slid
+      caught by: SPEC-2: an accept removes expired samples and counts them
+      caught by: SPEC-2: samples too old to remain are counted as expired, not evicted, even over capacity
+      caught by: SPEC-2: aggregate and values each sweep expired samples and count them once
+windowMs itself retained      pass=26 fail=1  [red]
+      caught by: SPEC-2: the boundary moment is expired, not retained (window is half-open)
+observation mutates           pass=25 fail=2  [red]
+      caught by: SPEC-2: retainedCount is an observation and removes nothing
+      caught by: SPEC-2: a rejected accept does not sweep, so it discards nothing
+zero-seeded min/max           pass=23 fail=4  [red]
+      caught by: SPEC-2: an accepted sample changes counts, sum and the answer
+      caught by: SPEC-2: capacity discards the OLDEST sample and the aggregate excludes it
+      caught by: SPEC-2: the aggregate is order- and discard-sensitive, step by step
+      caught by: SPEC-2: min and max survive negatives where a zero-seeded implementation would not
+capacity discard counted as agepass=20 fail=7  [red]
+      caught by: SPEC-2: capacity discards the OLDEST sample and the aggregate excludes it
+      caught by: SPEC-2: oldest-first discarding holds when the values are unordered
+      caught by: SPEC-2: the aggregate is order- and discard-sensitive, step by step
+      caught by: SPEC-2: repeated accepts past capacity keep exactly the newest samples
+      caught by: SPEC-2: an old sample does not expel a newer one that is still inside the window
+      caught by: SPEC-2: samples too old to remain are counted as expired, not evicted, even over capacity
+      caught by: SPEC-2: the injected clock is the only source of time

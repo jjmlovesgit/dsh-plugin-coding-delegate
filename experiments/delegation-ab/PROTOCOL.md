@@ -300,11 +300,79 @@ the cache rate". Quote the pair or quote neither.
 
 ### The four runs
 
-*(empty — to be filled in by the runs, not before)*
+*(in progress — arm D on the aggregation window is complete; the remaining three rows are still to run)*
+
+The arms are counterbalanced: **D runs first on the aggregation window, S runs first on the TTL cache.**
+The "first arm" column is therefore the point of the table, not decoration.
+
+This is a **deviation from the order written in the Procedure section**, which named the TTL cache as
+task 1. Both tasks are architect-written specifications with judges frozen before any arm ran, so neither
+result is contaminated by having been solved first *in this experiment* — but the TTL cache has been
+implemented in this repository before, under `experiments/contract-first/`, and the aggregation window
+had not been implemented anywhere until this run. Rather than accept that asymmetry inside a single task
+pair, task 1 of the experiment is the newer task, and the counterbalance is preserved across the pair that
+does exist. What matters for the decision rule is unchanged: for each task, one arm went first.
 
 | task | first arm | arm | cumulative input tokens | uncached | peak window | calls | judge |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| TTL cache | | D | | | | | |
-| TTL cache | | S | | | | | |
-| aggregation window | | S | | | | | |
-| aggregation window | | D | | | | | |
+| aggregation window | D | D | 1,050,313 | 45,257 | 64,779 | 24 | 27/27 pass |
+| aggregation window | D | S | | | | | |
+| TTL cache | S | S | | | | | |
+| TTL cache | S | D | | | | | |
+
+### Run 1: arm D, task 2 (aggregation window)
+
+Session `be2bd1f5-6432-4e66-ac3e-cbb891c89d1b`, a fresh subagent session whose transcript records
+`origin: subagent`, `delegationDepth: 1` and `parentSession` — so it is a fresh context, not a fork, and
+its tokens are attributable to it alone. The architect was given `SPEC-2.md` and told to delegate.
+
+| | |
+| --- | --- |
+| delegation calls | **1** |
+| worker tokens | 10,966 (`promptTokensEst` 9,810 + `completionTokensEst` 1,156) |
+| worker wall time | 12.97 s |
+| file written | `src/aggregation-window.js`, 2,650 bytes, sha256 `136fa3315ba2a51d…` |
+| registry mode | `created` |
+| judge | 27 pass / 0 fail |
+
+**The artifact is real, and I checked it rather than trusting the report.** The registry entry
+(`mode: created`) carries the same sha256 the architect quoted, and the judge is not hollow: with the
+file moved aside the suite yields **0 pass / 27 fail** and with it restored **27 pass / 0 fail**. A suite
+that passes whether or not the module exists would prove nothing, so the seed-to-fail direction was run
+as well as the green one.
+
+**What this row costs the claim.** Producing one 2,650-byte file cost the architect **1,050,313 input
+tokens across 24 calls** — a mean of 43,763 per call, peaking at 64,779 — while the worker that typed it
+used 10,966. The archived worker's equivalent run (row 0 of the earlier data) spent 1.9M over 43 calls.
+Nothing here looks like a smaller window; if anything the delegated arm paid full rate for the
+specification, the judge, and its own orchestration, and the delegation removed only the typing.
+
+That is **one run of one small task**, and it is not the comparison — arm S on the same task is. It is
+recorded because it is the first measurement, and because a prediction that only meets its supporting
+evidence is not being tested.
+
+**A plugin behaviour worth recording, because it is not what the README implies.** The delegation
+returned `VERIFICATION_NOT_APPROVED` with the text *"No verification command was supplied; the contract
+is unchecked"* — approval for the command was refused, so nothing ran. The savings ledger then recorded
+the unit as **`UNIT_FAILED`**. A unit whose tests were never executed is neither a pass nor a proven
+failure, and `contracts.ts` says so in as many words: `UNIT_UNVERIFIED` "is the honest third answer".
+The gate distinguishes the case (`VERIFICATION_NOT_APPROVED`, `delegation.ts:319`) and the outcome
+collapses it (`delegation.ts:742`), so `success: false` lands in the ledger as a failure. The
+downstream effect is user-visible: the read guard refuses to read the file back with the message *"the
+unit that wrote it failed verification"*, which was untrue — it passed 27/27 and merely never got to
+run the check. This run therefore also cost the architect the ability to read its own successful output,
+which is why the plugin's own verdict here is `UNVERIFIED` while the artifact is green.
+
+**Two guard false positives the architect hit**, reported by it first-hand and worth their own
+investigation:
+
+- A shell command containing any token that resolves to an **ancestor** of a delegated file — a bare
+  `src`, or `C:\Projects` — matches every delegated file beneath it and is refused. Plain `Test-Path`,
+  `Get-ChildItem` and `Get-Content` on the workspace were all rejected for this reason.
+- A command combining a delete verb with a source-file reference anywhere on the same line is refused as
+  "would delete source file X" even when the delete targets an unrelated temp file, and the guard named
+  a file that was never at risk.
+
+Both refusals are fail-closed, so nothing was harmed; the cost is that ordinary housekeeping commands
+stop working once a delegation has landed. They are recorded as findings, not fixed here: the
+experiment's own validity depends on the plugin being the same instrument across all four arms.

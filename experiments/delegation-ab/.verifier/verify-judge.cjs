@@ -21,6 +21,22 @@ const os = require('os')
 const path = require('path')
 const { spawnSync } = require('child_process')
 
+// Every row written here as well as to the console.
+//
+// This exists because the console output was NOT durable and a stale run was mistaken for the current
+// one. The first version of the mutation list declared a `boundary-inclusive` case that was never
+// implemented in reference-window.js, so that row ran the correct implementation and reported green --
+// and the run was then cited as if the judge had a hole at the half-open boundary. It did not: once the
+// mutation was implemented, the boundary test caught it (26 pass, 1 fail). The corrected run existed
+// only on a terminal, so the only durable record of this harness was the wrong one. A verification
+// result that lives in a scrollback is not evidence.
+const logPath = path.join(__dirname, 'last-verification.txt')
+const logLines = []
+function emit(line) {
+  console.log(line)
+  logLines.push(line)
+}
+
 const [judgePath, relModule, scratchName] = process.argv.slice(2)
 if (!judgePath || !relModule || !scratchName) {
   console.error('usage: node verify-judge.cjs <judge.cjs> <relModuleFromScratch> <scratchName>')
@@ -65,13 +81,13 @@ function run(label, mode) {
   const fail = /^# fail (\d+)/m.exec(out)
   const caught = [...out.matchAll(/^not ok \d+ - (.+)$/gm)].map((m) => m[1].trim())
   const green = result.status === 0 && pass && Number(pass[1]) > 0
-  console.log(
+  emit(
     String(label).padEnd(30) +
       'pass=' + (pass ? pass[1] : '?') +
       ' fail=' + (fail ? fail[1] : '?') +
       (green ? '  [green]' : '  [red]')
   )
-  if (!green) for (const name of caught) console.log('      caught by: ' + name)
+  if (!green) for (const name of caught) emit('      caught by: ' + name)
   if (!pass) console.log('      (no TAP summary -- the run did not execute)\n' + out.slice(-1200))
   return { green, caught }
 }
@@ -101,7 +117,7 @@ for (const [label, mode] of MUTATIONS.slice(1)) {
   }
 }
 
-fs.rmSync(scratch, { recursive: true, force: true })
+fs.writeFileSync(logPath, logLines.join(String.fromCharCode(10)) + String.fromCharCode(10), 'utf8')
 
 if (broken === 0) {
   console.log('\nOK: green on a correct implementation, red on all ' + (MUTATIONS.length - 1) + ' mutations.')
