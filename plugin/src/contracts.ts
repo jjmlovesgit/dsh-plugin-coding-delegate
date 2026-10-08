@@ -74,6 +74,49 @@ export const delegatedPaths = new Set<string>()
 export const DELEGATED_PATH_LIMIT = 500
 
 /**
+ * The same files as `delegatedPaths`, carrying the record so the read guard can ask what happened to a
+ * file rather than only whether it was delegated at all. `indexDelegated` is its only writer: two indexes
+ * updated in two places drift, and a drifted index here reads as "no verdict", which is the permissive
+ * answer to the question this index exists to answer.
+ *
+ * It arms itself on first use because the startup loop that fills `delegatedPaths` lives in `index.ts`,
+ * which is too large for the worker to rewrite -- so there is no place there to arm a second index, and a
+ * lazily armed one is the difference between correct and silently empty.
+ */
+const delegatedRecordIndex = new Map<string, DelegatedRecord>()
+let indexArmed = false
+
+/**
+ * Refresh both indexes from a set of records. Only whole files the worker produced enter the read guard's
+ * index -- a patched file is one the architect was already working on and must keep reading -- while the
+ * registry itself remembers either kind.
+ */
+function indexDelegated(records: Iterable<DelegatedRecord>): void {
+  indexArmed = true
+  for (const entry of records) {
+    if (entry.mode !== 'created') continue
+    const key = canonicalisePath(entry.path)
+    delegatedPaths.add(key)
+    delegatedRecordIndex.set(key, entry)
+  }
+  while (delegatedPaths.size > DELEGATED_PATH_LIMIT) {
+    const oldest = delegatedPaths.values().next().value
+    if (typeof oldest !== 'string') break
+    delegatedPaths.delete(oldest)
+    delegatedRecordIndex.delete(oldest)
+  }
+}
+
+/**
+ * The record for a delegated file, by canonical path. `undefined` means no verdict covers it, and the
+ * guard has to read that as unsettled rather than as a pass.
+ */
+export function lookupDelegatedRecord(canonicalPath: string): DelegatedRecord | undefined {
+  if (!indexArmed) indexDelegated(loadDelegatedRegistry())
+  return delegatedRecordIndex.get(canonicalPath)
+}
+
+/**
  * What a unit's verification said about the content it wrote.
  *
  * `UNIT_UNVERIFIED` is the honest third answer: a delegated edit with no verification command is the
@@ -220,16 +263,7 @@ export function rememberDelegated(paths: string[], mode: 'created' | 'patched' =
 
   const merged = mergeDelegatedRecords(loadDelegatedRegistry(), added)
   saveDelegatedRegistry(merged)
-
-  // Only whole files the worker produced enter the read guard's index. A patched file is one the
-  // architect was working on and must keep reading; the record still remembers it either way.
-  for (const entry of merged) {
-    if (entry.mode === 'created') delegatedPaths.add(canonicalisePath(entry.path))
-  }
-  while (delegatedPaths.size > DELEGATED_PATH_LIMIT) {
-    const oldest = delegatedPaths.values().next().value
-    if (typeof oldest === 'string') delegatedPaths.delete(oldest)
-  }
+  indexDelegated(merged)
 }
 
 /**
@@ -271,6 +305,11 @@ export function recordDelegatedOutcome(
     record.verdictAt = at
     stamped += 1
   }
-  if (stamped > 0) saveDelegatedRegistry(records)
+  if (stamped > 0) {
+    saveDelegatedRegistry(records)
+    // The index still holds these records as they were before the stamp, so it has to be refreshed or the
+    // guard would keep reading "no verdict" for a file whose verdict has just been recorded.
+    indexDelegated(records)
+  }
   return stamped
 }

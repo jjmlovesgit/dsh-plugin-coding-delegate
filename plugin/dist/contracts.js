@@ -38,6 +38,7 @@ exports.sha256File = sha256File;
 exports.resolveContractFiles = resolveContractFiles;
 exports.contractFileHashes = contractFileHashes;
 exports.contractViolations = contractViolations;
+exports.lookupDelegatedRecord = lookupDelegatedRecord;
 exports.resolveDelegatedRegistryPath = resolveDelegatedRegistryPath;
 exports.parseDelegatedRegistry = parseDelegatedRegistry;
 exports.mergeDelegatedRecords = mergeDelegatedRecords;
@@ -117,6 +118,49 @@ function contractViolations(before, after) {
  */
 exports.delegatedPaths = new Set();
 exports.DELEGATED_PATH_LIMIT = 500;
+/**
+ * The same files as `delegatedPaths`, carrying the record so the read guard can ask what happened to a
+ * file rather than only whether it was delegated at all. `indexDelegated` is its only writer: two indexes
+ * updated in two places drift, and a drifted index here reads as "no verdict", which is the permissive
+ * answer to the question this index exists to answer.
+ *
+ * It arms itself on first use because the startup loop that fills `delegatedPaths` lives in `index.ts`,
+ * which is too large for the worker to rewrite -- so there is no place there to arm a second index, and a
+ * lazily armed one is the difference between correct and silently empty.
+ */
+const delegatedRecordIndex = new Map();
+let indexArmed = false;
+/**
+ * Refresh both indexes from a set of records. Only whole files the worker produced enter the read guard's
+ * index -- a patched file is one the architect was already working on and must keep reading -- while the
+ * registry itself remembers either kind.
+ */
+function indexDelegated(records) {
+    indexArmed = true;
+    for (const entry of records) {
+        if (entry.mode !== 'created')
+            continue;
+        const key = (0, paths_1.canonicalisePath)(entry.path);
+        exports.delegatedPaths.add(key);
+        delegatedRecordIndex.set(key, entry);
+    }
+    while (exports.delegatedPaths.size > exports.DELEGATED_PATH_LIMIT) {
+        const oldest = exports.delegatedPaths.values().next().value;
+        if (typeof oldest !== 'string')
+            break;
+        exports.delegatedPaths.delete(oldest);
+        delegatedRecordIndex.delete(oldest);
+    }
+}
+/**
+ * The record for a delegated file, by canonical path. `undefined` means no verdict covers it, and the
+ * guard has to read that as unsettled rather than as a pass.
+ */
+function lookupDelegatedRecord(canonicalPath) {
+    if (!indexArmed)
+        indexDelegated(loadDelegatedRegistry());
+    return delegatedRecordIndex.get(canonicalPath);
+}
 const DELEGATED_OUTCOMES = new Set(['UNIT_PASSED', 'UNIT_FAILED', 'UNIT_UNVERIFIED']);
 function resolveDelegatedRegistryPath() {
     return path.join((0, logging_1.resolveDataDir)(), 'delegated-registry.json');
@@ -227,17 +271,7 @@ function rememberDelegated(paths, mode = 'created') {
         return;
     const merged = mergeDelegatedRecords(loadDelegatedRegistry(), added);
     saveDelegatedRegistry(merged);
-    // Only whole files the worker produced enter the read guard's index. A patched file is one the
-    // architect was working on and must keep reading; the record still remembers it either way.
-    for (const entry of merged) {
-        if (entry.mode === 'created')
-            exports.delegatedPaths.add((0, paths_1.canonicalisePath)(entry.path));
-    }
-    while (exports.delegatedPaths.size > exports.DELEGATED_PATH_LIMIT) {
-        const oldest = exports.delegatedPaths.values().next().value;
-        if (typeof oldest === 'string')
-            exports.delegatedPaths.delete(oldest);
-    }
+    indexDelegated(merged);
 }
 /**
  * Stamp a unit's verdict onto the registry records for the files that unit wrote.
@@ -276,7 +310,11 @@ function recordDelegatedOutcome(paths, outcome, succeeded, at = Date.now()) {
         record.verdictAt = at;
         stamped += 1;
     }
-    if (stamped > 0)
+    if (stamped > 0) {
         saveDelegatedRegistry(records);
+        // The index still holds these records as they were before the stamp, so it has to be refreshed or the
+        // guard would keep reading "no verdict" for a file whose verdict has just been recorded.
+        indexDelegated(records);
+    }
     return stamped;
 }

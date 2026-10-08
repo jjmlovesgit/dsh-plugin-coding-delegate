@@ -38,10 +38,15 @@ exports.extractWriteTarget = extractWriteTarget;
 exports.hasCommandWriteSignal = hasCommandWriteSignal;
 exports.hasCommandDeleteSignal = hasCommandDeleteSignal;
 exports.evaluateDelegatedReadPolicy = evaluateDelegatedReadPolicy;
+exports.evaluateSettledFile = evaluateSettledFile;
 exports.evaluateCodeWriteGuard = evaluateCodeWriteGuard;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const paths_1 = require("./paths");
+// The registry owns both the path index and the verdict attached to each file. This is a one-way edge:
+// `contracts.ts` imports only `logging.ts` and `paths.ts`, and only `index.ts` and `roles.ts` import this
+// module, so there is no cycle to resolve.
+const contracts_1 = require("./contracts");
 /** Tools that write a file directly. */
 const WRITE_TOOLS = new Set([
     'write', 'edit', 'str_replace_editor', 'apply_patch', 'multi_edit',
@@ -57,7 +62,7 @@ const SHELL_TOOLS = new Set([
  */
 exports.READ_TOOLS = new Set(['read', 'read_file', 'fs_read', 'view', 'view_file', 'cat']);
 /**
- * True when `target` names a file a delegated worker wrote, however the caller spelled it.
+ * Every delegated file `target` could name, canonical, however the caller spelled it.
  *
  * `canonicalisePath` resolves a relative path against the process cwd, and the process cwd is not the
  * session workspace: comparing the two as strings missed every relative target, which is how the
@@ -65,26 +70,30 @@ exports.READ_TOOLS = new Set(['read', 'read_file', 'fs_read', 'view', 'view_file
  * reproduced against a file a delegated worker had just created, read back with no decision at all.
  *
  * The guard cannot be told the workspace. A tool call does not carry one, and the value lives in the
- * plugin context, which is exactly the coupling this module avoids so that it stays a pure function.
- * So the base is not assumed, it is searched: `resolvesTo` tests the target against every ancestor
- * directory of every delegated file. A delegated file always lives beneath its workspace, so the
- * workspace is one of those ancestors and the answer is recovered without being told. The search can
- * only over-ask -- it calls a read delegated when the target resolves to the delegated file from some
- * plausible base -- and asking is the safe direction for a guard.
+ * plugin context, which is exactly the coupling this module avoids so that it stays a pure function. So
+ * the base is not assumed, it is searched: `resolvesTo` tests the target against every ancestor directory
+ * of every delegated file. A delegated file always lives beneath its workspace, so the workspace is one
+ * of those ancestors and the answer is recovered without being told.
+ *
+ * Which is why this returns a LIST rather than a boolean. The same relative target can name a file in
+ * more than one workspace -- two temp workspaces both holding `plugin/src/thing.ts` -- and the guard has
+ * no way to prefer one. Returning every candidate lets the caller answer with the worst of them instead
+ * of silently taking whichever happened to be first.
  */
-function isDelegatedPath(target, paths) {
+function matchDelegatedPaths(target, paths) {
     if (typeof target !== 'string' || !target)
-        return false;
+        return [];
     const canonical = (0, paths_1.canonicalisePath)(target);
     const absolute = path.isAbsolute(target);
+    const matches = [];
     for (const p of paths ?? []) {
         const delegated = (0, paths_1.canonicalisePath)(String(p));
-        if (delegated === canonical)
-            return true;
-        if (!absolute && resolvesTo(target, delegated))
-            return true;
+        if (delegated !== canonical && (absolute || !resolvesTo(target, delegated)))
+            continue;
+        if (!matches.includes(delegated))
+            matches.push(delegated);
     }
-    return false;
+    return matches;
 }
 /** Does `target`, read relative to some ancestor of `delegated`, name `delegated` itself? */
 function resolvesTo(target, delegated) {
@@ -232,10 +241,12 @@ function isReadArgument(command, script) {
 function findDelegatedRead(command, paths) {
     if (typeof command !== 'string' || !command || !paths)
         return undefined;
+    let form;
+    const matches = [];
     for (const p of paths) {
         const canonical = (0, paths_1.canonicalisePath)(String(p));
         const forms = [canonical, canonical.replace(/\\/g, '/')];
-        // The same search as isDelegatedPath, in the form a command string needs: each way of spelling
+        // The same search as matchDelegatedPaths, in the form a command string needs: each way of spelling
         // the file relative to one of its ancestors. A single-segment name is skipped, because a bare
         // filename appears in commands that have nothing to do with the file.
         let dir = path.dirname(canonical);
@@ -248,12 +259,17 @@ function findDelegatedRead(command, paths) {
                 break;
             dir = parent;
         }
-        for (const form of forms) {
-            if (command.includes(form) && isReadArgument(command, form))
-                return form;
+        for (const candidate of forms) {
+            if (command.includes(candidate) && isReadArgument(command, candidate)) {
+                if (form === undefined)
+                    form = candidate;
+                if (!matches.includes(canonical))
+                    matches.push(canonical);
+                break;
+            }
         }
     }
-    return undefined;
+    return form === undefined ? undefined : { form, matches };
 }
 /**
  * The longest source-extension reference in a string.
@@ -348,6 +364,56 @@ function evaluateDelegatedReadPolicy(policy = 'ask') {
     };
 }
 /**
+ * Is this delegated file settled -- written by a unit that passed, with its content unchanged since?
+ *
+ * `succeeded` alone is not the test, because a verdict describes CONTENT. A file that passed and was then
+ * edited is not the version anything verified, so the hash is compared too, and a file that cannot be
+ * hashed fails closed rather than open. Pure and exported so the rule is testable without a registry.
+ */
+function evaluateSettledFile(record, currentHash) {
+    if (!record)
+        return { allowed: false, reason: 'the registry holds no verdict for it.' };
+    if (record.outcome === 'UNIT_FAILED') {
+        return { allowed: false, reason: 'the unit that wrote it failed verification.' };
+    }
+    if (record.outcome === 'UNIT_UNVERIFIED') {
+        return { allowed: false, reason: 'no verification command was given for the unit that wrote it.' };
+    }
+    if (record.outcome !== 'UNIT_PASSED' || record.succeeded !== true) {
+        return { allowed: false, reason: 'the registry holds no verdict for it.' };
+    }
+    if (currentHash === null) {
+        return { allowed: false, reason: 'its content could not be read, so nothing can be said about it.' };
+    }
+    if (record.sha256 !== currentHash) {
+        return {
+            allowed: false,
+            reason: 'its content changed after the verdict was reached, so it is not the version anything verified.',
+        };
+    }
+    return { allowed: true, reason: 'a unit passed it and its content is unchanged since that verdict.' };
+}
+/**
+ * The verdict for every delegated file a target could name: settled only when all of them are. Shared by
+ * the read tool and the shell route so the two cannot drift into disagreeing about the same file, and
+ * conservative because a relative target can genuinely name more than one -- the guard infers the
+ * workspace rather than being told it, and taking the permissive match would wave a failed file through.
+ */
+function evaluateMatchedReads(matched, config) {
+    const recordFor = config.delegatedRecordFor ?? contracts_1.lookupDelegatedRecord;
+    const unsettled = [];
+    for (const p of matched) {
+        const verdict = evaluateSettledFile(recordFor(p), (0, contracts_1.sha256File)(p));
+        if (!verdict.allowed)
+            unsettled.push(verdict);
+    }
+    if (unsettled.length === 0) {
+        return { allowed: true, reason: 'every matching delegated file is settled.' };
+    }
+    const extra = unsettled.length > 1 ? ` (${unsettled.length} delegated files could match this path.)` : '';
+    return { allowed: false, reason: `${unsettled[0].reason}${extra}` };
+}
+/**
  * Decide whether a tool call would author source code from the cloud context.
  * Pure and exported so it can be unit-tested without a running server.
  * Returns null when the call has nothing to do with code authoring.
@@ -359,25 +425,40 @@ function evaluateCodeWriteGuard(exec, config = {}) {
     const reason = (target) => `Writing source file '${target}' from the cloud context is blocked by the local-only code guard. ` +
         `Delegate new files to the local worker with delegate_worker, passing targetFiles and workspaceDir. ` +
         `The worker has no repository read, so it cannot modify an existing file; plan that as a delta.`;
-    // Reading a file the architect delegated pulls that code straight back into its context, which
-    // is precisely the noise delegation exists to keep out. Ask rather than deny: reviewing a line
-    // of it is sometimes exactly what the operator wants.
+    // Reading a file the architect delegated pulls that code back into its context, which is the noise
+    // delegation exists to keep out. But not every delegated file is noise: one a unit passed and nothing
+    // has touched since is finished work, and reading source in order to engineer is what the architect is
+    // for. The rule is settled versus in-flight, and it says which one it applied.
     if (exports.READ_TOOLS.has(name)) {
         const target = extractWriteTarget(args);
-        if (target && isDelegatedPath(target, config.delegatedPaths)) {
-            const delegatedRead = evaluateDelegatedReadPolicy(config.delegateReadPolicy);
-            if (delegatedRead.kind === 'allow')
-                return null;
+        if (!target)
+            return null;
+        const matched = matchDelegatedPaths(target, config.delegatedPaths);
+        if (matched.length === 0)
+            return null;
+        // The setting is the ceiling and is checked first, so both hatches keep working exactly as they did:
+        // 'allow' is the documented rule-3 weakening, and 'deny' refuses even settled work.
+        const delegatedRead = evaluateDelegatedReadPolicy(config.delegateReadPolicy);
+        if (delegatedRead.kind === 'allow')
+            return null;
+        if (delegatedRead.kind === 'deny') {
             return {
-                kind: delegatedRead.kind === 'deny' ? 'deny' : 'ask',
+                kind: 'deny',
                 target,
-                reason: `'${target}' was written by a delegated worker, and reading it pulls that code into the ` +
-                    `cloud architect's context — the noise the delegation exists to keep out. The worker has no ` +
-                    `repository read, so it cannot summarise the file back either: approve only if you need the ` +
-                    `contents here, or re-plan the unit so that it does not. ${delegatedRead.reason}`,
+                reason: `'${target}' was written by a delegated worker. ${delegatedRead.reason}`,
             };
         }
-        return null;
+        const settled = evaluateMatchedReads(matched, config);
+        if (settled.allowed)
+            return null;
+        return {
+            kind: 'ask',
+            target,
+            reason: `'${target}' was written by a delegated worker and is not settled: ${settled.reason} Reading it ` +
+                `pulls that code into the cloud architect's context, and the worker has no repository read, so it ` +
+                `cannot summarise the file back instead. Approve only if you need the contents here, or re-plan ` +
+                `the unit so that it does not.`,
+        };
     }
     if (WRITE_TOOLS.has(name)) {
         const target = extractWriteTarget(args);
@@ -463,18 +544,31 @@ function evaluateCodeWriteGuard(exec, config = {}) {
                 };
             }
         }
-        // Reading a delegated file through the shell is the same read by another route.
+        // Reading a delegated file through the shell is the same read by another route, so it answers to the
+        // same rule: settled work passes, in-flight work asks.
         const delegatedRead = findDelegatedRead(command, config.delegatedPaths);
         if (delegatedRead) {
             const readPolicy = evaluateDelegatedReadPolicy(config.delegateReadPolicy);
             if (readPolicy.kind === 'allow')
                 return null;
+            if (readPolicy.kind === 'deny') {
+                return {
+                    kind: 'deny',
+                    target: delegatedRead.form,
+                    reason: `Shell command reads '${delegatedRead.form}', which a delegated worker wrote. ` +
+                        `${readPolicy.reason}`,
+                };
+            }
+            const settled = evaluateMatchedReads(delegatedRead.matches, config);
+            if (settled.allowed)
+                return null;
             return {
-                kind: readPolicy.kind === 'deny' ? 'deny' : 'ask',
-                target: delegatedRead,
-                reason: `Shell command reads '${delegatedRead}', which a delegated worker wrote. Reading it pulls ` +
-                    `that code into the cloud architect's context, and the worker has no repository read to ` +
-                    `summarise it back instead. Approve only if you need the contents here. ${readPolicy.reason}`,
+                kind: 'ask',
+                target: delegatedRead.form,
+                reason: `Shell command reads '${delegatedRead.form}', which a delegated worker wrote, and it is not ` +
+                    `settled: ${settled.reason} Reading it pulls that code into the cloud architect's context, and ` +
+                    `the worker has no repository read to summarise it back instead. Approve only if you need the ` +
+                    `contents here.`,
             };
         }
         return null;

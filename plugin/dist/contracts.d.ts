@@ -26,6 +26,11 @@ export declare function contractViolations(before: Record<string, string | null>
 export declare const delegatedPaths: Set<string>;
 export declare const DELEGATED_PATH_LIMIT = 500;
 /**
+ * The record for a delegated file, by canonical path. `undefined` means no verdict covers it, and the
+ * guard has to read that as unsettled rather than as a pass.
+ */
+export declare function lookupDelegatedRecord(canonicalPath: string): DelegatedRecord | undefined;
+/**
  * What a unit's verification said about the content it wrote.
  *
  * `UNIT_UNVERIFIED` is the honest third answer: a delegated edit with no verification command is the

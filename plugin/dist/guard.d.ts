@@ -1,3 +1,4 @@
+import type { DelegatedRecord } from './contracts';
 /**
  * Tools that read a file's contents into the caller's context. Exported because `describeSourceRead`
  * asks the same question — is this tool a read? — and two lists would drift.
@@ -46,6 +47,18 @@ export declare function evaluateDelegatedReadPolicy(policy?: DelegateReadPolicy)
     kind: 'allow' | 'ask' | 'deny';
     reason: string;
 };
+export interface SettledVerdict {
+    allowed: boolean;
+    reason: string;
+}
+/**
+ * Is this delegated file settled -- written by a unit that passed, with its content unchanged since?
+ *
+ * `succeeded` alone is not the test, because a verdict describes CONTENT. A file that passed and was then
+ * edited is not the version anything verified, so the hash is compared too, and a file that cannot be
+ * hashed fails closed rather than open. Pure and exported so the rule is testable without a registry.
+ */
+export declare function evaluateSettledFile(record: DelegatedRecord | undefined, currentHash: string | null): SettledVerdict;
 /**
  * Decide whether a tool call would author source code from the cloud context.
  * Pure and exported so it can be unit-tested without a running server.
@@ -59,6 +72,11 @@ export declare function evaluateCodeWriteGuard(exec: any, config?: {
     scriptDepth?: number;
     /** Paths a delegated worker wrote; reads of them are gated. Injectable for tests. */
     delegatedPaths?: Iterable<string>;
+    /**
+     * How to find the record for a delegated file, by canonical path. Injectable so the settled rule can
+     * be exercised against synthetic verdicts; the default reads the index the delegation itself wrote.
+     */
+    delegatedRecordFor?: (canonicalPath: string) => DelegatedRecord | undefined;
     /** ask | allow | deny for reading a delegated file back. Defaults to ask. */
     delegateReadPolicy?: DelegateReadPolicy;
     /** Paths the architect may author as the specification. Defaults to tests/. */
