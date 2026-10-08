@@ -4,6 +4,13 @@ import type { DelegatedRecord } from './contracts';
  * asks the same question — is this tool a read? — and two lists would drift.
  */
 export declare const READ_TOOLS: Set<string>;
+/**
+ * Search tools return file content, so the read gate has to treat them as reads. This is the read
+ * gate's copy of the vocabulary `READ_ONLY_INSPECTORS` already carries for the write guard: a tool
+ * which reads files in one guard and is invisible in the other is how rule 3 was bypassed — an agent
+ * was refused by the read guard and read the same files with search.
+ */
+export declare const SEARCH_TOOLS: Set<string>;
 export interface GuardVerdict {
     kind: 'deny' | 'ask';
     target: string;

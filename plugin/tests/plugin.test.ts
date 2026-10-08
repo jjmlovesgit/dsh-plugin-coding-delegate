@@ -590,7 +590,10 @@ describe('Delegated code cannot be read back without approval', () => {
       delegatedPaths: delegated,
     })
     expect(verdict?.kind).toBe('ask')
-    expect(verdict?.reason).toMatch(/reads/)
+    // The delegated rule is the more specific one and now supplies the reason. Before it was reachable
+    // through the shell door, the generic source-read rule answered instead and this assertion pinned
+    // that word; what the test is for — that the shell door is gated at all — is unchanged.
+    expect(verdict?.reason).toMatch(/delegated worker/)
   })
 
   it('does not treat a delegated path as a write target', () => {

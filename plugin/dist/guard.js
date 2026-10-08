@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.DELETE_PRIMITIVES = exports.READ_TOOLS = void 0;
+exports.DELETE_PRIMITIVES = exports.SEARCH_TOOLS = exports.READ_TOOLS = void 0;
 exports.extractWriteTarget = extractWriteTarget;
 exports.hasCommandWriteSignal = hasCommandWriteSignal;
 exports.hasCommandDeleteSignal = hasCommandDeleteSignal;
@@ -110,6 +110,48 @@ function resolvesTo(target, delegated) {
 /** Windows paths are case-insensitive; the rest are not. */
 function samePath(a, b) {
     return process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
+}
+/**
+ * Search tools return file content, so the read gate has to treat them as reads. This is the read
+ * gate's copy of the vocabulary `READ_ONLY_INSPECTORS` already carries for the write guard: a tool
+ * which reads files in one guard and is invisible in the other is how rule 3 was bypassed — an agent
+ * was refused by the read guard and read the same files with search.
+ */
+exports.SEARCH_TOOLS = new Set(['grep', 'rg', 'ripgrep', 'search', 'find_in_files', 'select-string']);
+/**
+ * A read names a path but a search names a pattern and a scope. `matchDelegatedPaths` matches file
+ * identity, so a directory scope matched nothing and every workspace-wide search walked past the
+ * rule. A relative scope can only be resolved against an ancestor directory of a delegated file
+ * because the guard is never told the workspace, which is the same inference `resolvesTo` uses. An
+ * empty scope returns every delegated path because a search with no path argument covers the
+ * workspace.
+ */
+function delegatedUnder(scope, paths) {
+    const all = [...(paths ?? [])];
+    if (typeof scope !== 'string' || !scope.trim())
+        return all;
+    const absolute = path.isAbsolute(scope);
+    const matches = [];
+    for (const p of all) {
+        const delegated = String(p);
+        let dir = path.dirname(delegated);
+        for (;;) {
+            const base = absolute ? path.resolve(scope) : path.resolve(dir, scope);
+            const rel = path.relative(base, delegated);
+            if (rel && !rel.startsWith('..') && !path.isAbsolute(rel)) {
+                if (!matches.includes(delegated))
+                    matches.push(delegated);
+                break;
+            }
+            if (absolute)
+                break;
+            const parent = path.dirname(dir);
+            if (parent === dir)
+                break;
+            dir = parent;
+        }
+    }
+    return matches;
 }
 const DEFAULT_GUARD_ASK_PATHS = ['tests/', 'tools/'];
 /**
@@ -429,13 +471,55 @@ function evaluateCodeWriteGuard(exec, config = {}) {
     // delegation exists to keep out. But not every delegated file is noise: one a unit passed and nothing
     // has touched since is finished work, and reading source in order to engineer is what the architect is
     // for. The rule is settled versus in-flight, and it says which one it applied.
-    if (exports.READ_TOOLS.has(name)) {
-        const target = extractWriteTarget(args);
-        if (!target)
-            return null;
-        const matched = matchDelegatedPaths(target, config.delegatedPaths);
-        if (matched.length === 0)
-            return null;
+    // A read names a path, a search names a pattern and a scope, and a shell command names whatever its arguments name — so the candidates are gathered per case and then judged by the one rule the branch already applied.
+    const readCall = (() => {
+        if (exports.READ_TOOLS.has(name)) {
+            const target = extractWriteTarget(args);
+            if (!target)
+                return null;
+            return { target, matched: matchDelegatedPaths(target, config.delegatedPaths) };
+        }
+        if (exports.SEARCH_TOOLS.has(name)) {
+            const a = (args ?? {});
+            const scope = String(a.path ?? a.file_path ?? a.target ?? '');
+            const matched = [
+                ...matchDelegatedPaths(scope, config.delegatedPaths),
+                ...delegatedUnder(scope, config.delegatedPaths),
+            ].filter((v, i, all) => all.indexOf(v) === i);
+            return { target: scope || '(workspace)', matched };
+        }
+        if (SHELL_TOOLS.has(name)) {
+            const command = String((args ?? {}).command ?? '');
+            if (!command)
+                return null;
+            // A shell command has to actually read something to count as a read. Without this, any command
+            // that merely names a directory containing delegated files would prompt — `npm --prefix plugin run build`,
+            // even `cd plugin` — and a gate that fires on ordinary commands is one an operator turns off.
+            const hasReadSignal = command
+                .split(/[\s'"|;&]+/)
+                .some((t) => READ_ONLY_INSPECTORS.has(t.toLowerCase()));
+            if (!hasReadSignal)
+                return null;
+            const matched = [];
+            for (const token of command.split(/[\s'"]+/)) {
+                if (!token || token.length < 2 || token.startsWith('-'))
+                    continue;
+                for (const hit of matchDelegatedPaths(token, config.delegatedPaths)) {
+                    if (!matched.includes(hit))
+                        matched.push(hit);
+                }
+                for (const hit of delegatedUnder(token, config.delegatedPaths)) {
+                    if (!matched.includes(hit))
+                        matched.push(hit);
+                }
+            }
+            return matched.length ? { target: command.slice(0, 80), matched } : null;
+        }
+        return null;
+    })();
+    if (readCall && readCall.matched.length > 0) {
+        const target = readCall.target;
+        const matched = readCall.matched;
         // The setting is the ceiling and is checked first, so both hatches keep working exactly as they did:
         // 'allow' is the documented rule-3 weakening, and 'deny' refuses even settled work.
         const delegatedRead = evaluateDelegatedReadPolicy(config.delegateReadPolicy);
