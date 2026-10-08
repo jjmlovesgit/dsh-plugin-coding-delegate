@@ -55,6 +55,112 @@ project and asks for a feature that must integrate with it. That is harder to ar
 because the two arms will read different things, and the asymmetry has to be disclosed rather than
 removed.
 
+## Task 2: the aggregation window
+
+Task 1 is reused exactly as it stands: [`../contract-first/SPEC.md`](../contract-first/SPEC.md) and
+[`../contract-first/tests/spec-conformance.test.cjs`](../contract-first/tests/spec-conformance.test.cjs).
+
+Task 2 is new and exists so the arms can be counterbalanced, which the design below requires and which
+one task cannot provide:
+
+| artifact | file | sha256 |
+| --- | --- | --- |
+| specification | [`SPEC-2.md`](SPEC-2.md) | `f0598c8a5cff8a83…` |
+| frozen judge | [`tests/spec-conformance-2.test.cjs`](tests/spec-conformance-2.test.cjs) | `91fe3a4352e54a7d…` |
+
+A bounded sliding aggregation window: timestamped samples, a trailing time bound, a capacity bound that
+discards oldest-first, aggregates that must survive discards, and four counters. It is deliberately not
+the TTL cache again — the eviction discipline is a different one (capacity, not recency), so the second
+task tests a different failure mode rather than a re-run of the first.
+
+**Provenance, stated because it is a deviation.** `SPEC-2.md` and its judge were authored by a
+*delegated local worker* on the architect's instruction, not by the architect directly — which is the
+pattern working as designed, and also means the artifact carries the same provenance as any other
+delegated unit in this repository. The architect reviewed both, and then had them verified
+independently (below) rather than trusting the author's own report.
+
+### The judge was verified in both directions before freezing
+
+A suite that has only ever been watched passing is not evidence. `node --test` was run against a
+reference implementation written from the specification, and then against six deliberate mutations of
+it. Baseline **27/27 green**; every mutation red:
+
+| mutation | caught by |
+| --- | --- |
+| evicts newest instead of oldest | "capacity discards the OLDEST sample and the aggregate excludes it" |
+| never expires for age | "the boundary moment is expired, not retained (window is half-open)" |
+| `windowMs` itself retained (`<=` for `<`) | "the boundary moment is expired, not retained" |
+| observation mutates | "retainedCount is an observation and removes nothing" |
+| zero-seeded min/max | "min and max survive negatives where a zero-seeded implementation would not" |
+| capacity discard counted as age | "samples too old to remain are counted as expired, not evicted, even over capacity" |
+
+The runner and the reference live in [`./.verifier/`](./.verifier/), **and the arms must not read that
+directory.** It contains a complete solution to task 2; a run that read it would be measuring reading
+comprehension of the answer. It is in the repository because the verification has to be re-runnable —
+a one-off result in a log is not a gate — and it is in a fenced subdirectory rather than deleted for
+exactly that reason.
+
+Worth recording, because it is the failure mode this whole file is about: the first verification run
+came back **green on six of seven rows**, and the green row was `windowMs itself retained`. The
+mutation was never implemented — the verification script listed it, and the `isLive` helper it was
+supposed to alter was written without it — so that row ran the *correct* implementation and reported,
+accurately, that nothing was caught. A mutation harness that silently fails to mutate is a green gate
+with nothing behind it. It was found by reading the mutation's own source, not the green line.
+
+## The arm prompts
+
+These are the two runs. They differ in **exactly one line** — whether `delegate_worker` may be used —
+and that line is marked below. Everything else is byte-identical, including the spec text, the judge,
+and the stopping rule. Paste one into a fresh session, run the judge, then
+`node experiments/delegation-ab/measure-session.cjs <session>` and record the row.
+
+**The stopping rule is part of the prompt**, not left to the operator's judgement: the run ends when
+the judge is green, or when the operator stops it. An arm that keeps iterating against a passing judge
+inflates its own token count, and an arm that stops short of green is void by the decision rule anyway.
+
+**Before each run, `experiments/delegation-ab/src/` must be empty.** A run that begins with the other
+arm's file in place is reading its opponent's answer. This is validity condition 2 and it is the one
+most easily broken by accident.
+
+### Arm D — delegated
+
+    Implement the module specified in experiments/delegation-ab/SPEC-2.md.
+
+    The specification is the whole requirement: read it and satisfy it. Do not read
+    experiments/delegation-ab/.verifier/ -- it contains a solution to this task, and reading it would
+    invalidate the run.
+
+    The workspace is experiments/delegation-ab. Your implementation must be at
+    experiments/delegation-ab/src/aggregation-window.js.
+
+    You may use delegate_worker to have a local worker write the implementation. You are not to write
+    the implementation yourself, and you are not to read it back except as the plugin's read policy
+    permits.
+
+    Acceptance: node --test tests/spec-conformance-2.test.cjs must pass, run from
+    experiments/delegation-ab.
+
+    Stop when the suite is green. If it is not green after your attempts, stop and report.
+
+### Arm S — standard
+
+    Implement the module specified in experiments/delegation-ab/SPEC-2.md.
+
+    The specification is the whole requirement: read it and satisfy it. Do not read
+    experiments/delegation-ab/.verifier/ -- it contains a solution to this task, and reading it would
+    invalidate the run.
+
+    The workspace is experiments/delegation-ab. Your implementation must be at
+    experiments/delegation-ab/src/aggregation-window.js.
+
+    You may not use delegate_worker. Write the implementation yourself, and iterate on it yourself,
+    as many times as it takes.
+
+    Acceptance: node --test tests/spec-conformance-2.test.cjs must pass, run from
+    experiments/delegation-ab.
+
+    Stop when the suite is green. If it is not green after your attempts, stop and report.
+
 ## Design
 
 Two arms, four runs.
@@ -83,14 +189,41 @@ Four validity conditions, each of which has killed an experiment in this reposit
 ## Metrics
 
 **Primary: cumulative input tokens** — the sum of per-call prompt size across the run. That is the
-metered cost. It is in the `CONTEXT_QUALITY` trace, per call, with a high-water mark.
+metered cost.
 
-Secondary: peak window fill, compactions, prunes, tokens reclaimed, number of calls, and whether
-the frozen judge passed.
+Secondary: peak window fill, compactions, prunes, tokens reclaimed, number of calls, whether
+`delegate_worker` was used, and whether the frozen judge passed.
 
-The architect side comes from `context-quality.ts` off `session/event`; the local side from
+### Correction: where the primary metric actually comes from
+
+This section originally said the figure was "in the `CONTEXT_QUALITY` trace, per call". **It is not, and
+it never was.** `context-quality.ts` folds session events into `lastPromptTokens` and
+`peakPromptTokens` — two snapshots — and records no per-call figure at all, so the cumulative number
+cannot be recovered from the trace by any amount of arithmetic. The claim was made against the module's
+documentation rather than its code, and one `read` of `context-quality.ts` disproves it.
+
+It is recovered from the **session transcript** instead: `~/.dsh/sessions/**/session.v3.jsonl.zstd`,
+where every `assistant/message` carries the host's own usage record for that call. The file is a
+concatenation of independent zstd frames — and `zlib.zstdDecompressSync` decodes only the *first* one,
+returning the 201-byte session header and nothing else, which is exactly how a reader concludes the
+transcript holds no usage data and gives up. Split on the zstd magic number and every frame decodes.
+
+`measure-session.cjs` does this and prints the row the table below needs:
+
+    node experiments/delegation-ab/measure-session.cjs <session-id-prefix>
+    node experiments/delegation-ab/measure-session.cjs --list
+
+The figure is reported **two ways**, because they are a different price and a different claim:
+`inputTokens` is the uncached remainder, `cacheReadTokens` the cached prefix, and on a long session the
+prefix is nearly all of the total. A single collapsed number would hide which one moved.
+
+The architect side comes from the transcript; the local side from
 `savings-ledger.json` — **two instruments, joined by hand**. Report them separately; do not present
-a single combined figure as though one instrument produced it.
+a single combined figure as though one instrument produced it. Note also what the primary metric
+contains and excludes: a delegated worker's inference happens in the plugin's own process, not as
+session calls, so **the worker's tokens are absent from it by construction**. That is the comparison the
+protocol wants — the worker is not metered — but it is the single largest way this experiment could be
+read as flattering the pattern, so it is stated here rather than discovered later.
 
 ## Threats to validity, stated up front
 
@@ -132,9 +265,46 @@ Written before the runs, so the result cannot be reinterpreted afterwards:
 
 ## Results
 
+### Row 0: this project, already built
+
+Measured before any arm runs, on the session that built this repository — a real delegated workload of
+full size and full messiness. It is **not** one of the four runs and has **no standard-arm counterpart**,
+so it cannot answer the question on its own. It is here because it is the largest piece of evidence that
+exists, it was free, and because a prediction that survives contact with it is worth more than one that
+has only met a toy task.
+
+| metric | value |
+| --- | --- |
+| calls (architect) | 1,795 |
+| **cumulative input tokens** | **666,756,560** |
+| — uncached (`inputTokens`) | 2,101,968 |
+| — cached (`cacheReadTokens`) | 664,654,592 |
+| mean prompt per call | 371,452 |
+| peak prompt | 791,798 |
+| turns / steps | 122 / 1,795 |
+| `delegate_worker` calls | 329 |
+| compactions / prunes / reclaimed | 4 / 16 / 2,429,036 |
+| elapsed | 26.4 h |
+| session | `session-f0387683` |
+
+Read honestly, this cuts against a naive form of the claim. Over a session that leaned on delegation
+**329 times**, the architect still carried 666.8M input tokens, at a mean of ~371k per call, with a peak
+of 791,798. A worker's 548k tokens from `savings-ledger.json` is **0.08%** of that. Whatever delegation
+is buying here, it is not a small architect window.
+
+The mean exceeds DeepSeek's advertised 128k context several times over, and that is not a contradiction
+in the instrument: `inputTokens + cacheReadTokens` is the whole prompt *re-billed* on each call, cached
+in large part at a lower rate. So the two figures under the total are not decoration — they are the
+difference between "this cost 666M tokens" and "this carried a 666M-token prefix, most of it re-read at
+the cache rate". Quote the pair or quote neither.
+
+### The four runs
+
 *(empty — to be filled in by the runs, not before)*
 
-| task | first arm | arm | cumulative input tokens | peak window | calls | judge |
-| --- | --- | --- | --- | --- | --- | --- |
-| TTL cache | | D | | | | |
-| TTL cache | | S | | | | |
+| task | first arm | arm | cumulative input tokens | uncached | peak window | calls | judge |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| TTL cache | | D | | | | | |
+| TTL cache | | S | | | | | |
+| aggregation window | | S | | | | | |
+| aggregation window | | D | | | | | |
