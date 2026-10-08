@@ -658,20 +658,24 @@ tokens that follow a pattern parameter — because `require('fs')['write' + 'Fil
 the second re-opens the same hole from the other side. The cost is named rather than hidden: a read-only
 one-liner that mentions a code file asks for approval.
 
-The second is a defect in how verifications were being written, and it is now visible as bad data.
-`plugin/src/guard.ts` and `plugin/src/contracts.ts` both carry `UNIT_FAILED` in the registry, and both hashes
-match their files: the content is exactly what was recorded, only the verdict is wrong. The cause is that those
-two calls passed PowerShell-flavoured verification strings — `cd plugin && npm run build 2>&1 | Select-Object
--Last 4; node -e …` — and the runner reported `exit 255`. `Select-Object` is a PowerShell cmdlet and `;` is not
-a statement separator outside it, so the command never ran in the runner's shell. Nothing was verified, and the
-failure was recorded faithfully and persisted.
+The second is a defect in how verifications were being written, and it is now visible as bad data. **Six**
+paths carry `UNIT_FAILED` in the registry — `plugin/src/contracts.ts`, `plugin/src/guard.ts`,
+`plugin/src/roles.ts`, `plugin/src/verification.ts`, `scripts/check-dist-in-sync.cjs` and
+`experiments/contract-first/src/ttl-cache.js` — and all six hashes still match the files on disk. Five of them
+are one mistake repeated: those calls passed PowerShell-flavoured verification strings — `cd plugin && npm run
+build 2>&1 | Select-Object -Last 4; node -e …` — and the runner reported `exit 255`. `Select-Object` is a
+PowerShell cmdlet and `;` is not a statement separator outside it, so the command never ran in the runner's
+shell. Nothing was verified, and the failure was recorded faithfully and persisted. The sixth is not a bad
+record at all: `experiments/contract-first/src/ttl-cache.js` genuinely failed its contract at 12 of 14, and
+`UNIT_FAILED` is the right verdict for it.
 
-The tempting repair is to call `recordDelegatedOutcome` for those two paths and stamp `UNIT_PASSED`, since the
-full gate did pass over exactly those contents. That is refused deliberately: `recordDelegatedOutcome` is the
+The tempting repair is to call `recordDelegatedOutcome` for the five and stamp `UNIT_PASSED`, since the full
+gate did pass over exactly those contents. That is refused deliberately: `recordDelegatedOutcome` is the
 plugin's own verdict-writing seam, and reaching into it from outside would create the one path this system
-exists to prevent — the architect authoring its own verdicts. The wrong verdict stays visible, reads of those
-two files ask with a reason that is not true, and the next write of each file supersedes it. Verifications are
-written as plain commands from now on.
+exists to prevent — the architect authoring its own verdicts. The wrong verdicts stay visible, reads of those
+files ask with a reason that is not true, and the next write of each file supersedes it. Verifications are
+written as plain commands from now on — the runner's shell is `cmd.exe`, not PowerShell, so no cmdlet, no `;`
+and no `$?` survives in a verification string.
 
 ## The contract that could not be satisfied, and the guard that called it sound
 

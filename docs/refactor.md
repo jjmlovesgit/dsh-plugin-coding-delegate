@@ -112,6 +112,15 @@ The predicted eighth pass for `LocalRouter` / routing and the DLP rules in `inde
   It also resolves the repository root from its own location rather than trusting the cwd, because run from
   `plugin/` it used to resolve `plugin/dist` to `plugin/plugin/dist`, match nothing, and report success for
   a tree it had never looked at: a gate that passes by looking at nothing is worse than no gate.
+- **A `runVerification` string runs under `cmd.exe`, not PowerShell.** The block above is what *you* run in the
+  session shell. A verification string handed to `delegate_worker` goes to the plugin's runner, and the
+  runner's shell is `cmd.exe`, so a PowerShell-flavoured string fails without running: `Select-Object` is not a
+  command, `;` does not separate statements, and `$?` is not a variable. It exits 255, verifies nothing, and
+  leaves a real-looking `UNIT_FAILED` behind — **five of the six such records in the registry came from exactly
+  this** (see `findings.md`; the sixth is a genuine failure). Write verification strings as plain commands
+  joined with `&&`, and prefer `npm --prefix <repo>/plugin run …` to `cd`, which also makes the command
+  independent of the workspace it happens to run in — the coherence check's `cd plugin` is why every
+  delegation into `experiments/` reports `INCOHERENT` while its own contract passes.
 - **Run the oracles as `npm run test:oracles`, never as a bare `node --test`.** That script carries a
   `--require` preload (`plugin/scripts/isolate-oracle-data-dir.cjs`) which redirects the plugin's data
   directory to a temp home. `vitest.config.ts` covers the unit tests, but `node --test` never loads it, so a
