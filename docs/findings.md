@@ -488,3 +488,44 @@ config gains a `workspaceRoot`, the pre-execute call site passes the resolved se
 target is resolved against it before comparison — the same `locate()` shape used in `delegation.ts`. It
 needs an oracle that fails first: a relative target that names a delegated path must be recognised.
 
+## The architect reads source constantly, and that is the job — not the problem
+
+ROADMAP item F parked a question — *does the architect still need repository access?* — on the grounds that
+only the trace could say. **The trace has now said it**, and it says the access is not occasional, it is the
+background condition of the work.
+
+The same 264 events, read as a rate rather than as a security result: **31 turns today, ~8.5 gate events per
+turn.** Twenty-seven attributed `SOURCE_READ` traces. Every one sampled was the architect working on its own
+material — `plugin/src/roles.ts` and `plugin/src/index.ts` while editing them, `dsh-agent`'s type
+definitions while answering the item-1 question. Not one was delegated output being pulled back.
+
+So the conclusion item F was written expecting — "close the access" — is the wrong one. Reading to diagnose
+and to plan is what the architect is for. What the count actually measures is **accumulation**: every read
+is carried on every later call, and that window was at 74%.
+
+**The rule that follows is better than "gate delegated reads", because it names the reason rather than the
+category.** The distinction worth enforcing is *settled* versus *in-flight*:
+
+| state of a file | policy |
+| --- | --- |
+| written by a unit that passed, hash unchanged since that verdict | **allow** — final, intended, the architect's legitimate material |
+| written by a unit that **failed** | ask — this is the noisy version, and it may be about to be overwritten |
+| changed since its verdict (a retry, a later write, a hand edit) | ask — it is not the version anything verified |
+| host packages, vendor types, documentation | allow — never delegated at all |
+
+This stops gating the legitimate case, which is most of what the architect reads, and it is a question
+rather than a wall: a hand-edited file surfacing as "not the version that was verified" is true and worth
+knowing, but it is an `ask`.
+
+**And the join that would make it true is missing, not difficult.** `delegated-registry.json` records a
+`sha256` for every file a worker wrote — so the plugin knows what the worker left. The ledger now records
+`outcome`/`succeeded` per delegation — so it knows whether that unit passed. **The two records exist and
+nothing connects them.** The registry knows files and hashes; the ledger knows units and verdicts. Stamping
+the outcome into the registry entry at verdict time is the whole of the work, and both files are written by
+the same code.
+
+A note on "valid reason": intent cannot be enforced and should not be guessed at. It can be recorded, and
+the record is what would eventually justify narrowing the access — if the reads turn out to be mostly
+"checking one signature while planning", the answer is a better way to ask that question, not a stricter
+gate.
+
