@@ -274,10 +274,11 @@ have a runtime.
 
 ## Blocked on the host: agent lineage
 
-The architecture this plugin is built for has three tiers: a cloud architect that specifies, a
+The architecture this plugin was proposed for has three tiers: a cloud architect that specifies, a
 thinking *coding lead* that reads the repository and authors each unit's contract, and a local worker
-that implements. Tiers 1 and 3 exist. **Tier 2 cannot be built yet, and the reason is a host
-capability rather than missing plugin work.**
+that implements. Tiers 1 and 3 are the two-tier loop that ships. Tier 2 was built, mounted, measured and
+then retired — [`docs/lead-tier.md`](docs/lead-tier.md) is the record. The host capability below is what
+stood in the way of doing it *properly*, and it is a limit of DSH rather than of this plugin.
 
 > **Status: still a host limitation, currently blocking nothing.** Both features below were written for the
 > lead tier, which was built, measured and retired — the preset directory is gone
