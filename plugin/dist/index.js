@@ -699,7 +699,11 @@ function apply(ctx, options = {}) {
     // Local-only code guard: refuse cloud-authored source writes so that all code
     // work routes through delegate_worker to the local worker.
     if (options?.localCodeGuard !== false) {
+        // Parameters inferred from the host's `tools/pre-execute` signature: `(exec: ToolExecution, next)`.
         (0, host_events_1.onHost)(ctx, 'tools/pre-execute', async (exec, next) => {
+            // `as const` keeps `kind` the literal the host's `PreToolDecision` requires. Without it the object
+            // widens to `{ kind: string }` and the whole handler stops satisfying the host's signature -- which
+            // is what made this one line worth checking rather than assuming.
             const decision = typeof next === 'function' ? await next() : { kind: 'allow' };
             if (!decision || decision.kind !== 'allow')
                 return decision;
@@ -773,6 +777,10 @@ function apply(ctx, options = {}) {
                 prompt: prompt.slice(0, 100),
             });
         }
+        // The host types `next` as always a function, so the `payload` branch is a runtime guard the types
+        // cannot see through -- and `payload` is not a `PreStepDecision`, so it never was a valid answer.
+        // Asserted rather than deleted: if the guard ever fires, passing the payload through is still the
+        // least surprising thing to do, and this line now says out loud that it is unverified.
         return typeof next === 'function' ? await next() : payload;
     }, { prepend: true });
     // Context-quality counters: the measurement that turns "your GPU does the typing" into an observation
@@ -794,6 +802,7 @@ function apply(ctx, options = {}) {
         const id = session?.id ?? session?.header?.id;
         return typeof id === 'string' && id.length > 0 ? id : '__global__';
     };
+    // Parameters inferred from the host's `session/event` signature: `(session: Session, event: SessionEvent)`.
     (0, host_events_1.onHost)(ctx, 'session/event', (session, event) => {
         const key = qualityKeyFor(session);
         const current = contextQuality.get(key) ?? context_quality_1.EMPTY_CONTEXT_QUALITY;
@@ -826,7 +835,13 @@ function apply(ctx, options = {}) {
         }
     });
     // 2. Primary Thread (Architect) Request Hook: Pin primary thread to DeepSeek Cloud with native uncapped context and tool schema injection
-    (0, host_events_1.onHost)(ctx, 'agent/request', async (payload, next) => {
+    (0, host_events_1.onHost)(ctx, 'agent/request', 
+    // Parameters deliberately NOT annotated: both are inferred from the host's own signature for
+    // `agent/request`, so reading a field the host does not send is now a compile error here.
+    async (payload, next) => {
+        // `next` is typed by the host as always a function, so the `{}` fallback is a runtime guard the
+        // types cannot see through. Widening this local keeps the guard without pretending the branch is
+        // reachable; everything else in this handler stays typed.
         const resolvedConfig = typeof next === 'function' ? await next() : {};
         const turn = payload?.turn;
         const agent = payload?.agent;
@@ -845,8 +860,9 @@ function apply(ctx, options = {}) {
         }
         if (!prompt && agent?.session)
             prompt = (0, delegation_1.extractPromptText)(agent.session);
-        if (!prompt && payload?.session)
-            prompt = (0, delegation_1.extractPromptText)(payload.session);
+        // `payload?.session` used to be tried here. The host's `agent/request` payload is
+        // `{ agent, turn, step, signal }` -- there is no `session` on it, so that fallback never matched a
+        // single request. Found by typing the handler against the host's own signature rather than by review.
         if (!prompt && payload)
             prompt = (0, delegation_1.extractPromptText)(payload);
         // Pre-flight DLP Firewall. This is a GATE, not a log line: a payload carrying
@@ -966,6 +982,10 @@ function apply(ctx, options = {}) {
             uncappedContextWindow: role.role === 'architect',
             toolsCount: mutatedConfig.tools?.length || 0,
         });
+        // The host expects `LlmCallConfig` here. `applyAgentRole` returns a looser record, so this is an
+        // ASSERTION rather than a check: the plugin cannot prove it returns a valid config, and DSH does not
+        // verify it either. Named rather than hidden -- the payload on the way in IS checked, which is where
+        // the dead `payload.session` read was found.
         return mutatedConfig;
     }, { prepend: true });
     // Architect usage is deliberately NOT recorded in this ledger. Three subscriptions that tried to are

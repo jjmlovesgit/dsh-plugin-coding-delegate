@@ -1096,8 +1096,12 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
   // Local-only code guard: refuse cloud-authored source writes so that all code
   // work routes through delegate_worker to the local worker.
   if (options?.localCodeGuard !== false) {
-    onHost(ctx, 'tools/pre-execute', async (exec: any, next: any) => {
-      const decision = typeof next === 'function' ? await next() : { kind: 'allow' }
+    // Parameters inferred from the host's `tools/pre-execute` signature: `(exec: ToolExecution, next)`.
+    onHost(ctx, 'tools/pre-execute', async (exec, next) => {
+      // `as const` keeps `kind` the literal the host's `PreToolDecision` requires. Without it the object
+      // widens to `{ kind: string }` and the whole handler stops satisfying the host's signature -- which
+      // is what made this one line worth checking rather than assuming.
+      const decision = typeof next === 'function' ? await next() : ({ kind: 'allow' } as const)
       if (!decision || decision.kind !== 'allow') return decision
       try {
         const verdict = evaluateCodeWriteGuard(exec, {
@@ -1165,7 +1169,7 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
   onHost(
     ctx,
     'agent/pre-step',
-    async (payload: any, next: any) => {
+    async (payload, next) => {
       const turn = payload?.turn
       const prompt = extractTextFromClaimedMessages(payload?.messages)
       if (turn !== undefined && prompt) {
@@ -1176,7 +1180,11 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
           prompt: prompt.slice(0, 100),
         })
       }
-      return typeof next === 'function' ? await next() : payload
+      // The host types `next` as always a function, so the `payload` branch is a runtime guard the types
+      // cannot see through -- and `payload` is not a `PreStepDecision`, so it never was a valid answer.
+      // Asserted rather than deleted: if the guard ever fires, passing the payload through is still the
+      // least surprising thing to do, and this line now says out loud that it is unverified.
+      return typeof next === 'function' ? await next() : (payload as any)
     },
     { prepend: true } as any
   )
@@ -1200,7 +1208,8 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
     const id = session?.id ?? session?.header?.id
     return typeof id === 'string' && id.length > 0 ? id : '__global__'
   }
-  onHost(ctx, 'session/event', (session: any, event: any) => {
+  // Parameters inferred from the host's `session/event` signature: `(session: Session, event: SessionEvent)`.
+  onHost(ctx, 'session/event', (session, event) => {
     const key = qualityKeyFor(session)
     const current = contextQuality.get(key) ?? EMPTY_CONTEXT_QUALITY
     const next = foldContextQuality(current, event)
@@ -1237,8 +1246,13 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
   onHost(
     ctx,
     'agent/request',
-    async (payload: any, next: any) => {
-      const resolvedConfig = typeof next === 'function' ? await next() : {}
+    // Parameters deliberately NOT annotated: both are inferred from the host's own signature for
+    // `agent/request`, so reading a field the host does not send is now a compile error here.
+    async (payload, next) => {
+      // `next` is typed by the host as always a function, so the `{}` fallback is a runtime guard the
+      // types cannot see through. Widening this local keeps the guard without pretending the branch is
+      // reachable; everything else in this handler stays typed.
+      const resolvedConfig: any = typeof next === 'function' ? await next() : {}
       const turn = payload?.turn
       const agent = payload?.agent
 
@@ -1257,7 +1271,9 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
       }
 
       if (!prompt && agent?.session) prompt = extractPromptText(agent.session)
-      if (!prompt && payload?.session) prompt = extractPromptText(payload.session)
+      // `payload?.session` used to be tried here. The host's `agent/request` payload is
+      // `{ agent, turn, step, signal }` -- there is no `session` on it, so that fallback never matched a
+      // single request. Found by typing the handler against the host's own signature rather than by review.
       if (!prompt && payload) prompt = extractPromptText(payload)
 
       // Pre-flight DLP Firewall. This is a GATE, not a log line: a payload carrying
@@ -1409,7 +1425,11 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
         }
       )
 
-      return mutatedConfig
+      // The host expects `LlmCallConfig` here. `applyAgentRole` returns a looser record, so this is an
+      // ASSERTION rather than a check: the plugin cannot prove it returns a valid config, and DSH does not
+      // verify it either. Named rather than hidden -- the payload on the way in IS checked, which is where
+      // the dead `payload.session` read was found.
+      return mutatedConfig as any
     },
     { prepend: true } as any
   )

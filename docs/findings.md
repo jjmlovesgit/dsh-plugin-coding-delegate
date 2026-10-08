@@ -388,3 +388,30 @@ absence and is never contradicted. ROADMAP item 21 closed it for session event *
 the half still open, and the fix is the same one — type the registration against the host's `Events`
 interface so an invented name cannot compile.
 
+**Closed, and it found a fourth phantom on the way.** Subscriptions now go through `onHost`, whose name
+parameter is `keyof Events` and whose handler parameter is `OmitThisParameter<Events[K]>`. Converting
+`ctx.on('tool/call')` failed to compile — `tool/call` is a *session event type*, not a hook — which both
+confirmed the contract and proved `keyof Events` is the host's real vocabulary rather than an empty
+interface. Two subtleties were caught by the compiler rather than by review: `onHost` must pass Cordis's
+third listener argument through, because the DLP and routing hooks use `{ prepend: true }` and a wrapper
+that dropped it would have silently changed dispatch order; and `OmitThisParameter` is required because
+several host events declare `this: Scoped<…>`, which a plain arrow function would be rejected for.
+
+**Then the payloads, which found a fifth thing that never worked.** Once handler parameters stopped being
+annotated `any` and were inferred from the host's signature, `agent/request` failed on
+
+```
+Property 'session' does not exist on type '{ agent: Agent; turn: number; step: number; signal: AbortSignal }'
+```
+
+a fallback read kept "in case the payload carries a session" that the payload has never carried. It sat
+next to a working `agent?.session` read and looked like a second chance; it was dead from the day it was
+written. Same family as the phantom subscriptions, and invisible to review for the same reason — a read of
+a field that is merely absent produces `undefined`, not an error, so every defensive fallback of this shape
+is indistinguishable from a working one until something checks the shape.
+
+Two things the typing could *not* settle, left as assertions and named as such in the code rather than
+papered over: the unreachable `next`-is-not-a-function guards in `agent/request` and `agent/pre-step`, and
+the routing hook's return value, which `applyAgentRole` types more loosely than the host's `LlmCallConfig`.
+The payload on the way in is checked; the config on the way out is trusted.
+

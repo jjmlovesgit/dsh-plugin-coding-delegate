@@ -270,9 +270,20 @@ constrains the name to `keyof Events` — with `Events` augmented by the pinned 
 subscription the host does not offer cannot compile. That is what caught `ctx.on('tool/call')`: not a
 Cordis hook at all, but a session event type, and a "fallback" that had never run and could not have.
 
-Hook **payloads** remain loosely typed: the handlers take `any`, because consuming the host's payload
-shapes exactly is a larger change. Session-log event payloads are checked, through `session-events.ts`;
-hook payloads are not, and that is the gap that is left.
+Hook **payloads** are checked as well, because the handlers no longer annotate their parameters — both are
+inferred from the host's signature for that event. That is how `payload.session` was found: a fallback read
+in the routing hook for a field `agent/request` has never carried, which had never once matched.
+
+Three limits, stated rather than left to be discovered:
+
+- **The two unreachable guards are asserted, not checked.** `agent/request` and `agent/pre-step` each keep a
+  runtime fallback for a condition the host's types say cannot happen (`next` is always a function). Those
+  two branches now say `as any` out loud instead of quietly widening the whole handler.
+- **Return values are asserted, not proven.** `applyAgentRole` hands back a looser record than the host's
+  `LlmCallConfig`, so the routing hook cannot demonstrate that it returns a valid config — and DSH does not
+  verify it either. The payload on the way *in* is checked; the config on the way out is trusted.
+- **Only the four handlers this plugin registers are covered.** Anything added later keeps the check only if
+  it goes through `onHost` and leaves its parameters unannotated.
 
 ### Judging a transcribed contract
 
