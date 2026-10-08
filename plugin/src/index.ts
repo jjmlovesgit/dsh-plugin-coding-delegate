@@ -1435,66 +1435,28 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
     { prepend: true } as any
   )
 
-  // 3. Post-step usage listener for actual token usage & ledger recording
-  function handlePostStepUsage(payload: any) {
-    const session = payload?.session || payload
-    const usage =
-      payload?.usage ||
-      session?.usage ||
-      session?.response?.usage ||
-      session?.result?.usage ||
-      payload?.payload?.usage
-
-    if (!usage) return
-
-    const promptTokens = usage.prompt_tokens ?? usage.inputTokens ?? usage.promptTokens ?? 0
-    const completionTokens = usage.completion_tokens ?? usage.outputTokens ?? usage.completionTokens ?? 0
-    const totalTokens = usage.total_tokens ?? usage.totalTokens ?? (promptTokens + completionTokens)
-    const cacheHitTokens = usage.prompt_cache_hit_tokens ?? usage.cacheHitTokens ?? usage.prompt_cache_hit ?? 0
-
-    if (totalTokens > 0) {
-      tracker.recordUsage({
-        turn: payload?.turn ?? session?.turn ?? payload?.step ?? 1,
-        route: 'ARCHITECT_CLOUD',
-        model: 'deepseek-chat',
-        reason: 'STEP_COMPLETION',
-        promptTokens,
-        completionTokens,
-        totalTokens,
-        cacheHitTokens,
-      })
-    }
-  }
-
-  ctx.on('agent/post-step' as any, handlePostStepUsage)
-  ctx.on('agent/step-finish' as any, handlePostStepUsage)
-
-  // 4. Stream chunk listener for output token accumulation if usage is emitted on stream frames
-  ctx.on('agent/assistant-stream' as any, (payload: any) => {
-    const frame = payload?.frame
-    const raw = frame || payload
-
-    if (typeof raw?.usage?.completion_tokens === 'number') {
-      const usage = raw.usage
-      const promptTokens = usage.prompt_tokens ?? 0
-      const completionTokens = usage.completion_tokens ?? 0
-      const totalTokens = usage.total_tokens ?? (promptTokens + completionTokens)
-      const cacheHitTokens = usage.prompt_cache_hit_tokens ?? 0
-
-      if (totalTokens > 0) {
-        tracker.recordUsage({
-          turn: payload?.turn ?? frame?.turn ?? 1,
-          route: 'ARCHITECT_CLOUD',
-          model: 'deepseek-chat',
-          reason: 'STREAM_USAGE_FRAME',
-          promptTokens,
-          completionTokens,
-          totalTokens,
-          cacheHitTokens,
-        })
-      }
-    }
-  })
+  // Architect usage is deliberately NOT recorded in this ledger. Three subscriptions that tried to are
+  // gone, because none of them could ever have fired -- checked against the installed host, not assumed:
+  //
+  //   `agent/post-step` and `agent/step-finish` do not exist. Neither name appears anywhere in the
+  //   installed `@deepseek-ai/*` packages; this plugin invented them.
+  //
+  //   `agent/assistant-stream` does exist, but its frames are `start` / `chunk` / `end`
+  //   (`AssistantStreamFrame` in `dsh-agent`) and none carries `usage`. That stream is "presentation data
+  //   rather than the replay source"; the durable settlement is `assistant/message`, which does carry
+  //   `usage?: TokenUsage`.
+  //
+  // So `cloudTurns`, `architectTurns`, `totalCloudTokens` and `totalSpendUSD` are permanently zero, and
+  // the ledger's `scope` field now says so rather than leaving them to read as measured data.
+  //
+  // Reviving them was considered and rejected, not overlooked. It would mean a ledger write on every
+  // architect model call -- 980 in one observed session -- to produce a dollar figure this plugin no
+  // longer claims anything about. The architect side *is* measured, by the context-quality fold off the
+  // same `session/event` subscription used above; it is measured as context, and it is not money.
+  //
+  // The general fix for this whole class -- a subscription to an event the host does not emit -- is to
+  // type `ctx.on` against the host's `Events` interface so that such a name cannot compile. That is the
+  // open half of the host contract: ROADMAP item 21 covers session event TYPES, not hook names.
 }
 
 // The patch engine is configured inside ./delegation.ts, where both halves now live.

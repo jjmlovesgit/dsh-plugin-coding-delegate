@@ -361,8 +361,30 @@ architect side is measured elsewhere and works. `context-quality.ts` folds `assi
 with a host status line reading 980 steps. One instrument works and one is dead. The right move is to
 build the missing measurement on the working one rather than to resurrect the dead one.
 
-**Not investigated:** *why* the hooks carry no usage. That is a host-integration question, and the answer
-decides whether they are fixable or should be deleted — a field that is always zero is worse than an absent
-one, because it reads as measured data. The four fields now exist alongside a `scope` string that says what
-the ledger actually covers, which is the cheapest available guard against being read as a session record.
+**Diagnosed.** The three subscriptions could never have fired, for two independent reasons, both checked
+against the installed host rather than reasoned about:
+
+1. **`agent/post-step` and `agent/step-finish` do not exist.** Neither name appears anywhere in the
+   installed `@deepseek-ai/*` packages. This plugin invented both.
+2. **`agent/assistant-stream` exists but carries no usage.** Its frames are `start` / `chunk` / `end`
+   (`AssistantStreamFrame` in `dsh-agent`), and none has a `usage` field. `dsh-agent`'s own README calls
+   that stream *"presentation data rather than the replay source"* — the durable settlement is the
+   `assistant/message` event, which *does* carry `usage?: TokenUsage`.
+
+So the handlers were unreachable code and the four fields were never going to populate. They have been
+removed, and the ledger's `scope` string now states that architect usage is not recorded there, and why.
+
+**Why they were not revived.** `assistant/message` is the correct source and it is already subscribed, so
+reviving was cheap in principle. It was rejected on cost: it would mean a ledger write on *every* architect
+model call — 980 in one observed session — to produce a dollar figure this project no longer claims
+anything about. The architect side **is** measured, by the context-quality fold on the same subscription,
+as context rather than as money.
+
+**The gap this exposes, which is the useful part.** A plugin can subscribe to an event the host does not
+emit and nothing anywhere says so. `ctx.on` is invoked through `any`, so a name the host has never heard of
+compiles cleanly and then fails silently for as long as the plugin lives. This is the same shape as the
+README's account of `usage.inputTokens`: a plausible-looking integration that produces a number-shaped
+absence and is never contradicted. ROADMAP item 21 closed it for session event *types*; hook *names* are
+the half still open, and the fix is the same one — type the registration against the host's `Events`
+interface so an invented name cannot compile.
 

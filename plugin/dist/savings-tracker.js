@@ -318,7 +318,10 @@ class SavingsTracker {
         // Stated in the file, because four of these fields were once read as session-wide when the ledger has
         // only ever recorded delegated work. A measurement whose scope is implicit will be misread.
         ledger.scope =
-            'cumulative across sessions; records delegated worker calls, not architect turns or a session total';
+            'cumulative across sessions; records delegated worker calls only. Architect usage is NOT recorded here ' +
+                '-- cloudTurns, architectTurns, totalCloudTokens and totalSpendUSD are always zero because the host ' +
+                'events that would feed them do not exist or carry no usage. The architect side is measured as ' +
+                'context by context-quality.ts off session/event, not as money.';
         ledger.history.push(record);
         if (ledger.history.length > 500) {
             ledger.history = ledger.history.slice(-500);
