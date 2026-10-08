@@ -451,3 +451,40 @@ control that reports a decision and no one checks whether the decision has an ef
 Not resolved. It needs a live run with a path in `delegatedPaths` and a read of it, which item 1's lineage
 work now makes attributable: before, the guard could not say *who* was reading, only *that* something was.
 
+**Then it was run, and it is a confirmed fail-open — with the same root cause as the A2 bug fixed the same
+day.**
+
+The test: `plugin/tests/oracles/role-lineage.test.cjs` had just been **created** by a delegated worker, so
+it was registered `mode: 'created'` and restored into `delegatedPaths`. Reading it back with the `read`
+tool is exactly the gated action. It read silently.
+
+Three observations pin the mechanism:
+
+| observation | value |
+| --- | --- |
+| `ALLOWED-ONCE` lines in the desktop log | **264** — of which `pwsh` 207, `write` 33, `edit` 8, **`read` 1** |
+| the one `read` that was ever gated | `C:\Projects\temp\live-check\target.js` — an **absolute** path |
+| the trace for the ungated read | `"target": "plugin/tests/oracles/role-lineage.test.cjs"` — the **raw relative string** |
+
+So the guard *does* see the `read` tool (27 `SOURCE_READ` traces, and it now resolves `"role": "architect"`
+correctly); it simply never matches the path.
+
+`isDelegatedPath` canonicalises both sides, so this is not a missing normalisation. It is
+`canonicalisePath` resolving a **relative** target against the **process cwd** instead of the session
+workspace. A registered absolute path matches; a relative one resolves somewhere else and misses. The
+architect reads files by relative path essentially always, so **the delegated-read gate is off in normal
+use** — which is exactly why item 16's prompt never fired.
+
+This is the A2 defect again. That one was a failure's `file:line` compared against absolute contract paths;
+the fix was to resolve against the workspace first, and the comment written at the time says why: *"a
+failure reports its location relative to the workspace its command ran in, so it must be resolved against
+that workspace before it can be compared with anything."* The same sentence applies here, in a file the fix
+did not touch. **The class was not fixed; one instance of it was**, which is the thing worth carrying
+forward — and it is the third time this session that a relative-versus-absolute comparison has silently
+disabled a check.
+
+**Fix direction, not yet applied.** `isDelegatedPath` needs the workspace root: `evaluateCodeWriteGuard`'s
+config gains a `workspaceRoot`, the pre-execute call site passes the resolved session workspace, and the
+target is resolved against it before comparison — the same `locate()` shape used in `delegation.ts`. It
+needs an oracle that fails first: a relative target that names a delegated path must be recognised.
+
