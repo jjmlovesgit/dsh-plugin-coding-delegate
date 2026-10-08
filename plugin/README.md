@@ -404,6 +404,22 @@ nothing decides which files a unit needs, and nothing checks that two units agre
   protection, and nothing detects that the architect should have declared one. The mechanism makes a
   declared contract unrewritable; it cannot make declaring one mandatory.
 
+  **The pattern that makes opt-in survivable: one shared interface contract per boundary.** The expensive
+  failure is not a worker breaking its own contract — it is two units agreeing on an interface neither was
+  shown. The worker has no repository read, so if the architect does not inject unit A's file into unit B's
+  `contextFiles`, B's worker invents a plausible signature; B's contract was written by the same architect
+  from the same mental model, so B's tests agree with the invention and B reports `SUCCESS`.
+
+  Author one test per boundary asserting the agreed surface — that the module exports these names, with
+  these arities and these shapes — and declare it as `contractFiles` on **every** unit that touches that
+  boundary. Then unit A fails if it does not emit the agreed surface, because that test is among those
+  judging it; unit B is measured against the same pinned artifact whether or not A's file was injected, so
+  its assumption rests on something checked rather than something remembered; and no worker can edit it, so
+  a change voids the verdict as `CONTRACT_MODIFIED`. Put it in the suite `coherenceVerification` runs and it
+  is evaluated after every unit, so breaking the surface reports `INCOHERENT` even when a unit's own tests
+  pass. What remains missing is what this section opened with: nothing detects that a unit touching an
+  existing boundary declared no interface contract. The pattern is available; adopting it is judgement.
+
 ### Verification
 
 - **Verification** runs `runVerification` with the resolved workspace as cwd, and the
