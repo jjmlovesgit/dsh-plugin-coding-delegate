@@ -611,3 +611,44 @@ fields existed carry no verdict, so their files will ask until they are written 
 delegation actually maintains. The live check has to supply that half, and it needs a restart first: the host
 holds the `dist` it loaded at startup.
 
+## Phase 3, checked live — and the oracle's missing half supplied
+
+The restart made both halves testable, and the A/B was built so that only one of its arms can distinguish
+anything. A silent read of a settled file is *also* what the old `delegateReadPolicy: 'allow'` hatch produced,
+so the settled arm proves nothing on its own. The unsettled arm is the discriminator: only a gate that is
+actually on can ask.
+
+| arm | file | what the log shows |
+| --- | --- | --- |
+| settled — a unit passed, hash unchanged | `.probe/live-settled.js` | no approval line, and a `SOURCE_READ` trace is present |
+| unsettled — no verdict in the registry | `plugin/tests/oracles/role-lineage.test.cjs` | `ALLOWED-ONCE read -> …role-lineage.test.cjs`, and **no** trace |
+
+The trace is the instrument. The guard's approve path returns before the `SOURCE_READ` observation, so a trace
+naming the target means that branch was never taken — the same discriminator that found the hatch last time.
+Here the two traces come out opposite ways round, which is what the rule predicts. `[LOCAL_ROUTER_INIT]` also
+appears ahead of the probe's ledger line, so the reload had taken effect rather than the result being stale.
+
+**Two limits found while doing it, both worth keeping.**
+
+The first is that the shell route cannot tell a filename used as a *search pattern* from one being read.
+Grepping the debug log for the string `role-lineage` was itself gated as a read of `role-lineage.test.cjs`,
+and `node -e "require('./dist/contracts.js')"` was gated as a read of that file, because each command contains
+a relative spelling of a delegated path and `isReadArgument` sees a read-only inspector in front of it. Both
+were `ask`s and both were approved, so nothing leaked — but a guard that reports a grep as a read is reporting
+something untrue, and that is the kind of noise that gets a gate switched off.
+
+The second is a defect in how verifications were being written, and it is now visible as bad data.
+`plugin/src/guard.ts` and `plugin/src/contracts.ts` both carry `UNIT_FAILED` in the registry, and both hashes
+match their files: the content is exactly what was recorded, only the verdict is wrong. The cause is that those
+two calls passed PowerShell-flavoured verification strings — `cd plugin && npm run build 2>&1 | Select-Object
+-Last 4; node -e …` — and the runner reported `exit 255`. `Select-Object` is a PowerShell cmdlet and `;` is not
+a statement separator outside it, so the command never ran in the runner's shell. Nothing was verified, and the
+failure was recorded faithfully and persisted.
+
+The tempting repair is to call `recordDelegatedOutcome` for those two paths and stamp `UNIT_PASSED`, since the
+full gate did pass over exactly those contents. That is refused deliberately: `recordDelegatedOutcome` is the
+plugin's own verdict-writing seam, and reaching into it from outside would create the one path this system
+exists to prevent — the architect authoring its own verdicts. The wrong verdict stays visible, reads of those
+two files ask with a reason that is not true, and the next write of each file supersedes it. Verifications are
+written as plain commands from now on.
+
