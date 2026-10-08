@@ -415,3 +415,39 @@ papered over: the unreachable `next`-is-not-a-function guards in `agent/request`
 the routing hook's return value, which `applyAgentRole` types more loosely than the host's `LlmCallConfig`.
 The payload on the way in is checked; the config on the way out is trusted.
 
+## The routing hook's return value cannot be typed, and that is the finding
+
+Chasing the second of those turned up a boundary rather than a fix. `applyAgentRole` does not *set*
+provider or model — it spreads what `next()` handed it and lets `applyArchitectConfig` override both. So a
+generic passthrough (`<T extends Record<string, any>>(requestConfig: T) => T`) would make the caller's type
+flow through and remove the `as any`. It would also check nothing, because the fields come from **optional
+operator config**:
+
+```ts
+provider: options.rerouteLocal ? options.localProvider : options.cloudProvider
+```
+
+`cloudProvider?: string` is optional at the type level, so even the honest signature cannot promise a valid
+`LlmCallConfig` — it can promise at most `provider?: string`, and the host requires `provider: string`. The
+assertion at the boundary is therefore not laziness and not a shortcut; it is the accurate representation
+of a guarantee this plugin is not in a position to make. A cast that says "I am claiming this" is better
+than a type that says "this is proven" when it is not.
+
+The residual question is a runtime one, not a typing one, and is worth a live check: **what does DSH do
+with a `provider` of `undefined`?** Nothing in the plugin or its oracles exercises that path.
+
+## A gate whose default may not be a gate
+
+Item 16's delegated-read prompt never fired. Following it: `evaluateDelegatedReadPolicy` is a pure function
+of the *setting*, and on the default `'ask'` it returns `ask` unconditionally for a read of a delegated
+file. So the policy function is not the reason nothing prompted.
+
+That leaves two possibilities with different fixes — the read never reached `tools/pre-execute`, or the host
+does not surface an approval for a pre-execute `{kind:'ask'}`. **The second would be a fail-open**: the
+default setting for reading delegated source back would silently allow, and a documented gate would be
+documentation of a gate that does not exist. It is the same shape as everything else in this file — a
+control that reports a decision and no one checks whether the decision has an effect.
+
+Not resolved. It needs a live run with a path in `delegatedPaths` and a read of it, which item 1's lineage
+work now makes attributable: before, the guard could not say *who* was reading, only *that* something was.
+
