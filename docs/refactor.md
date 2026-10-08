@@ -95,18 +95,23 @@ The predicted eighth pass for `LocalRouter` / routing and the DLP rules in `inde
   npx vitest run
   npm run test:oracles
   cd ..
+  git add <the source files, and plugin/dist>
   node scripts/check-dist-in-sync.cjs
+  git commit
   ```
 
   Run it and gate the commit on the exit code **in the same command**. A red suite has been pushed once by
   running the check and the commit without gating between them; do not repeat it.
 
-  The last step is not redundant with the build. `plugin/dist` is versioned, so the suite is green whether
-  or not the rebuilt artifact was *staged*, and a fix has already been committed with its `dist/guard.js`
-  left dirty. `scripts/check-dist-in-sync.cjs` compares the working tree against `HEAD` and fails when they
-  differ. It resolves the repository root from its own location rather than trusting the cwd, because run
-  from `plugin/` it used to resolve `plugin/dist` to `plugin/plugin/dist`, match nothing, and report success
-  for a tree it had never looked at — a gate that passes by looking at nothing is worse than no gate.
+  The artifact step is not redundant with the build. `plugin/dist` is versioned, so the suite is green
+  whether or not the rebuilt artifact was *staged*, and a fix has already been committed with its
+  `dist/guard.js` left dirty. `scripts/check-dist-in-sync.cjs` compares the working tree against the
+  **index**, which is the question a pre-commit gate can act on: is every rebuilt artifact staged? It
+  compared against `HEAD` at first, and that is unsatisfiable before the commit — a correctly rebuilt dist
+  always differs from `HEAD` until it is committed — so it failed the first time it was run in this order.
+  It also resolves the repository root from its own location rather than trusting the cwd, because run from
+  `plugin/` it used to resolve `plugin/dist` to `plugin/plugin/dist`, match nothing, and report success for
+  a tree it had never looked at: a gate that passes by looking at nothing is worse than no gate.
 - **Run the oracles as `npm run test:oracles`, never as a bare `node --test`.** That script carries a
   `--require` preload (`plugin/scripts/isolate-oracle-data-dir.cjs`) which redirects the plugin's data
   directory to a temp home. `vitest.config.ts` covers the unit tests, but `node --test` never loads it, so a

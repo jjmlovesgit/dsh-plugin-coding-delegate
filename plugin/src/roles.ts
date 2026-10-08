@@ -283,10 +283,33 @@ export function applyArchitectConfig(
   } = {}
 ): Record<string, any> {
   // A tripped DLP under dlpAction 'local' pins this request to the local provider instead of the cloud.
-  const mutatedConfig: Record<string, any> = {
-    ...(requestConfig || {}),
-    provider: options.rerouteLocal ? options.localProvider : options.cloudProvider,
-    model: options.rerouteLocal ? options.localModel : options.cloudModel,
+  //
+  // The route is only rewritten when there is a route to rewrite it TO. Both options are operator config and
+  // both are optional, so the unconditional assignment that stood here wrote `provider: undefined` over
+  // whatever the host had selected -- and that is not a corner case, because the plugin's own entry in
+  // `config.json` carries no options at all. A plugin registered without a profile patch would have
+  // clobbered every request's provider. Leaving the host's route alone is what a session without this plugin
+  // does anyway, which is the honest fallback.
+  //
+  // One case deliberately still writes `undefined`: `rerouteLocal` means the operator asked for this request
+  // to go to the local worker, and with no local provider configured that cannot be satisfied locally.
+  // Falling back to the host's route could send source to the cloud on a request whose whole point was to
+  // keep it off the cloud, so the misconfiguration is left to fail loudly, and this says so.
+  const route = options.rerouteLocal
+    ? { provider: options.localProvider, model: options.localModel }
+    : { provider: options.cloudProvider, model: options.cloudModel }
+  const misrouted = typeof route.provider !== 'string' || route.provider.length === 0
+  const mutatedConfig: Record<string, any> = { ...(requestConfig || {}) }
+  if (misrouted && options.rerouteLocal) {
+    console.warn(
+      '[LOCAL_GUARD] rerouteLocal is set but no localProvider is configured, so this request cannot be ' +
+        'routed locally. It is left unrouted rather than sent to whatever route the host selected.'
+    )
+    mutatedConfig.provider = undefined
+    mutatedConfig.model = options.localModel
+  } else if (!misrouted) {
+    mutatedConfig.provider = route.provider
+    mutatedConfig.model = route.model
   }
 
   // Uncap the context window for the cloud architect.

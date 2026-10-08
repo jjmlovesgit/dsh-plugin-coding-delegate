@@ -6,19 +6,26 @@
 // ran in the same command -- build, unit, oracles -- was green throughout, because all three read the
 // working tree and not one of them asked whether the artifact was in the change.
 //
-// Run this after `npm run build`. It works from any directory inside the repository.
+// Run this after `npm run build` and after staging, immediately before the commit:
 //
-// `git diff --quiet HEAD` compares the working tree against the last commit, so it catches a rebuilt
-// artifact that was never staged and a staged one that was never committed. It reads git's exit status
-// and never its output, deliberately: capturing a child process's stdout needs a pipe, and this is run in
-// environments where opening one is denied.
+//   npm run build && npx vitest run && npm run test:oracles
+//   git add <the source files and plugin/dist>
+//   node scripts/check-dist-in-sync.cjs   # must be 0
+//   git commit
 //
-// The repository root is NAMED rather than assumed, and that is a fix rather than a style choice. The
-// pathspec is relative to the repository root, so with the process cwd as the base, running this from
-// `plugin/` resolved `plugin/dist` to `plugin/plugin/dist`, which matches nothing -- and the check then
-// reported "matches HEAD", exit 0, for a tree it had never looked at. Measured: the same dirty dist gave
-// exit 1 from the root and exit 0 from `plugin/`. A gate that passes by looking at nothing is worse than
-// no gate, because it is read as evidence.
+// It compares the working tree against the INDEX, so it answers "is every rebuilt artifact staged?" --
+// which is the question a pre-commit gate can act on. The first version compared against HEAD instead,
+// and failed the first time it was used in the order documented here: before the commit, a correctly
+// rebuilt dist always differs from HEAD, so the check was unsatisfiable and would have been switched off
+// rather than fixed. Against the index it is 0 when the artifact is staged and 1 when it is not.
+//
+// It reads git's exit status and never its output, deliberately: capturing a child process's stdout needs
+// a pipe, and this is run in environments where opening one is denied.
+//
+// The repository root is NAMED rather than assumed. A pathspec resolves against the process cwd, so run
+// from `plugin/` this used to resolve `plugin/dist` to `plugin/plugin/dist`, match nothing, and report
+// success for a tree it had never looked at -- measured: the same dirty dist gave exit 1 from the root and
+// exit 0 from `plugin/`. A gate that passes by looking at nothing is worse than no gate.
 //
 // Not covered, and stated rather than implied: a brand-new dist file that was built but never added to git
 // is untracked, and `git diff` does not report untracked files. Run `git status -- plugin/dist` whenever a
@@ -28,7 +35,7 @@ const path = require('node:path');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 
-const result = spawnSync('git', ['-C', REPO_ROOT, 'diff', '--quiet', 'HEAD', '--', 'plugin/dist'], {
+const result = spawnSync('git', ['-C', REPO_ROOT, 'diff', '--quiet', '--', 'plugin/dist'], {
   stdio: 'inherit',
 });
 
@@ -38,15 +45,15 @@ if (result.error) {
 }
 
 if (result.status === 0) {
-  console.log('[DIST_SYNC] plugin/dist matches HEAD in ' + REPO_ROOT + '.');
+  console.log('[DIST_SYNC] every rebuilt artifact under plugin/dist is staged, in ' + REPO_ROOT + '.');
   process.exit(0);
 }
 
 if (result.status === 1) {
   console.error(
-    '[DIST_SYNC] plugin/dist does not match HEAD in ' + REPO_ROOT + ': the build output is not part of ' +
-      'the change. Rebuild with `npm run build`, then include the tracked files under plugin/dist in the ' +
-      'commit.'
+    '[DIST_SYNC] plugin/dist has changes that are not staged, in ' + REPO_ROOT + ': the build output is ' +
+      'not part of this change. Rebuild with `npm run build`, then `git add` the tracked files under ' +
+      'plugin/dist before committing.'
   );
   console.error('[DIST_SYNC] inspect with: git status -- plugin/dist');
   process.exit(1);
