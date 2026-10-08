@@ -1241,6 +1241,17 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
         event: type,
         summary: describeContextQuality(next),
       })
+
+      // Once per turn, the compounding figure: content the worker produced and the architect never carried,
+      // multiplied by the model calls it would have ridden on. The currency is context, not money -- see
+      // `docs/experiment.md` for why the ledger stopped quoting dollars. `turn/start` is used because it is
+      // already folded and traced, so this costs one branch rather than a second event subscription.
+      if (type === 'turn/start') {
+        trace('CONTEXT_HYGIENE', {
+          session: key.startsWith('session-') ? key.slice(8, 16) : key.slice(0, 8),
+          line: tracker.contextHygiene(next.steps).line,
+        })
+      }
     }
   })
 

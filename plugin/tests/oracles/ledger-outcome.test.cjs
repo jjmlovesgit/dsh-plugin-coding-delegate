@@ -183,3 +183,39 @@ test('an UNVERIFIED unit is not counted as a failed attempt', async () => {
     'so an unverified unit must not inflate the count of absorbed failures'
   );
 });
+
+test('the hygiene summary compounds kept-out content across the session model calls', () => {
+  const { SavingsTracker } = require(DIST);
+  const tracker = new SavingsTracker(LEDGER_DIR);
+
+  // 3800 bytes, which at this codebase's own 3.8-chars-per-token estimator is 1000 tokens.
+  tracker.recordUsage({
+    route: 'WORKER_LOCAL',
+    model: 'qwen/qwen3.8-27b',
+    reason: 'SUBAGENT_DELEGATION (hygiene-probe)',
+    promptTokens: 100,
+    completionTokens: 50,
+    totalTokens: 150,
+    outcome: 'UNIT_PASSED',
+    succeeded: true,
+    bytesWritten: 3800,
+  });
+
+  const few = tracker.contextHygiene(10);
+  const many = tracker.contextHygiene(1000);
+
+  assert.ok(few.bytesKeptOut >= 3800, 'kept-out bytes are reported');
+  assert.ok(few.tokensKeptOut > 0, 'and converted to tokens');
+  assert.equal(many.modelCalls, 1000, 'the call count is echoed');
+  assert.equal(
+    many.carriedTokens,
+    many.tokensKeptOut * many.modelCalls,
+    'the carry is the kept-out tokens times the calls they would have ridden on'
+  );
+  assert.ok(
+    many.carriedTokens > few.carriedTokens,
+    'so the figure compounds as the session goes on rather than staying flat'
+  );
+  assert.match(many.line, /upper bound/i, 'and it says it is a bound, because it is one');
+  assert.match(many.line, new RegExp(String(many.bytesKeptOut)), 'the line carries the byte figure');
+});

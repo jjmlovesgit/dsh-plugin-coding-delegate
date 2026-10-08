@@ -834,6 +834,16 @@ function apply(ctx, options = {}) {
                 event: type,
                 summary: (0, context_quality_1.describeContextQuality)(next),
             });
+            // Once per turn, the compounding figure: content the worker produced and the architect never carried,
+            // multiplied by the model calls it would have ridden on. The currency is context, not money -- see
+            // `docs/experiment.md` for why the ledger stopped quoting dollars. `turn/start` is used because it is
+            // already folded and traced, so this costs one branch rather than a second event subscription.
+            if (type === 'turn/start') {
+                (0, logging_1.trace)('CONTEXT_HYGIENE', {
+                    session: key.startsWith('session-') ? key.slice(8, 16) : key.slice(0, 8),
+                    line: tracker.contextHygiene(next.steps).line,
+                });
+            }
         }
     });
     // 2. Primary Thread (Architect) Request Hook: Pin primary thread to DeepSeek Cloud with native uncapped context and tool schema injection

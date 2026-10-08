@@ -98,5 +98,31 @@ export declare class SavingsTracker {
     accumulateChunk(turn: number, textChunk: string): void;
     recordCompletionTokens(turn: number, count: number): void;
     endTurn(turn: number): TurnRecord | null;
+    /**
+     * What this plugin kept out of the architect's context, and what that compounds to.
+     *
+     * The currency is context, not money. Content the worker produced never entered the architect's window,
+     * so it is absent from the call that produced it AND from every later call that carries that window
+     * forward. The second part is the whole claim: keeping it out stops it accumulating, so the figure is
+     * `tokensKeptOut x modelCalls` rather than `tokensKeptOut`.
+     *
+     * It is an UPPER BOUND, and it says so, because it assumes every byte produced so far rode every call
+     * counted. A byte produced late rode fewer. The plugin cannot do better without recording, per
+     * delegation, how many calls had already happened -- and an unlabelled bound is exactly the kind of
+     * number this project keeps having to retract.
+     */
+    contextHygiene(modelCalls: number): {
+        delegations: number;
+        failedDelegations: number;
+        bytesKeptOut: number;
+        tokensKeptOut: number;
+        modelCalls: number;
+        carriedTokens: number;
+        line: string;
+    };
+    /** The last ledger written or read in this process, so the summary does not re-read the file. */
+    private lastLedger;
+    /** Read the ledger from disk once, for a process that has not written one yet. */
+    private readLedger;
     private persist;
 }

@@ -118,6 +118,7 @@ class SavingsTracker {
             ...(tokensPerSecond !== undefined ? { tokensPerSecond } : {}),
         };
         const ledger = this.persist(record);
+        this.lastLedger = ledger;
         const rateText = tokensPerSecond !== undefined && elapsedMs !== undefined
             ? ` | Rate: ${tokensPerSecond} tok/s e2e (${completionTokens} tok in ${(elapsedMs / 1000).toFixed(2)}s)`
             : '';
@@ -179,6 +180,67 @@ class SavingsTracker {
             completionTokens,
             totalTokens,
         });
+    }
+    /**
+     * What this plugin kept out of the architect's context, and what that compounds to.
+     *
+     * The currency is context, not money. Content the worker produced never entered the architect's window,
+     * so it is absent from the call that produced it AND from every later call that carries that window
+     * forward. The second part is the whole claim: keeping it out stops it accumulating, so the figure is
+     * `tokensKeptOut x modelCalls` rather than `tokensKeptOut`.
+     *
+     * It is an UPPER BOUND, and it says so, because it assumes every byte produced so far rode every call
+     * counted. A byte produced late rode fewer. The plugin cannot do better without recording, per
+     * delegation, how many calls had already happened -- and an unlabelled bound is exactly the kind of
+     * number this project keeps having to retract.
+     */
+    contextHygiene(modelCalls) {
+        // Read once if this process has not written a ledger yet, so the first turn of a session does not
+        // report zeros while the file already holds real totals. A figure that reads zero looks like a
+        // measurement and is not one.
+        if (!this.lastLedger)
+            this.lastLedger = this.readLedger();
+        const ledger = this.lastLedger;
+        const delegations = ledger?.delegations ?? 0;
+        const failedDelegations = ledger?.failedDelegations ?? 0;
+        const bytesKeptOut = ledger?.bytesKeptOut ?? 0;
+        // The same estimator this file already applies to text.
+        const tokensKeptOut = Math.ceil(bytesKeptOut / 3.8);
+        const calls = Number.isFinite(modelCalls) && modelCalls > 0 ? Math.floor(modelCalls) : 0;
+        const carriedTokens = tokensKeptOut * calls;
+        return {
+            delegations,
+            failedDelegations,
+            bytesKeptOut,
+            tokensKeptOut,
+            modelCalls: calls,
+            carriedTokens,
+            line: delegations +
+                ' delegation(s) [cumulative], ' +
+                failedDelegations +
+                ' failed attempt(s) absorbed, ' +
+                bytesKeptOut +
+                ' B kept out (~' +
+                tokensKeptOut +
+                ' tok); over ' +
+                calls +
+                ' model call(s) an upper bound of ' +
+                carriedTokens +
+                ' token(s) never carried',
+        };
+    }
+    /** The last ledger written or read in this process, so the summary does not re-read the file. */
+    lastLedger = null;
+    /** Read the ledger from disk once, for a process that has not written one yet. */
+    readLedger() {
+        try {
+            if (!fs.existsSync(this.ledgerPath))
+                return null;
+            return JSON.parse(fs.readFileSync(this.ledgerPath, 'utf8'));
+        }
+        catch {
+            return null;
+        }
     }
     persist(record) {
         let ledger = {
