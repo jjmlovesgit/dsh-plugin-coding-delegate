@@ -616,7 +616,7 @@ function apply(ctx, options = {}) {
                         contractFiles: {
                             type: 'array',
                             items: { type: 'string' },
-                            description: 'Paths to the tests that constitute this unit contract. They are hashed before the worker runs, the worker is forbidden to write them, and they are re-hashed afterwards: any change voids the verdict. The architect owns these files.',
+                            description: 'Paths to the tests that constitute this unit contract. They are hashed before the worker runs, the worker is forbidden to write them, and they are re-hashed afterwards: any change voids the verdict. The architect owns these files. If this unit has to agree with a file another unit already wrote, declare an interface contract for that boundary here and on every other unit that touches it, or inject the file itself with contextFiles. A unit that writes into a tree where delegated files already exist, while declaring neither, is the usual cause of two units that both pass and still disagree: the worker has no repository read, so it invents the interface, and this unit contract was written from the same mental model, so its tests agree with the invention.',
                         },
                         contextFiles: {
                             type: 'array',
