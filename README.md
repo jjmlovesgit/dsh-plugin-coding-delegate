@@ -226,10 +226,15 @@ npm run build          # tsc -> dist
 npm test               # unit tests (vitest)
 npm run test:oracles   # regression oracles (node:test)
 npm run test:all       # both
+cd ..
+node scripts/check-dist-in-sync.cjs   # the committed dist matches a fresh build
 ```
 
-`dist/` is committed because DSH loads `dist/index.js`. CI rebuilds and fails if the committed
-`dist` has drifted from `src`.
+`dist/` is committed because DSH loads `dist/index.js`. CI rebuilds and fails if the committed `dist` has
+drifted from `src`, and `scripts/check-dist-in-sync.cjs` checks the same thing locally. Run it as part of a
+commit gate: the suite is green whether or not the rebuilt artifact was *staged*, which is how a fix was once
+committed with its `dist/guard.js` left dirty. It resolves the repository root from its own location so it
+works from any directory — run from `plugin/` it used to match nothing and report success.
 
 Run the oracles as `npm run test:oracles`, not as a bare `node --test`. The script carries a `--require`
 preload that redirects the plugin's data directory to a temp home: `vitest.config.ts` covers the unit tests,
