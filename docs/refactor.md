@@ -118,9 +118,12 @@ The predicted eighth pass for `LocalRouter` / routing and the DLP rules in `inde
   command, `;` does not separate statements, and `$?` is not a variable. It exits 255, verifies nothing, and
   leaves a real-looking `UNIT_FAILED` behind — **five of the six such records in the registry came from exactly
   this** (see `findings.md`; the sixth is a genuine failure). Write verification strings as plain commands
-  joined with `&&`, and prefer `npm --prefix <repo>/plugin run …` to `cd`, which also makes the command
-  independent of the workspace it happens to run in — the coherence check's `cd plugin` is why every
-  delegation into `experiments/` reports `INCOHERENT` while its own contract passes.
+  joined with `&&`, and make every path in it absolute, because the command runs with `cwd` set to the
+  delegation's own workspace. A relative `cd plugin` resolved against whatever workspace the unit targeted:
+  every delegation into `experiments/` reported `INCOHERENT` while its own contract passed, which reads as a
+  unit failure when the unit is fine. Measured — the relative form exits 1 from `experiments/contract-first`,
+  `cd /d C:\Projects\DSHLaya\plugin && …` exits 0 with the full gate green. The profile carries the absolute
+  form; loader patches apply at boot, so it takes effect on the next restart.
 - **Run the oracles as `npm run test:oracles`, never as a bare `node --test`.** That script carries a
   `--require` preload (`plugin/scripts/isolate-oracle-data-dir.cjs`) which redirects the plugin's data
   directory to a temp home. `vitest.config.ts` covers the unit tests, but `node --test` never loads it, so a
