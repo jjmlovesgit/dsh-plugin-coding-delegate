@@ -139,13 +139,23 @@ The second defect is quieter. Line 150 expects `evictions === 1` in a scenario w
 `maxEntries`, and `SPEC.md` says eviction runs when "the number of **live** entries exceeds `maxEntries`".
 The contract is testing a cache bounded by *total* entries. Test 9 asks for the same thing.
 
-`scripts/check-contract.cjs` reports **OK: the contract is well-formed and discriminating** for that file,
-and it is not wrong to. The contract does assert, and every failure against a null implementation is a
-behavioural disagreement. But it decides vacuity and malfunction, and **never faithfulness to the
-specification**, so a contradiction introduced during transcription is invisible to it — and invisible to
+`scripts/check-contract.cjs` reported **OK: the contract is well-formed and discriminating** for that file,
+and it was not wrong to. The contract does assert, and every failure against a null implementation is a
+behavioural disagreement. But it decided vacuity and malfunction, and **never faithfulness to the
+specification**, so a contradiction introduced during transcription was invisible to it — and invisible to
 the architect, who under rule 3 cannot read the file to find it. `README.md` already said a contract can be
 "well-formed, discriminating, and still test the wrong behaviours"; this is that sentence with an instance
 attached.
+
+**That gap is now closed, and this experiment is the case that closed it.** The guard takes an optional
+`--spec <file>`: a specification conformance suite the architect owns, which is the null trick run
+backwards. Null proves the module cannot be blamed; the suite proves the module *can* be trusted, and a
+contract that still rejects a conforming module is the artifact at fault. Pointed at the transcribed
+contract plus the suite in `tests/spec-conformance.test.cjs`, it exits 1 and names the two tests —
+*"not ok 9 - eviction chooses strictly by recency, not by expiry"* and *"not ok 10 - replacing an existing
+key refreshes expiry and recency, not counted as eviction"*. The same command against the corrected
+contract returns OK. The defect this document describes as undetectable became a verdict, produced without
+the architect reading a line of the contract.
 
 So Finding 5 is Finding 2 with its consequence made concrete. Finding 2 said the architect cannot tell a
 contract fault from a module fault. Finding 5 shows what that costs when the contract fault is **real**: the

@@ -698,17 +698,29 @@ there, so the test could only pass by being wrong.
 What makes this worth recording is not the bug but how long it survived every check the project has.
 `contractFiles` hashing proved the file never changed during a unit. The null-implementation guard
 (`scripts/check-contract.cjs`) reported **"OK: the contract is well-formed and discriminating"** for it,
-because the contract does assert and does discriminate — the guard decides vacuity and malfunction, and has
-no access to the specification, so it cannot decide *faithfulness* to it. And the architect, the one party
-holding both the specification and a reason to check, cannot read the contract at all (rule 3).
+because the contract does assert and does discriminate — the guard decides vacuity and malfunction, and had
+no access to the specification, so it could not decide *faithfulness* to it. And the architect, the one
+party holding both the specification and a reason to check, could not read the contract at all (rule 3).
 
 The consequence is the part that generalises. Where a contract fault is real, the loop has **no terminating
 condition**: it keeps delegating fixes to a module that already conforms, and the plateau it produces is
-indistinguishable from a limit on the worker. Catching it needs a question the guard does not ask today —
-*is this contract satisfiable, and does it test what the specification says?* — and the only evidence
-available to the architect is the specification itself. That is what settled this one: the specification's
-requirements, written as checks and run against the module independently of the contract, passed **16 of
-16** while the contract still failed two tests.
+indistinguishable from a limit on the worker. Catching it needs a question the guard did not ask: *is this
+contract satisfiable, and does it test what the specification says?* — and the only evidence available to
+the architect is the specification itself. That is what settled this one: the specification's requirements,
+written as checks and run against the module independently of the contract, passed **16 of 16** while the
+contract still failed two tests.
+
+**The guard now asks that question, and this defect is the case that made it.** `check-contract.cjs` takes an
+optional `--spec <file>`: a specification conformance suite the architect owns, which is the null trick run
+backwards. Null proves the module cannot be blamed; the suite proves the module *can* be trusted, and a
+contract that still rejects a conforming module is the artifact at fault. Run against the transcribed
+contract it exits 1 and names *"not ok 9 - eviction chooses strictly by recency, not by expiry"* and
+*"not ok 10 - replacing an existing key refreshes expiry and recency, not counted as eviction"*; run against
+the corrected contract it exits 0. The suite is judged by the rule the contract is judged by — one that
+passes a module returning itself for everything is refused as constraining nothing — and the verdict names
+both possibilities rather than condemning the contract, because it is only as strong as the suite's coverage.
+Seven assertions hold it to this, in `plugin/tests/oracles/contract-spec-conformance.test.cjs`. Writing them
+found a defect in the guard itself that had nothing to do with specifications.
 
 It was closed by leaving the contract untouched as evidence and transcribing a sibling,
 `tests/ttl-cache.spec.test.js`, from the specification — 14/14 against the unchanged module, 14/14 by
@@ -718,4 +730,33 @@ clock advance and every expected counter written out. The one area left as a des
 back with a scenario whose own comment declared an entry live at `t=110` when its expiry made it expired at
 `t=100`, so the assertion contradicted the scenario it was written to test. Specifying an area does not
 transfer the reasoning; specifying a scenario does.
+
+## A guard run from inside a test runner condemned every contract
+
+The oracle for the specification check made this visible on its very first run: every fixture failed,
+including the controls that should have passed. The guard was fine by hand and broken under a test.
+
+`runTests` spawns `node --test` with no `env`, so the child inherited `NODE_TEST_CONTEXT`. That variable is
+how node's test runner tells its own children to report over an IPC channel instead of stdout; handing it on
+to a grandchild means the grandchild's TAP never reaches the captured file. Every count reads 0, and the
+guard concludes — for whatever contract it is given — that the contract did not run:
+
+    A. against a null implementation: 0 tests, 0 passed, 0 failed by assertion, 0 by malfunction
+       FAIL: the contract did not run -- no test count was reported.
+
+Measured on one fixture both ways: with `NODE_TEST_CONTEXT=child-v8` set, `0 tests`; unset, `2 tests, 0
+passed, 2 failed by assertion`.
+
+The fix is one line — copy the environment, delete that key, pass the copy as `env`. The shape of the failure
+is the point. This is a gate that *fails* by looking at nothing, the mirror of the one `check-dist-in-sync.cjs`
+was fixed for, which *passed* by looking at nothing. Both are worse than no gate, and both were found the
+same way: by pointing the thing at a case whose answer was already known.
+
+Two smaller lessons from the same afternoon, kept because they are the same shape. `node --check` was used
+to verify each patch of this script as it went; it validates syntax, not references, so a patch that used a
+variable under the wrong name passed it and crashed on the next real run — the *coherence* check caught what
+the patch check could not, which is the argument for a gate being a run rather than a parse. And a
+verification command written as `node --require plugin/scripts/…` failed with MODULE_NOT_FOUND, because
+`--require` resolves a bare relative path as a module specifier rather than a file — the suite it was meant
+to run was green throughout.
 

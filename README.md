@@ -312,17 +312,45 @@ be. Two checks, only the first deciding:
 | discriminates | at least one assertion failure | it passes a module that returns itself for everything |
 | well-formed | no malfunction failures | a test never reached an assertion |
 
-The run against the real module is printed and deliberately not judged. A contract can be well-formed,
-discriminating, and still test the wrong behaviours; this guard removes one class of failure, not all of
-them. See [`docs/experiment.md`](docs/experiment.md), where it exonerated a contract the architect had
-already published a misdiagnosis of.
+The run against the real module is printed and deliberately not judged — a malfunction there may be the
+module throwing rather than the contract failing, and nothing in the output distinguishes the two. A
+contract can be well-formed, discriminating, and still test the wrong behaviours; this guard removes one
+class of failure, not all of them. It exonerated a contract the architect had already published a
+misdiagnosis of — see [`docs/experiment.md`](docs/experiment.md).
 
-**And it cannot see an unsatisfiable contract.** That is no longer hypothetical. The experiment's own
-contract passes this guard **OK** while asserting `has(b) === false` for an expired entry on one line and
-`has(b) === true` for an expired entry on another, so no implementation could ever have satisfied it. The
-guard decides vacuity and malfunction; it has no access to the specification, so it cannot decide
-faithfulness to it. Three rounds of the loop were blocked by exactly that, and the guard called the
-blocking artefact sound every time.
+**The second check closes the failure that costs the most.** Add `--spec`, and the guard also runs a
+**specification conformance suite** the architect owns: the same trick, run backwards. The null
+implementation proves the module cannot be blamed; the suite proves the module *can* be trusted — and then a
+contract that still rejects a conforming module is the artifact at fault.
+
+```bash
+node scripts/check-contract.cjs --contract path/to/spec.test.js --module path/to/module.js \
+  --spec path/to/spec-conformance.test.cjs
+```
+
+That is not hypothetical either; it is the defect this project actually shipped. The experiment's
+transcribed contract asserted `has(b) === false` for an expired entry on one line and `has(b) === true` for
+an expired entry on another, so no implementation could ever have satisfied it — while the null run called
+it sound every time. Measured against the specification suite, the guard now says so, and names what did it:
+
+```
+C. the specification suite against the real module: 16 test(s), 16 passed, 0 failed by assertion, 0 failed by malfunction
+D. the specification suite against a null implementation: 16 test(s), 0 passed, 16 failed by assertion, 0 failed by malfunction
+   ok: it asserts, and every failure is a behavioural disagreement
+
+DISAGREEMENT: the module satisfies the specification suite, and the contract still rejects it.
+Either the contract demands more than the specification states, or the specification suite is incomplete.
+Resolve which before delegating another fix. Contract tests that failed against a conforming module:
+     not ok 9 - eviction chooses strictly by recency, not by expiry
+     not ok 10 - replacing an existing key refreshes expiry and recency, not counted as eviction
+```
+
+The suite gets judged too, by the rule the contract is judged by: one that passes a module returning itself
+for everything is refused, because it constrains nothing and cannot serve as the reference. And the verdict
+deliberately names both possibilities rather than condemning the contract, because it is only as strong as
+the suite — an incomplete suite makes a non-conforming module look conformant, and the contract may simply
+require more than the specification states. Those seven assertions are in
+[`plugin/tests/oracles/contract-spec-conformance.test.cjs`](plugin/tests/oracles/contract-spec-conformance.test.cjs).
 
 ## What this does not claim
 
