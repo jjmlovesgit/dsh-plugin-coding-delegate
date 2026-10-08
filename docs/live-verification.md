@@ -127,6 +127,33 @@ integrity check was never broken and is not what was fixed — the retry path wa
 therefore where the verification had to happen. A green integrity report would have been consistent with
 the leak still being open.
 
+## The edit boundary and the coherence command, verified live
+
+The rule that a whole-file emission may **create** a file but not **modify** one was verified end to end
+through real delegations after a restart, in all three directions, against a throwaway
+`src/edit-boundary-probe.js` in the experiment workspace:
+
+| the unit asked for | result |
+| --- | --- |
+| creation of a file that did not exist | **SUCCESS**, one file written |
+| a whole-file rewrite of that file | **VERIFICATION_FAILED**, `filesWritten: []` |
+| the same change as a search/replace patch | **SUCCESS**, `patched in place with 1 hunk(s)` |
+
+The refusal is the point, and it says what to do rather than only what it refused:
+
+    Refused to overwrite …\src\edit-boundary-probe.js: the file already exists and a whole-file emission
+    may create a file but not modify one; the worker cannot see the file unless its content was injected,
+    so the architect should re-delegate with the content as context and have the worker emit a
+    search/replace patch instead
+
+The third row is that advice followed, and it is why the rule constrains the form of an edit rather than
+what can be expressed. The probe was removed afterwards and the working tree was clean.
+
+The coherence command's path independence was verified live the same way, after its own restart: the
+delegation into `experiments/contract-first` that used to report `INCOHERENT` reported **`SUCCESS` with
+`Coherence check: Passed 313, Failed 0`**, and `last-coherence.log` showed `tsc`, the 39 unit tests and the
+oracle run — the whole gate, executed from a workspace that is not the repository root.
+
 ## What remains unverified live
 
 - **The failed-compaction counter.** This used to read "no compaction has occurred in any observed session",

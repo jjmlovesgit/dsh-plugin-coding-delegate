@@ -122,7 +122,9 @@ whole-file emission may **create** a file and may not **modify** one; changing a
 search/replace block, matched byte-for-byte against what was there. Nothing becomes inexpressible — the
 whole file can still be replaced, by patching with its entire content as the search text — but it has to be
 said, and it has to match. `plugin/tests/oracles/edit-boundary.test.cjs` holds that, including the case the
-size heuristic waved through.
+size heuristic waved through, and it is **live-verified after a restart** in all three directions: creation
+of a new file succeeded, a whole-file rewrite of the same path was refused with `filesWritten: []`, and the
+same change sent as one search/replace patch applied.
 
 That closes the half of this finding that was a plugin gap. The other half is not a gap and is not going
 away: a worker that cannot edit surgically still cannot. What changes is that a mutation unit is now

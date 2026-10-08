@@ -371,7 +371,9 @@ coherence: nothing decides which files a unit needs, and nothing checks that two
   the old file's bytes, and a substitution keeping most of the bytes passed it regardless of how much of the
   file had actually changed. Nothing is inexpressible now: a whole file can still be replaced wholesale, by
   sending a patch whose search text is its entire current content. It just has to be said, and it has to
-  match what was there.
+  match what was there. Verified live after a restart, in all three directions: creating a new file
+  succeeded, a whole-file rewrite of that same path was refused with `filesWritten: []`, and the same change
+  sent as one patch applied.
 - **`contextFiles` shows the worker the code it must change, without showing it to you.** Entries are
   `{ path, startLine?, endLine? }` with 1-based inclusive ranges. The plugin reads them into the worker
   prompt and returns a record of what it injected — path, range, lines, bytes, sha256 — and never the
