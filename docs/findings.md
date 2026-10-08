@@ -172,17 +172,44 @@ applying them with `scripts/apply-staged-patch.cjs`, which is a workaround for a
 requiring the run to be at least as long as the opening one. `^(?:```+)\s*$` with the `m` flag, anchored
 per line, rather than `[\s\S]*?` to the next bare run.
 
-## The configured worker stops generating at about 1,200 tokens
+## The configured worker stops generating at about 1,200 tokens — corrected: it does not
 
-`PROFILES.WORKER.max_tokens` is 8192, but a direct request asking for 300 lines came back with exactly
-`completion_tokens=1200` and `finish_reason=stop` — the model chose to stop, so it is a model or LM Studio
-preset limit rather than a plugin one. Prompts are not the constraint: a 5,252-token prompt was accepted.
+**The measurement was real; the generalisation drawn from it was not.** A direct request asking for 300 lines
+came back with exactly `completion_tokens=1200` and `finish_reason=stop`. That is worth knowing: the model
+chose to stop, so it was a model or LM Studio preset limit rather than a plugin one, and the prompt was not
+the constraint (a 5,252-token prompt was accepted). The profile's `maxTokens` has since been raised from
+8192 to 16384, though that cannot explain it, since the stop was the model's own.
 
-**Impact:** a single delegated emission cannot produce a module much larger than ~150 lines, and a reply
-that carries both a file and a patch plan is truncated mid-structure. Every "the worker returned 28 lines"
-and "no complete search/replace block" failure in the emission.ts round traces to this. Work that needs a
-large file must arrive in several small requests, or the fence/parse path must be made robust enough that
-truncation is visible as truncation.
+What does not follow is a ceiling. Measured since, through ordinary delegations:
+
+| task | completion tokens | emitted |
+| --- | --- | --- |
+| transcribe a 14-test contract from a specification | 2,927 | 231 lines, 8,773 bytes |
+| replace one test inside that contract | 3,127 | 231 lines, 9,493 bytes |
+
+Both are more than twice the figure above and both produced complete, well-formed files. So "a single
+delegated emission cannot produce a module much larger than ~150 lines" is false, and the advice to break
+every large file across several requests would cost rounds for nothing.
+
+The claim's other half — that a reply carrying both a file and a patch plan is truncated mid-structure — did
+not reproduce either. The one emission that failed in that round returned **48 completion tokens and no code
+block at all**, and the plugin said so in as many words: *"worker output has no fenced code block and does
+not look like source code."* That is a refusal, not a truncation, and it was visible. Visible-and-refused is
+the property the last line of the original impact statement asked for, and it is the one that held.
+
+What the failure does suggest is a smaller and different limit. The task was not to **generate** a file but
+to **reproduce an existing 203-line file with two changes in it** — a copy-heavy request — and the worker
+declined. One instance proves nothing about why, so the honest statement is that fidelity-preserving
+reproduction of a long file is the suspect, not length. It is also moot by construction now: a whole-file
+emission may not modify an existing file at all, so that request shape is refused and a patch is asked for
+instead — which is what every attempt here succeeded at, in 300–650 completion tokens.
+
+The figure also appears in the round records — `handoff-emission.md` ("regardless of `max_tokens: 8192`"),
+`handoff-contracts.md`, `cut-verification.md`, `cut-roles.md`, `cut-guard.md` and `refactor-complete.md` —
+where it sets the per-emission line budgets those rounds were planned against. **Those are left exactly as
+written.** The limit was real for those rounds, the budgets derived from it were the right call at the time,
+and back-dating a correction into a round record destroys the evidence that makes it a record. This entry is
+the correction of record; if the two ever disagree, this one is measuring and the records are describing.
 
 ## The context-quality counters cannot see a resumed session's history
 
