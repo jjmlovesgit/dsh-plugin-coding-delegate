@@ -325,7 +325,60 @@ came out of that probe:
   `node -e "<anything>"`. That is a real hole and it is the operator's to accept. Recorded here rather
   than glossed, because this run is the first thing in the repository to depend on it.
 
+### Run 1c: the loop inside the unit, actually taken
+
+Same task, same frozen judge, run from a session that has an approval seam — this one. One delegation, and
+the contract did the verifying:
+
+| | |
+| --- | --- |
+| architect's `delegate_worker` calls | **1** |
+| times the architect ran the judge | **0** |
+| worker tokens | `promptTokensEst` 1,758 + `completionTokensEst` 992 = **2,750** |
+| worker wall time | 8.5 s at 116.6 tok/s |
+| artifact | `src/aggregation-window.js`, 3,273 bytes, sha256 `6d5ff93bcb04dca8…` |
+| verdict | `UNIT_PASSED`, `passed: 27, failed: 0` |
+| registry | `mode: created`, `outcome: UNIT_PASSED`, `succeeded: true` |
+| contract | declared `contractFiles` unchanged, sha `91fe3a4352e54a7d…`, no violations |
+
+Independently re-verified rather than taken from the tool result: the judge run locally gives **27 pass /
+0 fail**, and the contract file's hash is byte-identical to the one frozen before any arm ran.
+
+**The mechanism works, and this is the first clean positive result in the experiment.** The worker
+verified itself, the verdict came back compact, and the architect never executed the judge. Compare the
+three runs of the same task:
+
+| run | sessions | architect calls | architect judge runs | outcome |
+| --- | --- | --- | --- | --- |
+| 1 — loop outside | subagent | 24 (1,050,313 tok) | 5 | 27/27, but architect did the iterating |
+| 1b — loop inside, refused | subagent | 30 (1,414,323 tok) | 0 | no valid artifact; worker never converged |
+| **1c — loop inside, verification ran** | **this session** | **1 delegation** | **0** | **27/27 first attempt** |
+
+**What this does and does not establish.** It establishes that moving the judge into the unit removes the
+architect's iteration entirely — the phase that cost Run 1 **179,840 tokens (17.1%)** plus the
+**440,500 (41.9%)** it then spent on hash checks, cleanup and reporting around a loop it had run itself.
+None of that exists here: one call, one verdict, done. The worker's whole contribution was 2,750 tokens
+against Run 1's 10,966, because it did not have to be re-delegated.
+
+It does **not** establish the token comparison the protocol was built for, and the reason is the same one
+that has blocked every measurement in this file: **there is still no control arm.** The one-call figure is
+also not quotable as an architect cost. Isolating that single model call's prompt from a session already
+carrying this entire conversation is not possible with `measure-session.cjs`, which reports cumulative
+figures, so the honest statement is about the *shape* — one call, zero judge runs — and not about a
+millisecond-exact token delta. Reporting the session's cumulative **700,728,276** as "the cost of this
+run" would be false by a factor of about two hundred, and is exactly the error this file exists to
+prevent.
+
+**Two things this run also fixes, incidentally worth knowing.** The delegation instruction had to inline
+`SPEC-2.md` (8,504 bytes) because the worker has no repository read — so the architect pays the spec once
+as prompt rather than as a file read, and that is the real price of the pattern, not the code. And
+`coherenceVerification` ran the **plugin's** suite (337 oracles) rather than the judge, because it is
+operator-global in the profile and `cwd` is the delegation workspace; for a delegation into a workspace
+that is not this repository it is measuring nothing. That is an operator configuration wart, not a
+delegation result, and it costs wall time on every delegated unit.
+
 ### Attempt 2, and the finding that stops the measurement here
+
 
 The run was repeated with the allowlist live. All four delegations returned
 `VERIFICATION_NOT_APPROVED` with the reason string from `verification.ts:399` — the `ask` branch — so the
@@ -356,10 +409,13 @@ follows is that **the loop-inside-the-unit hypothesis is untested, and cannot be
 operator from this session.** It needs a top-level DSH session with a human at the approval prompt, which
 is a person running it, not an agent measuring it.
 
-That is a more useful result than the number would have been. It says the plugin's own central
-mechanism — a delegation that verifies itself — **is unreachable in any delegated child agent**, which is
-precisely the context `delegate_worker` creates. The one configuration that could exercise it is the one
-where the architect is also the approver.
+That is a more useful result than the number would have been, and **it is a claim about agent-driven
+sessions rather than about the plugin.** The pin is on child agents, so what is unreachable is a
+delegation that verifies itself *from inside another agent* — which is how every run in this file was
+driven, and why the finding looked total when it was first written. Run 1c below shows the mechanism does
+work from a session that has an approval seam. The correct statement of the limit is narrower and still
+sharp: **the plugin's self-verifying path cannot be exercised by an agent measuring it**, because the
+instrument an agent has is the one context where approval is pinned shut.
 
 ## Procedure
 
