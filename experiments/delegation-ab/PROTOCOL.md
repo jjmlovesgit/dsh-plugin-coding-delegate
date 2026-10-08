@@ -253,6 +253,34 @@ Written before the runs, so the result cannot be reinterpreted afterwards:
 - **If the frozen judge fails for either arm**, that run is void and gets repeated. A run that
   produced code the judge rejects is not a cheaper way of producing the feature.
 
+### Outcome: the rule cannot be applied
+
+The control arm could not be run (above), so **no branch of this rule is reachable**. The honest
+summary is the strongest form of the first branch rather than the weakest:
+
+- The delegated arm's own cost is measured, once: **1,050,313 cumulative input tokens** to produce one
+  2,650-byte module, against 10,966 tokens for the worker that typed it.
+- There is **no standard arm to compare it to**, so the comparison the rule was written for does not
+  exist. The token half of the claim is therefore **not "unsupported" — it is untestable inside the
+  environment the plugin runs in**, and that is a weaker position than an unfavourable measurement
+  would have been. An unfavourable measurement is at least a measurement.
+- Nobody should read the single delegated row as evidence for or against the claim. With one column and
+  no control it supports neither, and quoting it either way would be the exact overreach this file was
+  written to prevent.
+
+What the two runs *did* establish, and what they did not:
+
+| established | not established |
+| --- | --- |
+| what one delegated run costs, in the architect's own tokens | whether that is more or less than the alternative |
+| a cloud context cannot author source with this plugin installed | whether that prohibition is a price worth paying |
+| the guard denies rather than asks for paths outside `tests/` and `tools/` | whether the 27/27 judge is fair to a non-delegated implementation |
+| a delegated unit with an unapproved verification is recorded `UNIT_FAILED` | how often that matters in ordinary use |
+
+The measurement is parked, not abandoned. The instrument that would settle it is a session with the
+plugin **disabled**, which measures unimproved DSH rather than a within-plugin standard arm — a
+different claim, and one that must be labelled as such if it is ever made.
+
 ## Procedure
 
 1. Copy `SPEC.md` and `tests/spec-conformance.test.cjs` nowhere — reference them in place, so both
@@ -347,6 +375,17 @@ same message, which names the only remaining route: *"Delegate new files to the 
 this installation cannot author source. It can read, plan, and delegate — and nothing else. So a
 "standard arm", meaning one model doing everything including the writing, **cannot be run here at all**.
 One of the four cells of this design is not hard to fill; it is empty by construction.
+
+It is worth being exact about *why*, because "approval was refused" would be a much weaker finding. The
+write branch ends at `guard.ts:613`:
+
+    return { kind: downgrade ? 'ask' : 'deny', target, reason: reason(target) + ... }
+
+`downgrade` is true only when the target matches `guardAskPaths`, whose default is
+`['tests/', 'tools/']` (`guard.ts:115`). `src/aggregation-window.js` matches neither, so the verdict was
+**`deny`** — not `ask`, and therefore not something any approval setting could have granted. No operator
+prompt would have appeared, and there was nothing for a human to approve. The arm's report that
+"approval prompts are disabled" is true but not the cause: on this path there is no prompt to disable.
 
 The consequences are worth stating plainly, because they cut in two directions:
 
