@@ -68,6 +68,17 @@ claim: the architect reads code in order to engineer a change, and anything it r
 later turn. Reading is the dominant cost of a long session, not typing. So the discipline is to read
 narrowly, read late, and prefer the verdict you already have over opening the file.
 
+**That reading is irreducible, and it is not private.** A model cannot engineer a change to code it has
+not seen: to decide what to delegate, and what to put in the worker's `contextFiles`, the architect has
+to know what is already there — so it reads, and every read enters its window and is re-sent on every
+later turn. Delegation moves the *writing*, and the iteration over it, off the metered model. It does
+not move the reading, and it cannot be made to: what stays on your machine is the typing, not the
+knowledge of what is being typed. Treating the local GPU as a privacy boundary gets this exactly
+backwards, and the counter-evidence is in this repository's own history — over a full delegated
+workload here, 329 calls to the local worker against 1,795 architect calls, the architect still carried
+666.8M input tokens at a peak prompt of 791,798. What that buys is a window spent on design instead of
+source, which is a real and bounded gain. It is not a window that stays closed.
+
 ### Why that matters over a long task
 
 Everything that degrades a long agentic session degrades it *because code entered the window*:
@@ -339,7 +350,12 @@ Both are documented with the thing they check, in [`plugin/README.md`](plugin/RE
 - Local routing does **not** save money. The GPU is a fixed cost this plugin neither pays for nor
   reduces, and a local card will not pay for itself against a metered plan. What is preserved is the
   plan's allowance: metered tokens stay for the work only a frontier model can do, instead of being
-  spent reading code.
+  spent writing and iterating on code.
+- **It does not make reading private, and it does not stop the architect reading.** The architect must
+  see the code it is engineering against, and everything it reads is re-sent on every later turn. What
+  stays local is the authorship — the code the worker writes does not cross back — not the knowledge of
+  what the code is. A privacy boundary drawn around the local GPU is drawn in the wrong place; the
+  measured figures are in [How it works](#how-it-works-a-contract-out-a-verdict-back).
 - It does not make a local model as capable as a cloud one.
 - Provider transport, tool-schema enforcement and session storage live in DSH, not here.
 
