@@ -19,12 +19,48 @@ const SHELL_TOOLS = new Set([
  */
 export const READ_TOOLS = new Set(['read', 'read_file', 'fs_read', 'view', 'view_file', 'cat'])
 
+/**
+ * True when `target` names a file a delegated worker wrote, however the caller spelled it.
+ *
+ * `canonicalisePath` resolves a relative path against the process cwd, and the process cwd is not the
+ * session workspace: comparing the two as strings missed every relative target, which is how the
+ * architect names files essentially always. The live gate therefore fired only for absolute paths --
+ * reproduced against a file a delegated worker had just created, read back with no decision at all.
+ *
+ * The guard cannot be told the workspace. A tool call does not carry one, and the value lives in the
+ * plugin context, which is exactly the coupling this module avoids so that it stays a pure function.
+ * So the base is not assumed, it is searched: `resolvesTo` tests the target against every ancestor
+ * directory of every delegated file. A delegated file always lives beneath its workspace, so the
+ * workspace is one of those ancestors and the answer is recovered without being told. The search can
+ * only over-ask -- it calls a read delegated when the target resolves to the delegated file from some
+ * plausible base -- and asking is the safe direction for a guard.
+ */
 function isDelegatedPath(target: string, paths?: Iterable<string>): boolean {
+  if (typeof target !== 'string' || !target) return false
   const canonical = canonicalisePath(target)
+  const absolute = path.isAbsolute(target)
   for (const p of paths ?? []) {
-    if (canonicalisePath(String(p)) === canonical) return true
+    const delegated = canonicalisePath(String(p))
+    if (delegated === canonical) return true
+    if (!absolute && resolvesTo(target, delegated)) return true
   }
   return false
+}
+
+/** Does `target`, read relative to some ancestor of `delegated`, name `delegated` itself? */
+function resolvesTo(target: string, delegated: string): boolean {
+  let dir = path.dirname(delegated)
+  for (;;) {
+    if (samePath(path.resolve(dir, target), delegated)) return true
+    const parent = path.dirname(dir)
+    if (parent === dir) return false
+    dir = parent
+  }
+}
+
+/** Windows paths are case-insensitive; the rest are not. */
+function samePath(a: string, b: string): boolean {
+  return process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b
 }
 
 const DEFAULT_GUARD_ASK_PATHS = ['tests/', 'tools/']
@@ -177,7 +213,19 @@ function findDelegatedRead(command: string, paths?: Iterable<string>): string | 
   if (typeof command !== 'string' || !command || !paths) return undefined
   for (const p of paths) {
     const canonical = canonicalisePath(String(p))
-    for (const form of [canonical, canonical.replace(/\\/g, '/')]) {
+    const forms = [canonical, canonical.replace(/\\/g, '/')]
+    // The same search as isDelegatedPath, in the form a command string needs: each way of spelling
+    // the file relative to one of its ancestors. A single-segment name is skipped, because a bare
+    // filename appears in commands that have nothing to do with the file.
+    let dir = path.dirname(canonical)
+    for (;;) {
+      const relative = path.relative(dir, canonical)
+      if (relative.includes(path.sep)) forms.push(relative, relative.replace(/\\/g, '/'))
+      const parent = path.dirname(dir)
+      if (parent === dir) break
+      dir = parent
+    }
+    for (const form of forms) {
       if (command.includes(form) && isReadArgument(command, form)) return form
     }
   }
