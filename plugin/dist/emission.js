@@ -182,6 +182,22 @@ function extractAndEmitFiles(content, targetFilesHint, baseDir = process.cwd(), 
         // header syntax is shared, so the body decides the mode. An empty list means the body started a
         // patch and never finished it, which is refused rather than written over a real file.
         const patchBlocks = parsePatchBody(fileCode);
+        if (!patchBlocks && fs.existsSync(resolvedPath)) {
+            // This is an edit boundary, not a heuristic. A whole-file emission creates rather than modifies, and the
+            // worker has no repository read, so it cannot have seen this file unless the architect injected it; a file
+            // it has not seen can only be replaced blindly. That is how the contract-first experiment's mutation step
+            // returned a rewritten 86-line module in place of a 129-line one and the write landed, reported as nothing
+            // more than a failing contract. The size heuristic that used to guard this compared byte counts, and a
+            // substitution that keeps most of the bytes passes that regardless of how much of the file actually changed.
+            // A patch is not a restriction on what can be expressed, since the whole file can still be replaced with
+            // its entire content as the search text, only on what can be done silently.
+            emissionErrors.push('Refused to overwrite ' + resolvedPath + ': ' +
+                'the file already exists and a whole-file emission may create a file but not modify one; ' +
+                'the worker cannot see the file unless its content was injected, so the architect should re-delegate ' +
+                'with the content as context and have the worker emit a search/replace patch instead');
+            console.warn('[EMIT_FILE_BLOCKED] existing file, whole-file emission: ' + resolvedPath);
+            return;
+        }
         if (patchBlocks) {
             if (!fs.existsSync(resolvedPath)) {
                 emissionErrors.push(`Refused to patch ${resolvedPath}: it does not exist, and a search/replace block edits a ` +
@@ -205,22 +221,6 @@ function extractAndEmitFiles(content, targetFilesHint, baseDir = process.cwd(), 
             fileCode = applied.content;
         }
         try {
-            // Guard against clobbering: a model that cannot see the target file may return
-            // a stub, and a wholesale rewrite far smaller than what is already there is
-            // almost always damage rather than an edit.
-            //
-            // Deliberately skipped for a patch. The guard exists to catch output that is not really an
-            // edit, and a patch has already been matched byte-for-byte against the file it changes, so the
-            // failure it protects against cannot occur -- and a patch may legitimately shrink a file.
-            if (!patchBlocks && fs.existsSync(resolvedPath)) {
-                const previousBytes = fs.statSync(resolvedPath).size;
-                const nextBytes = Buffer.byteLength(fileCode, 'utf8');
-                if (previousBytes > 200 && nextBytes < previousBytes * 0.5) {
-                    emissionErrors.push('Refused to overwrite ' + resolvedPath + ': new content is ' + nextBytes + 'B but the existing file is ' + previousBytes + 'B ' +
-                        '(more than 50% smaller). Delete the target explicitly or fix the worker output first.');
-                    return;
-                }
-            }
             const parentDir = path.dirname(resolvedPath);
             fs.mkdirSync(parentDir, { recursive: true });
             fs.writeFileSync(resolvedPath, fileCode, 'utf8');

@@ -354,16 +354,24 @@ coherence: nothing decides which files a unit needs, and nothing checks that two
   cannot see the DSH session workspace (the Cordis `Agent` exposes only an id, and the path
   lives in session metadata behind a store the plugin cannot reach), so omitting it resolves
   to the server's working directory and says so in `summary`.
-- **A patch edits in place; a code block replaces.** To change part of an existing file the worker emits
+- **A patch edits in place; a code block creates.** To change part of an existing file the worker emits
   a fenced block headed `patch file="…"` whose body holds `<<<<<<< SEARCH`, `=======` and
   `>>>>>>> REPLACE` markers. The SEARCH text must match the file exactly and **exactly once**: zero
   matches, two matches, an empty search, and a trivially short search are each refused, and every block
   applies or none does. There is deliberately no fuzzy matching — a near miss is the mechanism by which
   a wrong edit lands silently, so it fails and the unit is re-delegated instead. The file's own line
   endings survive the edit, a malformed patch is refused rather than falling through as a whole-file
-  write, and a patch is exempt from the whole-file size guard precisely because it has already been
-  matched against the bytes it changes. The receipt reports which files were patched and how many hunks
-  each took.
+  write, and the receipt reports which files were patched and how many hunks each took.
+- **A whole-file emission may create a file, never modify one.** Writing over a path that already exists is
+  refused and reported, even when the new content is larger. The worker has no repository read, so it cannot
+  have seen that file unless `contextFiles` injected it, and a file it has not seen can only be replaced
+  blindly — which is exactly what happened in the contract-first experiment, where a "make exactly one
+  change" unit returned a rewritten 86-line module in place of a 129-line one and the write landed. This
+  used to be guarded by a size heuristic that refused an overwrite only when the new content was under half
+  the old file's bytes, and a substitution keeping most of the bytes passed it regardless of how much of the
+  file had actually changed. Nothing is inexpressible now: a whole file can still be replaced wholesale, by
+  sending a patch whose search text is its entire current content. It just has to be said, and it has to
+  match what was there.
 - **`contextFiles` shows the worker the code it must change, without showing it to you.** Entries are
   `{ path, startLine?, endLine? }` with 1-based inclusive ranges. The plugin reads them into the worker
   prompt and returns a record of what it injected — path, range, lines, bytes, sha256 — and never the

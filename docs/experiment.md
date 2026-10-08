@@ -110,6 +110,25 @@ An architect that cannot rely on a stated edit boundary being honoured cannot ru
 do the kinds of refactor that depend on a change being local, and cannot expect "fix this one line" to mean
 what it says. That is worth knowing independently of this module.
 
+**The boundary is now checked — and the heuristic standing in its place is why it was not.** The write
+landed because the only thing guarding a whole-file overwrite was a size comparison: refuse it when the new
+content is less than half the old file's bytes. That is a proxy for "this is not really an edit", and this
+rewrite is exactly what a proxy lets through: a substitution that keeps most of the bytes passes it no
+matter how much of the file actually changed.
+
+The rule that replaces it is not a heuristic. The worker has no repository read, so it cannot have seen the
+target file unless the architect injected it, and a file it has not seen can only be replaced blindly. So a
+whole-file emission may **create** a file and may not **modify** one; changing an existing file requires a
+search/replace block, matched byte-for-byte against what was there. Nothing becomes inexpressible — the
+whole file can still be replaced, by patching with its entire content as the search text — but it has to be
+said, and it has to match. `plugin/tests/oracles/edit-boundary.test.cjs` holds that, including the case the
+size heuristic waved through.
+
+That closes the half of this finding that was a plugin gap. The other half is not a gap and is not going
+away: a worker that cannot edit surgically still cannot. What changes is that a mutation unit is now
+**refused** rather than silently converted into a rewrite — the difference between a boundary and an
+instruction.
+
 ## Finding 5 — the transcribed contract was unsatisfiable, and the guard cannot see that
 
 This is the experiment's strongest result, and it was found by refusing to read a plateau as a limit on the

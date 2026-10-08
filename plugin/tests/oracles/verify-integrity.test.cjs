@@ -184,13 +184,15 @@ test("B: a tool-call transcript is refused instead of written", () => {
 
 test("B: a drastic shrink over an existing file is refused", () => {
   const { path: target, size } = seedBigFile("shrunk.ts", 3000);
-  // A well-formed fenced block, but tiny compared to what is already there.
+  // A well-formed fenced block, but tiny compared to what is already there. It used to be refused for
+  // being more than 50% smaller. It is now refused for being a whole-file emission against a file that
+  // already exists, which covers this case and every rewrite the size comparison let through.
   const tiny = '```ts file="shrunk.ts"\nexport const x = 1\n```';
 
   const result = extractAndEmitFiles(tiny, ["shrunk.ts"], TMP);
   assert.equal(result.filesWritten.length, 0);
   assert.ok(result.errors.length >= 1);
-  assert.match(result.errors[0], /more than 50% smaller/);
+  assert.match(result.errors[0], /already exists/);
   assert.equal(fs.statSync(target).size, size, "the existing file must be untouched");
 });
 
@@ -207,11 +209,25 @@ test("B: legitimate writes still work", () => {
   assert.ok(fs.readFileSync(fresh, "utf8").includes("greeting"));
 });
 
-test("B: growing an existing file is allowed", () => {
+test("B: growing an existing file requires a patch, not a bigger whole-file emission", () => {
+  // This used to read "growing an existing file is allowed", and the size heuristic it characterised is
+  // precisely what the contract-first experiment's mutation rewrite slipped past: keeping most of the
+  // bytes was enough to be treated as an edit. Growth is now an edit like any other, and an edit has to
+  // quote what it changes.
   const p = path.join(TMP, "growing.ts");
-  fs.writeFileSync(p, "export const a = 1\n", "utf8");
+  const original = "export const a = 1\n";
+  fs.writeFileSync(p, original, "utf8");
   const bigger = '```ts file="growing.ts"\nexport const a = 1\nexport const b = 2\nexport const c = 3\n```';
-  const result = extractAndEmitFiles(bigger, ["growing.ts"], TMP);
-  assert.equal(result.errors.length, 0);
+
+  const refused = extractAndEmitFiles(bigger, ["growing.ts"], TMP);
+  assert.equal(refused.filesWritten.length, 0, "a whole-file emission may not modify an existing file");
+  assert.equal(fs.readFileSync(p, "utf8"), original, "and it must leave the file alone");
+
+  const patch =
+    '```patch file="growing.ts"\n' +
+    "<<<<<<< SEARCH\nexport const a = 1\n=======\nexport const a = 1\nexport const b = 2\nexport const c = 3\n>>>>>>> REPLACE\n" +
+    "```";
+  const applied = extractAndEmitFiles(patch, ["growing.ts"], TMP);
+  assert.equal(applied.errors.length, 0);
   assert.ok(fs.readFileSync(p, "utf8").includes("export const c = 3"));
 });

@@ -760,3 +760,28 @@ verification command written as `node --require plugin/scripts/…` failed with 
 `--require` resolves a bare relative path as a module specifier rather than a file — the suite it was meant
 to run was green throughout.
 
+## A size heuristic is not a boundary, and the rewrite it let through
+
+The contract-first experiment's mutation step asked for exactly one change and got a rewritten module: 129
+lines down to 86. The write landed, and the plugin's only guard on a whole-file overwrite was a size
+comparison — refuse it when the new content is under half the old file's bytes. That is a proxy for "this is
+not really an edit", and a substitution that keeps most of the bytes passes it no matter how much of the
+file actually changed. The verdict then said `VERIFICATION_FAILED`, which reads as "the module is wrong" and
+says nothing about the edit having been a rewrite at all.
+
+The replacement is a rule rather than a threshold. The worker has no repository read, so it cannot have seen
+the target file unless the architect injected it, and a file it has not seen can only be replaced blindly.
+A whole-file emission may therefore **create** a file and may not **modify** one; changing an existing file
+requires a search/replace block matched byte-for-byte against the current content. Nothing becomes
+inexpressible — the whole file can still be replaced wholesale, by patching with its entire content as the
+search text — but it has to be said, and it has to match.
+
+The interesting part is what the change exposed. Two assertions in `verify-integrity.test.cjs` characterised
+the old heuristic directly — "a drastic shrink over an existing file is refused" and "growing an existing
+file is allowed" — and both had to be rewritten, the second into its opposite. A test that pins a heuristic
+in place is how a heuristic survives: the rule it approximates can be wrong for a long time while the suite
+stays green, and the failure is then attributed to the caller rather than to the threshold. Those two sat in
+a file written for two other, still-valid protections — refusal of content that does not look like source,
+and of a fence that named no file — which is exactly how a threshold gets filed alongside rules and stops
+being questioned.
+
