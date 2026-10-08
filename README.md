@@ -1,20 +1,22 @@
 # DSH Coding Delegate
 
-> **Your plan is for thinking. Your GPU does the typing.**
+> **A preventive control: the metered model cannot author code, and every delegation leaves a hashable
+> verdict.**
 
-A [DeepSeek Harness](https://github.com/deepseek-ai) (DSH) plugin that decides where a request may
-go by **permission rather than preference**: a credential is not permitted to reach the cloud, the
-cloud model is not permitted to author source code, and everything beyond those rules is the
-architect's explicit choice to delegate or not.
+A [DeepSeek Harness](https://github.com/deepseek-ai) (DSH) plugin that separates **who specifies** work
+from **who implements** it, and refuses to let the first party write the second party's code. It is a
+technical control, not a policy: enforcement happens in a tool-call hook before a write lands, so it does
+not depend on the model choosing to comply.
 
-Why it matters: on a metered plan the scarce resource is frontier tokens, and reading code is what
-spends them. Routing code work to a local model keeps that allowance for the work only a frontier
-model can do, so the plan lasts instead of timing out. That is a **capacity** claim, not a cost one —
-see [What this does not claim](#what-this-does-not-claim).
+Why that is worth anything, stated without a benefit claim: the usual arrangement is one model writing the
+tests and the code and then grading both. This plugin makes the specification an artifact that is hashed
+before implementation and re-hashed after, so a passing verdict means *the specification, unmodified,
+passed against the implementation* — and that is checkable after the fact from a local record.
 
-> **Status: 0.1.0, a personal project.** It works and is tested, but the API is not frozen and
-> the honest limits are documented rather than glossed. See
-> [What this does not claim](#what-this-does-not-claim).
+> **Status: 0.1.0, a personal project.** The mechanisms work and are tested. Its **limits are documented
+> rather than glossed**, including two that cannot be closed from inside the process — see
+> [What this control does not cover](#what-this-control-does-not-cover). Read that section before deciding
+> whether it fits your situation.
 
 ## What it does
 
@@ -22,30 +24,91 @@ Five things, in the order they act:
 
 1. **In-process, no sidecar.** No daemon, no extra port, nothing to supervise. The gate and the
    authorship guard run inside the plugin.
-2. **A DLP gate on every outbound request.** Prompts are scanned for credentials and
-   high-entropy tokens before the cloud sees them. A hit is refused or rerouted to the local
-   worker, never transmitted. The gate accumulates the user messages it has seen, so a credential
-   from an earlier turn keeps it closed instead of scrolling out of view.
-3. **A code guard, in both directions.** Cloud-authored writes *and deletions* of source are denied
-   or sent for approval — and so is reading back a file the worker wrote, since that pulls the
-   delegated code into the very context the delegation kept it out of. Shell forms are covered,
-   including inline program text (`python -c`, `node -e`).
+2. **A DLP gate on every outbound request.** Prompts are scanned for credentials and high-entropy tokens
+   before the cloud sees them. A hit is refused or rerouted to the local worker, never transmitted. The
+   gate accumulates the user messages it has seen, so a credential from an earlier turn keeps it closed
+   instead of scrolling out of view.
+3. **A code guard, in both directions.** Cloud-authored writes *and deletions* of source are denied or
+   sent for approval — and so is reading back a file the worker wrote, since that pulls delegated code
+   into the context delegation exists to keep it out of. Shell forms are covered, including inline program
+   text (`python -c`, `node -e`).
 4. **`delegate_worker`.** A tool the architect calls to hand one unit of implementation to a local
    OpenAI-compatible server (LM Studio, Ollama, vLLM, llama.cpp, a remote gateway). File writes are
    contained to the workspace, verification output is redacted to structure before it travels, and the
-   verification command itself requires approval. The worker has no repository read, so it only ever sees
-   what the architect declares with `contextFiles`.
+   verification command itself requires approval.
 5. **A unit is judged, not reported.** The contract is pinned with `contractFiles` — hashed before the
    worker runs, refused as a write target, re-hashed afterwards, so a change voids the verdict — and a unit
    that writes files without verifying reports `UNVERIFIED`. A whole-file emission may **create** a file and
-   may not **modify** one: changing an existing file means sending a search/replace block that matches what
-   is there byte-for-byte. Then `coherenceVerification` runs the project's own command, with the power to
+   may not **modify** one. Then `coherenceVerification` runs the project's own command, with the power to
    void a unit whose own tests passed while the tree did not.
+
+## What this control does not cover
+
+An effectiveness statement is part of a control, not an appendix to it. These are the limits, and they are
+the reason to read this file rather than the feature list.
+
+- **It prevents writes, not intent.** The guard sees tool calls and shell text. Source a model produces in
+  conversation, in a computation, through a second tool path, or through any plugin or MCP server outside
+  this one is invisible to it. This is a scope boundary, not a defect, and it means the control's coverage
+  is **this plugin's write paths** rather than "the model did not write code".
+- **The recorder and the recorded run in the same process.** The guard, the worker and the ledger all live
+  inside one DSH process, so the record below is evidence of what happened, not proof that nothing else
+  did. Hashing constrains the *worker* well; nothing here constrains the *recorder*. Closing this needs an
+  external sink that the process cannot reach back into, which is outside this plugin.
+- **It does not make coding cheaper, more private, or longer.** This plugin was originally justified by
+  those three claims. Each was tested and each failed; the measurements are in
+  [Retired claims](#retired-claims-and-why) rather than deleted, because a control whose author has
+  published its disconfirming evidence is more useful than one with a clean feature list.
+- **The guard is not precise.** A shell command naming a directory that *contains* a delegated file is
+  refused even when it only lists names, and a delete verb combined with a source filename anywhere on the
+  same line is refused even when the target is unrelated. Both fail closed — the cost is that ordinary
+  housekeeping stops working once a delegation has landed. Tracked, not yet fixed.
+- **The audit record covers delegation, not everything.** The ledger's architect-side counters
+  (`totalCloudTokens`, `architectTurns`, `totalSpendUSD`) are structurally zero: the host events that would
+  feed them do not carry usage. What the metered model *read* is recorded in a `SOURCE_READ` trace, which
+  is a log file rather than a tracked record. So the trail answers "what was delegated and how did it
+  resolve" and is silent about the rest.
+- **Nothing here is tamper-evident.** The registry and ledger are plain local JSON. Anyone with write
+  access to the data directory can edit them.
+
+## Retired claims, and why
+
+Every row was measured on this repository's own work. They are kept because a control's credibility comes
+from what it discloses, and because each one is a trap for the next person building something similar.
+
+| claim | what the measurement said |
+| --- | --- |
+| *"Your plan is for thinking, your GPU does the typing"* | True as a mechanism, and close to worthless as a saving. Across 329 delegations the architect was billed **666,756,560** input tokens; the local worker's entire output was **548,106** — **0.08%** of the bill. Delegation cannot meaningfully reduce a total it contributes 0.08% to. |
+| *"Runs on your machine, so it's private"* | **Refuted.** The architect must read source to engineer against it, and everything it reads is re-sent on every later turn — measured at ~8.5 read events per turn. What stays local is the typing, not the knowledge of what is being typed. |
+| *"Local routing saves money"* | **Refuted, and never claimed at the bottom of the file.** The delegated output is worth **$0.1047** of cloud-equivalent; the hardware payback is roughly **19,000×** this workload. |
+| *"Capacity, so the plan lasts"* | **Unsupported.** Session length is set by the context window filling, and that is dominated by the architect's reading, which the plugin does not reduce. Measured evidence that it extends sessions: none. |
+| A third tier would read the repository locally and keep the architect out of the code | **Built, measured, retired.** The tier's window did not fit; a per-model reasoning setting could not be overridden; offloading typing recovered far less than the reading it gave back; no lead-authored contract was ever dispatched and verified. The split of `src/index.ts` has since retired the first of those four, so the decision rests on the other three. See [`docs/ROADMAP.md`](docs/ROADMAP.md). |
+
+The general lesson, which outlives this plugin: **you cannot cut a session's metered cost by changing who
+types. You cut it by changing what the planning model has to hold.** Any architecture premised on the
+writing being expensive has the wrong cost model.
+
+## The evidence trail
+
+What a reviewer can check after a delegation, all of it local:
+
+| record | what it answers |
+| --- | --- |
+| `contractFiles` hashes, before and after | was the specification modified while implementing it? A change voids the verdict (`CONTRACT_MODIFIED`) |
+| the delegated registry | which files a unit wrote, their sha256, whether it **created** or **patched** them, and the verdict with its timestamp |
+| the savings ledger | every delegated call: tokens, duration, outcome |
+| `SOURCE_READ` trace | what source the architect read, with path, range and hash |
+| `CONTEXT_QUALITY` trace | per-call prompt size, peak, compactions, tokens reclaimed, and the route those figures belong to |
+
+**A verdict is one of three, not two.** `UNIT_PASSED`, `UNIT_FAILED`, `UNIT_UNVERIFIED` — an edit
+delegated without a verification command is the common case and is neither a pass nor a failure, so
+counting it as a failure would corrupt the very number it exists to produce. A file a *passing* unit left
+unchanged reads back silently; failed, unverified and since-edited ones ask.
 
 ## How it works: a contract out, a verdict back
 
-Coding needs two different jobs done, and they want two different contexts. The plugin gives each one
-its own window and lets exactly two things cross between them.
+Coding needs two different jobs done, and they want two different contexts. The plugin gives each one its
+own window and lets exactly two things cross between them.
 
 **The architect** is the metered thinking model. It holds the design conversation, decides how the work
 decomposes, and writes a **contract** for each unit: what to build, where the worker may write, and the
@@ -61,90 +124,6 @@ needs — nothing else — writes the code, and is discarded. A fresh context pe
 
 The verification command runs as an ordinary subprocess, with the operator's approval. Its raw output
 stays on the local machine; what travels back is the failure *structure*, with source stripped out.
-
-**The architect does not pay for the code it delegates.** Diffs never cross back — a verdict comes
-instead — and that is the claim. It is *not* the same as a flat window, and saying so would be the wrong
-claim: the architect reads code in order to engineer a change, and anything it reads is re-sent on every
-later turn. Reading is the dominant cost of a long session, not typing. So the discipline is to read
-narrowly, read late, and prefer the verdict you already have over opening the file.
-
-**That reading is irreducible, and it is not private.** A model cannot engineer a change to code it has
-not seen: to decide what to delegate, and what to put in the worker's `contextFiles`, the architect has
-to know what is already there — so it reads, and every read enters its window and is re-sent on every
-later turn. Delegation moves the *writing*, and the iteration over it, off the metered model. It does
-not move the reading, and it cannot be made to: what stays on your machine is the typing, not the
-knowledge of what is being typed. Treating the local GPU as a privacy boundary gets this exactly
-backwards, and the counter-evidence is in this repository's own history — over a full delegated
-workload here, 329 calls to the local worker against 1,795 architect calls, the architect still carried
-666.8M input tokens at a peak prompt of 791,798. What that buys is a window spent on design instead of
-source, which is a real and bounded gain. It is not a window that stays closed.
-
-### Why that matters over a long task
-
-Everything that degrades a long agentic session degrades it *because code entered the window*:
-
-- **Attention dilutes**, because design intent is left competing with thousands of lines that have
-  nothing to do with the next decision.
-- **Compaction is lossy**, and it summarises away precisely the specifics that mattered. Keeping code
-  out is prevention; compaction is cure, and cure arrives after the budget is spent.
-- **The session drifts**, as a context that is mostly code starts contradicting decisions it made when
-  it was mostly design.
-- **Restarts lose state**, because window exhaustion forces a new session and the accumulated design
-  goes with it.
-
-Typing is the highest-volume, lowest-judgement activity in coding. Segmented this way, the frontier
-model spends metered tokens on the two things only it can do: deciding what the work is, and deciding
-whether a verdict means done. That is a **capacity** claim, not a cost one — see
-[What this does not claim](#what-this-does-not-claim).
-
-### What the loop does not close yet
-
-Stated plainly, because these limits decide whether it fits your work:
-
-- **The worker cannot discover, but it can be shown.** It has no repository read, so it will never find
-  the file it needs. Declare `contextFiles` and the plugin reads them into its prompt — so a unit closes
-  on existing code without that code entering the architect's window — and the worker answers with a
-  whole file or a search/replace delta, so it need not return a large file in one piece. What is still
-  missing is **cross-unit coherence**: nothing decides which files a unit needs, and nothing checks that
-  two units agree.
-- **The architect is not blind, and claiming otherwise was wrong.** It reads source to engineer, and
-  every read is re-sent on every later turn. Reading is what costs: a 7,300-token module read once and
-  carried for fifty turns is roughly **365,000 input tokens** — more than twice all the typing in this
-  project's history, which is about 159,000. The plugin does not gate that reading; it **records** it, in
-  the `SOURCE_READ` trace, so the choice is visible rather than assumed.
-- **A third tier was built, measured, and retired.** A local thinking model was meant to read the
-  repository and author each contract, keeping the architect out of the code entirely. It was retired on
-  four measurements: the tier's window did not fit, LM Studio's per-model reasoning setting is
-  authoritative so it could not be made to think, offloading typing recovers far less than the reading it
-  gives back, and no lead-authored contract was ever dispatched and verified. The split of `src/index.ts`
-  has since retired the *first* of those four — every module now fits that window — so the decision now
-  rests on the other three. The measurements, and which of them still hold, are in
-  [`docs/ROADMAP.md`](docs/ROADMAP.md).
-- **The contract is signed, and the worker cannot touch it.** `contractFiles` are hashed before the
-  worker runs, refused as emission targets, and re-hashed afterwards, so a change voids the verdict. A
-  passing result therefore means the architect's tests, unmodified, passed against the worker's code.
-- **Coherence is partly checked, and mostly still the architect's job.** `coherenceVerification` runs a
-  project-level command after each unit's contract and can void it: a unit whose own tests passed while the
-  tree did not is reported **`INCOHERENT`**, which is a different instruction to the architect from "your
-  unit failed". That catches a tree broken by a unit. It does not catch work that is locally correct and
-  globally inconsistent — the usual failure mode of splitting work up, and splitting it here does not remove
-  it.
-
-> The mechanism above is well established — attention dilution and lossy compaction are properties of
-> how these models and harnesses behave. What this plugin reports is the **harness's own accounting
-> rather than a proxy**, written to a `CONTEXT_QUALITY` trace line: turns, steps, compactions, model-free
-> prunes, failed compactions, **tokens reclaimed** (DSH's `shadowedTokenCount` on `compaction/summary`
-> and `compaction/prune`), and the **prompt the model actually received, per call**, with its high-water
-> mark and the route's advertised window (from the provider's `usage` on `assistant/message` — summing
-> `inputTokens` **and** `cacheReadTokens`, because `inputTokens` alone is only the uncached remainder and
-> reading it as the window understates a full one by orders of magnitude).
->
-> Two things worth stating plainly. The counters are **process-scoped, not lifetime-of-session**: DSH
-> does not publish events that entered through replay, fork, or resume, so a resumed session counts from
-> the resume — it under-reports, and that is the honest reading of what the firehose can answer.
-> And the **route travels with the window figures** because "frontier tokens" is only a checkable claim
-> if it says which model produced the number: with the default two-tier configuration every session call
-> is the architect's, and with a lead tier configured it is whichever model the session is pinned to.
 
 ## The policy
 
@@ -165,6 +144,10 @@ the answer is no.
 | 6 | A command the architect proposes may not run unchecked | approval seam |
 | 7 | A delegated result is a verdict, not a claim | files written without verification report `UNVERIFIED` |
 | 8 | Source may not reach the cloud | cloud-bound requests carrying fenced source are refused by default; `sourceEgress` decides |
+
+Rule 8 is a heuristic and it has a hole: it looks for fenced blocks with a source language tag of at least
+three lines, so source pasted without a tag, described in prose, or split across short blocks is not
+detected. It is also the one rule that can refuse a request you typed yourself.
 
 ## Requirements
 
@@ -207,6 +190,17 @@ The two settings people most often need:
     localModel: 'Qwen/Qwen3-Coder-30B-A3B-Instruct'
     localEndpoint: 'http://192.168.1.50:8000/v1'   # vLLM, Ollama, llama.cpp, a gateway
 ```
+
+**One setting decides whether a unit can verify itself.** A delegated verification command is refused
+unless the program is allowlisted or approval is granted, and that is operator configuration rather than
+a tool argument — deliberately, so a model cannot switch it off:
+
+```yaml
+    verificationAllowlist: ['node']   # a delegated `node …` command runs unattended
+```
+
+It matches the **program, not its arguments**, so allowlisting `node` also allows
+`node -e "<anything>"`. Prefer it over `verificationApproval: 'allow'`, which is strictly wider.
 
 **Full configuration reference, provider setups and every security key: [`plugin/README.md`](plugin/README.md).**
 It is the real documentation; this file is the summary.
@@ -254,113 +248,61 @@ What is *missing* from a receipt is the finding. A unit that writes files withou
 `UNVERIFIED`; one whose tests passed while the tree did not reports `INCOHERENT`. Neither is `SUCCESS`, and
 neither is reported as one — a delegated result is a verdict, not a claim.
 
-## Security
-
-The plugin was reviewed externally, and the response to that review — including the defects found
-afterwards, the live verification run, and what remains out of scope — is in
-[`SECURITY-REVIEW.md`](SECURITY-REVIEW.md).
-
-Two properties worth stating plainly:
-
-- **Approvals are real.** A gate that auto-admits is decoration. The approval seam was verified to
-  prompt for a human decision, with 1.9–3.1 s decision latencies in the session audit and no
-  `auto` preset active.
-- **The guard is a deterrent, not a boundary.** It mediates tool calls and shell text. A path
-  computed at runtime, a mutation inside a library, and code written into prose are all outside it.
-
-## Repository layout
-
-```
-plugin/                     the publishable package (src, dist, tests, README, LICENSE)
-plugin/tests/oracles/       regression oracles — one file per behaviour the plugin promises
-plugin/cordis.patch.yml     registers the plugin; ships no provider or model config
-plugin/cordis.patch.example.yml  a complete configuration example, NOT applied automatically
-scripts/register-plugin.ps1 registers the plugin into a DSH profile
-SECURITY-REVIEW.md          review findings, remediation, and limits
-```
-
-## Development
-
-```bash
-cd plugin
-npm ci
-npm run build          # tsc -> dist
-npm test               # unit tests (vitest)
-npm run test:oracles   # regression oracles (node:test)
-npm run test:all       # both
-cd ..
-node scripts/check-dist-in-sync.cjs   # the committed dist matches a fresh build
-```
-
-`dist/` is committed because DSH loads `dist/index.js`. CI rebuilds and fails if the committed `dist` has
-drifted from `src`, and `scripts/check-dist-in-sync.cjs` checks the local half of that: it compares the
-working tree against the index, so it fails when a rebuilt artifact is not staged. Run it after `git add`
-and before committing — the suite is green whether or not the artifact was staged, which is how a fix was
-once committed with its `dist/guard.js` left dirty. It resolves the repository root from its own location so
-it works from any directory; run from `plugin/` it used to match nothing and report success.
-
-Run the oracles as `npm run test:oracles`, not as a bare `node --test`. The script carries a `--require`
-preload that redirects the plugin's data directory to a temp home: `vitest.config.ts` covers the unit tests,
-but `node --test` never loads it, so a bare invocation writes test fixtures into your live
-`~/.dsh/local-router/router-debug.log`. `scripts/check-oracle-isolation.cjs` is the contract check for it.
-
-`scripts/check-readme-consistency.cjs` is the same kind of check aimed at this documentation. The two
-READMEs necessarily state some of the same facts — the package README has to stand alone — and duplicated
-facts drift: the plugin's policy table had seven rules while this file had eight, and a section here
-declared "Four things" above a list of five. It fails when the policy tables disagree on their rules, or
-when a declared count does not match the list beneath it.
-
-### The host contract, and judging a contract
-
-Both are documented with the thing they check, in [`plugin/README.md`](plugin/README.md):
-
-- **The host contract.** `plugin/src/session-events.ts` types every DSH event this plugin reads against the
-  host's own `SessionEventMap`, so a DSH release that renames an event — or moves a payload field — fails
-  `npm run build` naming the offending literal, instead of the plugin quietly ceasing to count.
-- **Judging a transcribed contract.** `scripts/check-contract.cjs` decides whether a contract is fit to
-  judge at all, without the architect reading it: against a null implementation, and against a
-  specification conformance suite the architect owns.
-
 ## What this does not claim
 
 - **A patch must match exactly, and a stale one fails.** The worker returns either a whole file or a
   search/replace delta matched byte-for-byte against what it was shown. There is no fuzzy matching, so a
-  miss is refused rather than approximated — if the code changed after the worker was given it, the
-  edit fails and the unit is re-delegated. Nothing here lets the worker *discover* code; it only ever
+  miss is refused rather than approximated. Nothing here lets the worker *discover* code; it only ever
   edits what it was given.
 - **A whole-file emission creates; it does not modify.** Writing over a path that already exists is refused,
-  however large the new content is. The worker cannot see a file unless the architect injected it, and a
-  file it has not seen can only be replaced blindly — which is how a "make exactly one change" unit once
-  returned a rewritten 86-line module in place of a 129-line one and had the write land. A whole file can
-  still be replaced wholesale, by sending a patch whose search text is its entire current content.
+  however large the new content is. A whole file can still be replaced wholesale, by sending a patch whose
+  search text is its entire current content — which requires the architect to inject that content, because
+  the worker cannot read it.
 - **The read guard cannot tell one agent from another.** DSH does not expose agent lineage to plugins, so
   the guard fails closed for every agent rather than distinguishing the architect from a subagent. What an
-  agent *is* no longer decides what it may read — the settled rule does, reading a file a passing unit left
-  unchanged silently and asking about failed, unverified and since-edited ones. `delegateReadPolicy: 'allow'`
-  remains as an escape hatch for an operator running a local lead, and it relaxes rule 3 for every agent
-  alike: a deliberate weakening with the cost written down, not a boundary.
-- **Rule 8 is a heuristic, and it has a hole.** It looks for fenced blocks with a source language tag of
-  at least three lines. Source pasted without a language tag, described in prose, or split across short
-  blocks is not detected. It is also the one rule that can refuse a request you typed yourself, which is
-  why `sourceEgress` exists: `deny` (default), `ask`, or `allow`.
-- The guard sees tool calls and shell text, not intent. Runtime-computed paths and library-mediated
-  writes are invisible to it; configuration files are out of scope.
-- The DLP gate scans the user messages the plugin has seen — not assistant output or tool results —
-  and pattern-plus-entropy matching cannot recognise confidential material that looks ordinary.
-- Local routing does **not** save money. The GPU is a fixed cost this plugin neither pays for nor
-  reduces, and a local card will not pay for itself against a metered plan. What is preserved is the
-  plan's allowance: metered tokens stay for the work only a frontier model can do, instead of being
-  spent writing and iterating on code.
-- **It does not make reading private, and it does not stop the architect reading.** The architect must
-  see the code it is engineering against, and everything it reads is re-sent on every later turn. What
-  stays local is the authorship — the code the worker writes does not cross back — not the knowledge of
-  what the code is. A privacy boundary drawn around the local GPU is drawn in the wrong place; the
-  measured figures are in [How it works](#how-it-works-a-contract-out-a-verdict-back).
-- It does not make a local model as capable as a cloud one.
-- Provider transport, tool-schema enforcement and session storage live in DSH, not here.
+  agent *is* no longer decides what it may read — the settled rule does.
+- **A delegated unit cannot verify itself from inside a subagent.** DSH pins a child agent's
+  `approvalPolicy` to `'never'`, so the approval seam is absent and the verification is refused
+  deterministically. Self-verifying delegations need a top-level session. Measured, and it is not this
+  plugin's to override.
+- **It does not make a local model as capable as a cloud one.**
+- **Provider transport, tool-schema enforcement and session storage live in DSH, not here.**
+
+## Repository layout
+
+| path | what it is |
+| --- | --- |
+| [`plugin/`](plugin/) | the plugin, its tests and its full documentation |
+| [`experiments/delegation-ab/`](experiments/delegation-ab/) | the A/B protocol that produced the retired claims, including the run that could not be taken and why |
+| [`experiments/contract-first/`](experiments/contract-first/) | an unsatisfiable contract preserved as evidence, and its corrected sibling |
+| [`docs/findings.md`](docs/findings.md) | defects found, with what each one cost |
+| [`docs/experiment.md`](docs/experiment.md) | measurements, including the ones that undercut the plugin |
+| [`docs/ROADMAP.md`](docs/ROADMAP.md) | what was built, measured and retired |
+
+## Development
+
+```powershell
+cd plugin
+npm run build          # tsc
+npm run test           # vitest, unit
+npm run test:oracles   # node --test, contract oracles
+npm run test:all
+```
+
+At the repository root:
+
+```powershell
+node scripts/check-readme-consistency.cjs   # the two policy tables must agree
+node scripts/check-dist-in-sync.cjs         # rebuilt dist must be staged
+node scripts/check-contract.cjs --spec      # specification-conformance suite
+```
+
+## Security
+
+The plugin was reviewed externally, and the response to that review — including the defects found
+and left unfixed, with reasons — is in [`SECURITY-REVIEW.md`](SECURITY-REVIEW.md).
 
 ## License
 
 MIT — see [`LICENSE`](LICENSE). The package carries its own copy at [`plugin/LICENSE`](plugin/LICENSE),
-because `plugin/` is what gets published and a tarball without a licence file is a tarball without a
-licence.
+because the published artifact is standalone.
