@@ -106,6 +106,14 @@ export function redactVerificationOutput(raw: string): RedactedFailure[] {
       continue
     }
 
+    // A passing test ends the block above it. Without this, every line up to the next `not ok` was read as
+    // part of the previous failure -- including the `ok` lines of tests named for a timeout, which is how an
+    // assertion failure came to be reported as [timeout].
+    if (/^ok\s+\d+/i.test(t)) {
+      flush()
+      continue
+    }
+
     const notOk = /^not ok\s+(\d+)\s*-\s*(.*)$/i.exec(t)
     if (notOk) {
       flush()
@@ -121,7 +129,11 @@ export function redactVerificationOutput(raw: string): RedactedFailure[] {
       }
       const code = /^code:\s*(.+)$/.exec(t)
       if (code) {
-        current.code = code[1].replace(/^['"]|['"]$/g, '').trim()
+        const value = code[1].replace(/^['"]|['"]$/g, '').trim()
+        current.code = value
+        // A failed expectation is an assertion, and nothing later in the block may relabel it: the word
+        // "timeout" appears in this suite's own test names, and a stray mention used to win.
+        if (/^ERR_ASSERTION$/i.test(value)) current.kind = 'assertion'
         continue
       }
       const err = /^error:\s*(.*)$/.exec(t)
@@ -130,7 +142,9 @@ export function redactVerificationOutput(raw: string): RedactedFailure[] {
         if (message) current.message = message
         continue
       }
-      if (/timeout/i.test(t)) current.kind = 'timeout'
+      if (/timeout/i.test(t) && !/^ERR_ASSERTION$/i.test(String(current.code ?? ''))) {
+        current.kind = 'timeout'
+      }
       // Everything else inside a failure block is deliberately not copied.
       continue
     }
