@@ -45,6 +45,7 @@ exports.pruneDelegatedRecords = pruneDelegatedRecords;
 exports.saveDelegatedRegistry = saveDelegatedRegistry;
 exports.loadDelegatedRegistry = loadDelegatedRegistry;
 exports.rememberDelegated = rememberDelegated;
+exports.recordDelegatedOutcome = recordDelegatedOutcome;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const crypto = __importStar(require("crypto"));
@@ -116,6 +117,7 @@ function contractViolations(before, after) {
  */
 exports.delegatedPaths = new Set();
 exports.DELEGATED_PATH_LIMIT = 500;
+const DELEGATED_OUTCOMES = new Set(['UNIT_PASSED', 'UNIT_FAILED', 'UNIT_UNVERIFIED']);
 function resolveDelegatedRegistryPath() {
     return path.join((0, logging_1.resolveDataDir)(), 'delegated-registry.json');
 }
@@ -141,14 +143,23 @@ function parseDelegatedRegistry(text) {
         const entryPath = String(entry.path ?? '').trim();
         if (!entryPath)
             continue;
-        records.push({
+        const record = {
             path: entryPath,
             sha256: typeof entry.sha256 === 'string' && entry.sha256 ? entry.sha256 : null,
             at: Number.isFinite(Number(entry.at)) ? Number(entry.at) : 0,
             // Records written before this field existed predate the distinction, and the conservative reading
             // of an old record is the one that protects more: treat it as created.
             mode: entry.mode === 'patched' ? 'patched' : 'created',
-        });
+        };
+        // An unrecognised verdict is dropped rather than carried: the absence of the field means "no verdict",
+        // and a value this code cannot read must never be able to relax a guard by passing for a success.
+        if (DELEGATED_OUTCOMES.has(String(entry.outcome))) {
+            record.outcome = entry.outcome;
+            record.succeeded = entry.succeeded === true;
+            if (Number.isFinite(Number(entry.verdictAt)))
+                record.verdictAt = Number(entry.verdictAt);
+        }
+        records.push(record);
     }
     return records;
 }
@@ -227,4 +238,45 @@ function rememberDelegated(paths, mode = 'created') {
         if (typeof oldest === 'string')
             exports.delegatedPaths.delete(oldest);
     }
+}
+/**
+ * Stamp a unit's verdict onto the registry records for the files that unit wrote.
+ *
+ * A delegation writes the registry before its verification has run, so the record it creates cannot
+ * carry the verdict. This is the second half of that write, and the only thing that joins a per-file
+ * sha256 to a per-unit verdict -- without it "is this file settled?" has no answer, and the read guard
+ * has to ask about every delegated file for ever.
+ *
+ * Best effort, for the same reason the first half is: failing to persist must not fail a delegation that
+ * was already paid for, and an absent stamp reads as "no verdict", which is the conservative answer
+ * rather than a permissive one. Returns how many records were stamped, so a caller can tell a no-op
+ * from a write.
+ */
+function recordDelegatedOutcome(paths, outcome, succeeded, at = Date.now()) {
+    if (!Array.isArray(paths) || paths.length === 0)
+        return 0;
+    if (!DELEGATED_OUTCOMES.has(String(outcome)))
+        return 0;
+    // Canonical on both sides. The registry holds absolute paths, so unlike the read guard -- which has to
+    // infer a workspace before a relative target means anything -- there is no base here to get wrong.
+    const wanted = new Set();
+    for (const p of paths) {
+        if (typeof p === 'string' && p)
+            wanted.add((0, paths_1.canonicalisePath)(p));
+    }
+    if (wanted.size === 0)
+        return 0;
+    const records = loadDelegatedRegistry();
+    let stamped = 0;
+    for (const record of records) {
+        if (!wanted.has((0, paths_1.canonicalisePath)(record.path)))
+            continue;
+        record.outcome = outcome;
+        record.succeeded = succeeded === true;
+        record.verdictAt = at;
+        stamped += 1;
+    }
+    if (stamped > 0)
+        saveDelegatedRegistry(records);
+    return stamped;
 }

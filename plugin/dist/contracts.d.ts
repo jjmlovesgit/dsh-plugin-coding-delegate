@@ -25,6 +25,14 @@ export declare function contractViolations(before: Record<string, string | null>
  */
 export declare const delegatedPaths: Set<string>;
 export declare const DELEGATED_PATH_LIMIT = 500;
+/**
+ * What a unit's verification said about the content it wrote.
+ *
+ * `UNIT_UNVERIFIED` is the honest third answer: a delegated edit with no verification command is the
+ * common case, and it is neither a pass nor a failure. Only `UNIT_PASSED` has had its content checked,
+ * so every other value must be read as unsettled.
+ */
+export type DelegatedOutcome = 'UNIT_PASSED' | 'UNIT_FAILED' | 'UNIT_UNVERIFIED';
 /** One delegated file as it is persisted: where it is, and what was written there. */
 export interface DelegatedRecord {
     path: string;
@@ -37,6 +45,14 @@ export interface DelegatedRecord {
      * existing file becomes impossible the moment a patch to it has been delegated once.
      */
     mode: 'created' | 'patched';
+    /**
+     * The verdict of the delegation that last wrote this file, and when it was reached. Absent means no
+     * verdict covers the content in the record: nothing has verified it yet, or the file was rewritten
+     * since and the content the verdict described is gone.
+     */
+    outcome?: DelegatedOutcome;
+    succeeded?: boolean;
+    verdictAt?: number;
 }
 export declare function resolveDelegatedRegistryPath(): string;
 /**
@@ -57,3 +73,17 @@ export declare function saveDelegatedRegistry(records: DelegatedRecord[]): boole
 /** Load, validate and prune. Called at startup so a restart does not forget what was delegated. */
 export declare function loadDelegatedRegistry(): DelegatedRecord[];
 export declare function rememberDelegated(paths: string[], mode?: 'created' | 'patched'): void;
+/**
+ * Stamp a unit's verdict onto the registry records for the files that unit wrote.
+ *
+ * A delegation writes the registry before its verification has run, so the record it creates cannot
+ * carry the verdict. This is the second half of that write, and the only thing that joins a per-file
+ * sha256 to a per-unit verdict -- without it "is this file settled?" has no answer, and the read guard
+ * has to ask about every delegated file for ever.
+ *
+ * Best effort, for the same reason the first half is: failing to persist must not fail a delegation that
+ * was already paid for, and an absent stamp reads as "no verdict", which is the conservative answer
+ * rather than a permissive one. Returns how many records were stamped, so a caller can tell a no-op
+ * from a write.
+ */
+export declare function recordDelegatedOutcome(paths: string[], outcome: DelegatedOutcome, succeeded: boolean, at?: number): number;

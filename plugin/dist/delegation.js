@@ -609,6 +609,14 @@ async function delegateWorker(params = {}, tracker) {
             else
                 pendingRetryContext.delete(workspaceBase);
         }
+        // Three outcomes, not two. An unverified unit is deliberately not a success in this plugin, but it
+        // is not a failure either -- and counting it as one would inflate the very figure this field exists
+        // to produce, because an edit delegated without a verification command is the common case.
+        const unitOutcome = unitSuccess
+            ? 'UNIT_PASSED'
+            : unverified
+                ? 'UNIT_UNVERIFIED'
+                : 'UNIT_FAILED';
         // Recorded here rather than when the model answered, because the OUTCOME is the point. A unit that
         // failed is a failed attempt, and without that the ledger cannot say how much churn the architect
         // never had to see. `unitSuccess` is the unit's own verdict, matching what `resolveDelegateStatus`
@@ -623,13 +631,17 @@ async function delegateWorker(params = {}, tracker) {
                 completionTokens,
                 totalTokens,
                 elapsedMs,
-                // Three outcomes, not two. An unverified unit is deliberately not a success in this plugin, but it
-                // is not a failure either -- and counting it as one would inflate the very figure this field exists
-                // to produce, because an edit delegated without a verification command is the common case.
-                outcome: unitSuccess ? 'UNIT_PASSED' : unverified ? 'UNIT_UNVERIFIED' : 'UNIT_FAILED',
+                outcome: unitOutcome,
                 succeeded: unitSuccess,
                 bytesWritten: filesWritten.reduce((sum, f) => sum + (f.bytes || 0), 0),
             });
+        }
+        // The registry was written before the verification ran, so the record it holds cannot carry the
+        // verdict. This is the second half of that write, and the only thing that joins a per-file sha256 to
+        // a per-unit verdict. One expression feeds both records deliberately: the ledger and the registry
+        // must not be able to disagree about what happened.
+        if (filesWritten.length > 0) {
+            (0, contracts_1.recordDelegatedOutcome)(filesWritten.map((f) => f.path), unitOutcome, unitSuccess);
         }
         return {
             success: isSuccess,

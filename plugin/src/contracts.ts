@@ -73,6 +73,17 @@ export function contractViolations(
 export const delegatedPaths = new Set<string>()
 export const DELEGATED_PATH_LIMIT = 500
 
+/**
+ * What a unit's verification said about the content it wrote.
+ *
+ * `UNIT_UNVERIFIED` is the honest third answer: a delegated edit with no verification command is the
+ * common case, and it is neither a pass nor a failure. Only `UNIT_PASSED` has had its content checked,
+ * so every other value must be read as unsettled.
+ */
+export type DelegatedOutcome = 'UNIT_PASSED' | 'UNIT_FAILED' | 'UNIT_UNVERIFIED'
+
+const DELEGATED_OUTCOMES = new Set<string>(['UNIT_PASSED', 'UNIT_FAILED', 'UNIT_UNVERIFIED'])
+
 /** One delegated file as it is persisted: where it is, and what was written there. */
 export interface DelegatedRecord {
   path: string
@@ -85,6 +96,14 @@ export interface DelegatedRecord {
    * existing file becomes impossible the moment a patch to it has been delegated once.
    */
   mode: 'created' | 'patched'
+  /**
+   * The verdict of the delegation that last wrote this file, and when it was reached. Absent means no
+   * verdict covers the content in the record: nothing has verified it yet, or the file was rewritten
+   * since and the content the verdict described is gone.
+   */
+  outcome?: DelegatedOutcome
+  succeeded?: boolean
+  verdictAt?: number
 }
 
 export function resolveDelegatedRegistryPath(): string {
@@ -111,14 +130,22 @@ export function parseDelegatedRegistry(text: string): DelegatedRecord[] {
     if (!entry || typeof entry !== 'object') continue
     const entryPath = String(entry.path ?? '').trim()
     if (!entryPath) continue
-    records.push({
+    const record: DelegatedRecord = {
       path: entryPath,
       sha256: typeof entry.sha256 === 'string' && entry.sha256 ? entry.sha256 : null,
       at: Number.isFinite(Number(entry.at)) ? Number(entry.at) : 0,
       // Records written before this field existed predate the distinction, and the conservative reading
       // of an old record is the one that protects more: treat it as created.
       mode: entry.mode === 'patched' ? 'patched' : 'created',
-    })
+    }
+    // An unrecognised verdict is dropped rather than carried: the absence of the field means "no verdict",
+    // and a value this code cannot read must never be able to relax a guard by passing for a success.
+    if (DELEGATED_OUTCOMES.has(String(entry.outcome))) {
+      record.outcome = entry.outcome as DelegatedOutcome
+      record.succeeded = entry.succeeded === true
+      if (Number.isFinite(Number(entry.verdictAt))) record.verdictAt = Number(entry.verdictAt)
+    }
+    records.push(record)
   }
   return records
 }
@@ -203,4 +230,47 @@ export function rememberDelegated(paths: string[], mode: 'created' | 'patched' =
     const oldest = delegatedPaths.values().next().value
     if (typeof oldest === 'string') delegatedPaths.delete(oldest)
   }
+}
+
+/**
+ * Stamp a unit's verdict onto the registry records for the files that unit wrote.
+ *
+ * A delegation writes the registry before its verification has run, so the record it creates cannot
+ * carry the verdict. This is the second half of that write, and the only thing that joins a per-file
+ * sha256 to a per-unit verdict -- without it "is this file settled?" has no answer, and the read guard
+ * has to ask about every delegated file for ever.
+ *
+ * Best effort, for the same reason the first half is: failing to persist must not fail a delegation that
+ * was already paid for, and an absent stamp reads as "no verdict", which is the conservative answer
+ * rather than a permissive one. Returns how many records were stamped, so a caller can tell a no-op
+ * from a write.
+ */
+export function recordDelegatedOutcome(
+  paths: string[],
+  outcome: DelegatedOutcome,
+  succeeded: boolean,
+  at: number = Date.now()
+): number {
+  if (!Array.isArray(paths) || paths.length === 0) return 0
+  if (!DELEGATED_OUTCOMES.has(String(outcome))) return 0
+
+  // Canonical on both sides. The registry holds absolute paths, so unlike the read guard -- which has to
+  // infer a workspace before a relative target means anything -- there is no base here to get wrong.
+  const wanted = new Set<string>()
+  for (const p of paths) {
+    if (typeof p === 'string' && p) wanted.add(canonicalisePath(p))
+  }
+  if (wanted.size === 0) return 0
+
+  const records = loadDelegatedRegistry()
+  let stamped = 0
+  for (const record of records) {
+    if (!wanted.has(canonicalisePath(record.path))) continue
+    record.outcome = outcome
+    record.succeeded = succeeded === true
+    record.verdictAt = at
+    stamped += 1
+  }
+  if (stamped > 0) saveDelegatedRegistry(records)
+  return stamped
 }
