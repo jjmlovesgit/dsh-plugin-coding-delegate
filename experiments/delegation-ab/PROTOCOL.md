@@ -316,9 +316,73 @@ does exist. What matters for the decision rule is unchanged: for each task, one 
 | task | first arm | arm | cumulative input tokens | uncached | peak window | calls | judge |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | aggregation window | D | D | 1,050,313 | 45,257 | 64,779 | 24 | 27/27 pass |
-| aggregation window | D | S | | | | | |
+| aggregation window | D | S | — could not be run | — | — | 0 judge runs | not run |
 | TTL cache | S | S | | | | | |
 | TTL cache | S | D | | | | | |
+
+### Run 2: arm S, task 2 — the control arm cannot exist under this instrument
+
+**Arm S was blocked, and the thing that blocked it is the plugin being tested.**
+
+The arm was a fresh subagent session, given the identical task text and the frozen judge, with
+`delegate_worker` forbidden and sole authorship its job. It wrote a complete 166-line implementation —
+and could not place it, because *every* route to a source file was refused:
+
+| route attempted | result |
+| --- | --- |
+| `write` → `src/aggregation-window.js` | blocked by the local-only code guard |
+| `write` → a `.js` probe in the workspace staging dir | blocked |
+| `write` → a `.js` probe in the platform temp dir | blocked |
+| `write` → a `.cjs` runner | blocked |
+| `pwsh Set-Content` to a `.js` path | refused as naming a source file while carrying a write signal |
+| `pwsh Copy-Item` `.txt` → `.js` | refused for the same reason |
+
+The guard is global and extension-based, not path-scoped, and it refuses **reads** of `.js` paths as
+well. The string it returns — `local-only code guard` — is `guard.ts:495`, in this plugin. The architect
+of this experiment then confirmed it first-hand by attempting the same write and being refused with the
+same message, which names the only remaining route: *"Delegate new files to the local worker with
+`delegate_worker`."*
+
+**This is not an accident of the harness; it is the plugin working as designed.** A cloud context in
+this installation cannot author source. It can read, plan, and delegate — and nothing else. So a
+"standard arm", meaning one model doing everything including the writing, **cannot be run here at all**.
+One of the four cells of this design is not hard to fill; it is empty by construction.
+
+The consequences are worth stating plainly, because they cut in two directions:
+
+- **Against the claim:** the token comparison this experiment was built to make is now unrunnable. There
+  is no control to compare the delegated arm against, so the primary metric has one column and the
+  decision rule has nothing to decide. On this evidence the token claim is **not merely unsupported — it
+  is untestable in the environment where the plugin runs**, which is a weaker position than "unproven".
+- **For the claim, and more interesting:** the guard is not a limitation on the experiment, it is a
+  measurement of it. The plugin does not merely *prefer* delegation; with the cloud context unable to
+  write source, delegation is the **only** path to new code in a DSH session that has this plugin
+  installed. That is a real and previously unrecorded property of the design — and it is exactly the
+  property that makes a within-system control arm impossible. A plugin that forbids the alternative
+  cannot be benchmarked against the alternative by its own instrument.
+- **Scope of the honest statement:** this experiment can therefore speak to *what the delegated arm
+  costs* and to *what the guard forbids*. It cannot speak to whether delegation is cheaper than the
+  alternative, because the alternative is unavailable to be measured. Any comparison against a
+  non-delegating DSH session requires running that session with the plugin **disabled**, which measures
+  unimproved DSH rather than a within-plugin standard arm — a different claim, and one that should be
+  labelled as such if it is ever made.
+
+**Two other things from the arm, both worth keeping.** The implementation is staged at
+`aggregation-window.js.pending.txt` (166 lines, 6,392 bytes) and was never executed: the arm hand-traced
+it against the judge and said so rather than inventing a pass count, which is the correct behaviour and
+worth recording. And it independently reached one genuine ambiguity, reported without being asked:
+
+> `SPEC-2.md` says the clock is the only time source and that one reading is the current moment "for the
+> whole of that method", but it does not say whether a sample's stored acceptance moment comes from
+> *that* reading or from a later one.
+
+The judge's own comment resolves it — *"all three are far inside a 50ms window measured from 5"* — so a
+pinned clock must store the reading it took and sweep against the same one, giving age exactly 0. **A
+correct implementation cannot fail that check, and an incorrect one cannot pass it**, since a single
+`now()` reading stored and compared against itself is the only shape that satisfies it. So no test
+change is needed. The finding is still real and belongs to the second task's specification rather than
+its judge: the clause is underdetermined as written, and it was resolved by a judge comment rather than
+by `SPEC-2.md`. The cheaper fix is one sentence in the spec, not a weaker test.
 
 ### Run 1: arm D, task 2 (aggregation window)
 

@@ -1,0 +1,197 @@
+'use strict';
+
+// SPEC-2.md -- a bounded sliding aggregation window.
+//
+// The window keeps samples in acceptance order (oldest first) and answers every query over the samples
+// within the trailing window at the moment of the call, where that moment is one reading of the
+// injected clock.
+//
+// Storage is a growable ring buffer rather than a plain array. Both removal reasons -- age and capacity
+// -- always take the oldest sample first, so the oldest sample is always at the front of the sequence
+// and every discard is an O(1) advance of the buffer's tail. The specification places no requirement
+// on the retention structure.
+
+const REQUIRED_OPTIONS_MESSAGE =
+  'createAggregationWindow requires an options object with capacity, windowMs and now';
+
+/** TypeError helper: every construction failure surfaces as a TypeError. */
+const invalid = (message) => {
+  throw new TypeError(message);
+};
+
+/**
+ * Validates the single options object and returns its three members.
+ * Nothing is defaulted and no alias is accepted: each property is required and each is checked here,
+ * at construction, so an invalid option can never be tolerated at call time.
+ */
+const readOptions = (options) => {
+  if (typeof options !== 'object' || options === null) {
+    invalid(REQUIRED_OPTIONS_MESSAGE);
+  }
+
+  const { capacity, windowMs, now } = options;
+
+  // A positive integer: no zero, no negative, no fraction, no numeric string, no NaN, no Infinity.
+  if (typeof capacity !== 'number' || !Number.isSafeInteger(capacity) || capacity <= 0) {
+    invalid('capacity must be a positive integer');
+  }
+
+  // A positive finite number: zero, negatives, NaN and both infinities are rejected.
+  if (typeof windowMs !== 'number' || !Number.isFinite(windowMs) || windowMs <= 0) {
+    invalid('windowMs must be a positive finite number');
+  }
+
+  if (typeof now !== 'function') {
+    invalid('now must be a function returning a number of milliseconds');
+  }
+
+  return { capacity, windowMs, now };
+};
+
+/** A finite number, and nothing else: NaN, both infinities, strings, null and objects are rejected. */
+const isFiniteNumber = (value) => typeof value === 'number' && Number.isFinite(value);
+
+const createAggregationWindow = (options) => {
+  const { capacity, windowMs, now } = readOptions(options);
+
+  // Ring buffer of the retained sequence, oldest first.
+  // The sample at logical index i lives at physical index (head + i) % slots.length.
+  let slots = new Array(Math.max(4, capacity));
+  let head = 0; // logical index 0
+  let count = 0; // retained samples
+
+  // Counters are cumulative for the life of the object and survive clear().
+  let accepted = 0;
+  let evicted = 0;
+  let expired = 0;
+  let queries = 0;
+
+  /** Grows the ring, unrolling it so the logical order starts at physical index 0 again. */
+  const grow = () => {
+    const next = new Array(slots.length * 2);
+    for (let i = 0; i < count; i += 1) {
+      next[i] = slots[(head + i) % slots.length];
+    }
+    slots = next;
+    head = 0;
+  };
+
+  /** Appends one already-validated sample, accepted at moment `at`. */
+  const append = (value, at) => {
+    if (count === slots.length) {
+      grow();
+    }
+    slots[(head + count) % slots.length] = { value, at };
+    count += 1;
+  };
+
+  /** Reads the sample at logical index `i`; undefined when the index is outside the sequence. */
+  const peek = (i) => (i < 0 || i >= count ? undefined : slots[(head + i) % slots.length]);
+
+  /**
+   * Removes every sample expired at moment `at`, oldest first, incrementing `expired` once per removal.
+   * This is the sweep shared by accept, aggregate and values. Because acceptance moments are
+   * non-decreasing, the expired samples are exactly a prefix of the sequence, so the sweep stops at the
+   * first sample still inside the window.
+   */
+  const sweep = (at) => {
+    let removed = 0;
+    while (removed < count && peek(removed).at + windowMs <= at) {
+      removed += 1;
+    }
+    head = (head + removed) % slots.length;
+    count -= removed;
+    expired += removed;
+  };
+
+  /** Removes the oldest samples until at most `capacity` remain, counting one `evicted` each. */
+  const trimToCapacity = () => {
+    if (count <= capacity) {
+      return;
+    }
+    const excess = count - capacity;
+    head = (head + excess) % slots.length;
+    count -= excess;
+    evicted += excess;
+  };
+
+  return {
+    accept(value) {
+      // The only call-time validation in the specification, and it runs before anything is recorded or
+      // reconciled: a rejected value changes no counter and discards no sample.
+      if (!isFiniteNumber(value)) {
+        invalid('accepted value must be a finite number');
+      }
+
+      const at = now();
+      append(value, at);
+      accepted += 1;
+
+      // Normative order: age first, then capacity. A sample too old to remain is attributed to age even
+      // when it also exceeds capacity, because the two reasons are mutually exclusive.
+      sweep(at);
+      trimToCapacity();
+    },
+
+    aggregate() {
+      const at = now();
+      sweep(at);
+      queries += 1;
+
+      if (count === 0) {
+        return { count: 0, sum: 0, min: undefined, max: undefined, mean: undefined };
+      }
+
+      let sum = 0;
+      let min = Infinity;
+      let max = -Infinity;
+      for (let i = 0; i < count; i += 1) {
+        const { value } = peek(i);
+        sum += value;
+        if (value < min) {
+          min = value;
+        }
+        if (value > max) {
+          max = value;
+        }
+      }
+
+      return { count, sum, min, max, mean: sum / count };
+    },
+
+    values() {
+      const at = now();
+      sweep(at);
+      queries += 1;
+
+      const out = new Array(count);
+      for (let i = 0; i < count; i += 1) {
+        out[i] = peek(i).value;
+      }
+      return out;
+    },
+
+    retainedCount() {
+      // Observation only: this reads the clock and reports a count. It removes nothing -- not even
+      // expired samples -- and touches no counter.
+      const at = now();
+      let within = 0;
+      while (within < count && peek(within).at + windowMs > at) {
+        within += 1;
+      }
+      return within;
+    },
+
+    clear() {
+      // Every sample leaves unconditionally; the reason is neither age nor capacity, so no counter moves.
+      head = 0;
+      count = 0;
+    },
+
+    stats() {
+      return { accepted, evicted, expired, queries };
+    },
+  };
+};
+
+module.exports = { createAggregationWindow };
