@@ -612,9 +612,22 @@ async function delegateWorker(params = {}, tracker) {
         // Three outcomes, not two. An unverified unit is deliberately not a success in this plugin, but it
         // is not a failure either -- and counting it as one would inflate the very figure this field exists
         // to produce, because an edit delegated without a verification command is the common case.
+        //
+        // `neverRan` is the second way a contract goes unchecked, and it was missing from this expression
+        // long enough to be found by running a real delegation rather than by reading it. The first way is
+        // `unverified` -- no command was supplied. The second is `verificationGate` -- a command WAS supplied
+        // and the gate stopped it, typically because approval was not granted. Both mean the contract was
+        // never checked, which is what `resolveDelegateStatus` has always said at its own guard clause, so
+        // this asks the same question it asks rather than inventing a second answer to it.
+        //
+        // Collapsing the gate case into UNIT_FAILED was not a cosmetic mislabel. `UNIT_FAILED` is what
+        // `evaluateSettledFile` renders as "the unit that wrote it failed verification", so a file whose
+        // tests passed but which was never allowed to run them was reported to the architect as having
+        // failed -- a claim about content that nothing had established either way.
+        const neverRan = Boolean(verificationGate) || unverified;
         const unitOutcome = unitSuccess
             ? 'UNIT_PASSED'
-            : unverified
+            : neverRan
                 ? 'UNIT_UNVERIFIED'
                 : 'UNIT_FAILED';
         // Recorded here rather than when the model answered, because the OUTCOME is the point. A unit that

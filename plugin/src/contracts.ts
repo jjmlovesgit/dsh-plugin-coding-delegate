@@ -119,9 +119,16 @@ export function lookupDelegatedRecord(canonicalPath: string): DelegatedRecord | 
 /**
  * What a unit's verification said about the content it wrote.
  *
- * `UNIT_UNVERIFIED` is the honest third answer: a delegated edit with no verification command is the
- * common case, and it is neither a pass nor a failure. Only `UNIT_PASSED` has had its content checked,
- * so every other value must be read as unsettled.
+ * `UNIT_UNVERIFIED` is the honest third answer: a delegated edit whose contract was never checked is
+ * neither a pass nor a failure. Only `UNIT_PASSED` has had its content checked, so every other value
+ * must be read as unsettled.
+ *
+ * There are two routes to it, and a record does not say which was taken. The common one is that no
+ * verification command was supplied at all. The other is that a command was supplied and the gate
+ * stopped it -- typically approval was refused, and nothing ran. The first is an absence of evidence
+ * and the second is a decision not to gather any, but both leave the content exactly as unestablished,
+ * which is the only thing this field is for. Consumers must therefore word their explanations in terms
+ * of the contract that went unchecked rather than of whether a command was written down.
  */
 export type DelegatedOutcome = 'UNIT_PASSED' | 'UNIT_FAILED' | 'UNIT_UNVERIFIED'
 

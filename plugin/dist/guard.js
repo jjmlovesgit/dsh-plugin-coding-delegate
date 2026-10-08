@@ -419,7 +419,15 @@ function evaluateSettledFile(record, currentHash) {
         return { allowed: false, reason: 'the unit that wrote it failed verification.' };
     }
     if (record.outcome === 'UNIT_UNVERIFIED') {
-        return { allowed: false, reason: 'no verification command was given for the unit that wrote it.' };
+        // Deliberately about the CONTRACT rather than about whether a command was written down, because a
+        // registry record does not carry that distinction and guessing it produced a false statement here.
+        // This message used to read "no verification command was given for the unit that wrote it", which was
+        // wrong whenever the gate was what stopped the check -- a command had been given, and approval was
+        // refused. Both are cases of a contract that was never checked, which is the fact the reader needs.
+        return {
+            allowed: false,
+            reason: 'the unit that wrote it was never verified, so nothing has been established about its content.',
+        };
     }
     if (record.outcome !== 'UNIT_PASSED' || record.succeeded !== true) {
         return { allowed: false, reason: 'the registry holds no verdict for it.' };

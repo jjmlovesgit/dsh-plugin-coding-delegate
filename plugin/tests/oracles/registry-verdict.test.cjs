@@ -136,6 +136,39 @@ test('an unverified unit stamps UNIT_UNVERIFIED, which is neither a pass nor a f
   assert.equal(record.succeeded, false, 'and never a success');
 });
 
+test('a verification that was never APPROVED stamps UNIT_UNVERIFIED, not UNIT_FAILED', async () => {
+  // Found by running the delegation experiment, not by reasoning about it.
+  //
+  // A command was supplied, so `unverified` is false and the gate is what stopped it. The status was
+  // already right -- VERIFICATION_NOT_APPROVED, because nothing ran -- but the OUTCOME collapsed it to
+  // UNIT_FAILED, and `UNIT_FAILED` is what the read guard turns into "the unit that wrote it failed
+  // verification". That message was untrue: the unit's tests were never executed, so nothing was
+  // disproven. Two different facts -- "it ran and failed" and "it never ran" -- were sharing one label,
+  // and the label asserted the first.
+  //
+  // The default policy is `mode: 'ask'` with no approver, which is exactly the operator case of a
+  // refusal, so this needs no special setup: it is what an unapproved delegation actually does.
+  const dir = tmp();
+  const verdict = await runAgainstWorker(emitted('unapproved.ts'), {
+    taskName: 'verdict-not-approved',
+    instruction: 'Write unapproved.ts.',
+    targetFiles: ['unapproved.ts'],
+    workspaceDir: dir,
+    runVerification: 'node checks.js',
+  });
+
+  assert.equal(verdict.status, 'VERIFICATION_NOT_APPROVED', 'nothing ran, so the outcome is unknown');
+  assert.match(String(verdict.verificationSkipped), /approval was not granted/, 'and it says why');
+
+  const record = registryRecord('unapproved.ts');
+  assert.equal(
+    record.outcome,
+    'UNIT_UNVERIFIED',
+    'a unit whose check never ran is unverified -- it must not be recorded as having failed'
+  );
+  assert.equal(record.succeeded, false, 'and it is still not a success');
+});
+
 test('the verdict survives a save/load round trip, and an unknown one is refused', () => {
   const { parseDelegatedRegistry } = require(CONTRACTS);
   const parsed = parseDelegatedRegistry(
