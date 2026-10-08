@@ -797,3 +797,11 @@ require more than the specification states. Those seven assertions are in
 - Credential detection is pattern-based plus an entropy backstop. It cannot recognise
   confidential material that looks ordinary — proprietary code, customer data or PII are
   caught by neither layer.
+- **The read gate covers search, and what it does not cover is the leak itself.** An agent was refused by
+  the read guard on four source files and then read the same content out of them with the search tool, so
+  the gate now treats `grep`, `rg`, `findstr`, `select-string` and shell readers as reads: an unsettled
+  delegated file can no longer be pulled into the architect's context by searching for it. But a search
+  whose reachable delegated files have all passed and are unchanged still returns them silently — the same
+  rule that lets the architect read finished work — and results cannot be filtered, because
+  `tools/pre-execute` returns a decision rather than a result. A search the operator allows delivers its
+  matches.

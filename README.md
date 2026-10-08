@@ -293,6 +293,12 @@ preload that redirects the plugin's data directory to a temp home: `vitest.confi
 but `node --test` never loads it, so a bare invocation writes test fixtures into your live
 `~/.dsh/local-router/router-debug.log`. `scripts/check-oracle-isolation.cjs` is the contract check for it.
 
+`scripts/check-readme-consistency.cjs` is the same kind of check aimed at this documentation. The two
+READMEs necessarily state some of the same facts — the package README has to stand alone — and duplicated
+facts drift: the plugin's policy table had seven rules while this file had eight, and a section here
+declared "Four things" above a list of five. It fails when the policy tables disagree on their rules, or
+when a declared count does not match the list beneath it.
+
 ### The host contract, and judging a contract
 
 Both are documented with the thing they check, in [`plugin/README.md`](plugin/README.md):
