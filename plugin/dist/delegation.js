@@ -409,18 +409,6 @@ async function delegateWorker(params = {}, tracker) {
         const promptTokens = data.usage?.prompt_tokens ?? estimateTokenCount(combinedPrompt);
         const completionTokens = data.usage?.completion_tokens ?? estimateTokenCount(content);
         const totalTokens = data.usage?.total_tokens ?? promptTokens + completionTokens;
-        if (tracker) {
-            tracker.recordUsage({
-                turn: turnId,
-                route: 'WORKER_LOCAL',
-                model,
-                reason: 'SUBAGENT_DELEGATION (' + (params.taskName || 'subtask') + ')',
-                promptTokens,
-                completionTokens,
-                totalTokens,
-                elapsedMs,
-            });
-        }
         if (!fs.existsSync(workspaceBase)) {
             try {
                 fs.mkdirSync(workspaceBase, { recursive: true });
@@ -620,6 +608,25 @@ async function delegateWorker(params = {}, tracker) {
                 pendingRetryContext.set(workspaceBase, failureLocations);
             else
                 pendingRetryContext.delete(workspaceBase);
+        }
+        // Recorded here rather than when the model answered, because the OUTCOME is the point. A unit that
+        // failed is a failed attempt, and without that the ledger cannot say how much churn the architect
+        // never had to see. `unitSuccess` is the unit's own verdict, matching what `resolveDelegateStatus`
+        // is given, so a coherence failure does not read as a failed attempt by this unit.
+        if (tracker) {
+            tracker.recordUsage({
+                turn: turnId,
+                route: 'WORKER_LOCAL',
+                model,
+                reason: 'SUBAGENT_DELEGATION (' + (params.taskName || 'subtask') + ')',
+                promptTokens,
+                completionTokens,
+                totalTokens,
+                elapsedMs,
+                outcome: unitSuccess ? 'UNIT_PASSED' : 'UNIT_FAILED',
+                succeeded: unitSuccess,
+                bytesWritten: filesWritten.reduce((sum, f) => sum + (f.bytes || 0), 0),
+            });
         }
         return {
             success: isSuccess,

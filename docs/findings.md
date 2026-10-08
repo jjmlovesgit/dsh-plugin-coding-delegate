@@ -343,3 +343,26 @@ error, a passing run tells you nothing until you have watched it fail. This proj
 shape three times: the fence scanner that truncated a body containing a fence, `isSuccess` conflating the
 unit and project verdicts, and this. Each was found by disbelieving a green result.
 
+## The architect's usage hooks are wired but never fire
+
+`index.ts` records architect turns — `tracker.recordUsage({ route: 'ARCHITECT_CLOUD', ... })` — from
+`agent/post-step`, `agent/step-finish` and `agent/assistant-stream`. The ledger contains **zero** of them:
+245 entries, every one `WORKER_LOCAL`, across a day in which the DeepSeek console reports **1,325 API
+requests**.
+
+So `cloudTurns`, `architectTurns`, `totalCloudTokens` and `totalSpendUSD` are permanently zero in practice.
+The accounting itself is sound — `tests/savings-tracker.test.ts` asserts `ledger.cloudTurns === 1` for a
+direct `recordUsage` call and passes — so this is not a counting bug. The hooks simply never deliver
+`usage` on this host.
+
+**Why it matters less than it looks, and where the fix should go.** The ledger is a delegation log; the
+architect side is measured elsewhere and works. `context-quality.ts` folds `assistant/message` off the
+`session/event` firehose and counts model calls correctly — 147 recorded in one session log, consistent
+with a host status line reading 980 steps. One instrument works and one is dead. The right move is to
+build the missing measurement on the working one rather than to resurrect the dead one.
+
+**Not investigated:** *why* the hooks carry no usage. That is a host-integration question, and the answer
+decides whether they are fixable or should be deleted — a field that is always zero is worse than an absent
+one, because it reads as measured data. The four fields now exist alongside a `scope` string that says what
+the ledger actually covers, which is the cheapest available guard against being read as a session record.
+

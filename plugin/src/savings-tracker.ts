@@ -27,6 +27,17 @@ export interface StepUsage {
   totalTokens: number
   cacheHitTokens?: number
   elapsedMs?: number
+  /**
+   * What a unit decided, when this record is a delegation rather than a bare model call.
+   *
+   * Absent for anything that is not a unit verdict. Its presence is what makes a record a delegation,
+   * so the ledger counts delegations without parsing the routing reason.
+   */
+  outcome?: string
+  /** Whether that verdict was a success. The signal that makes absorbed retries countable. */
+  succeeded?: boolean
+  /** File bytes this unit produced -- content the architect never carried. */
+  bytesWritten?: number
 }
 
 export interface TurnRecord {
@@ -41,7 +52,14 @@ export interface TurnRecord {
   totalTokensEst: number
   cacheHitRateEst: number
   costUSD: number
-  savedUSD: number
+  /**
+   * What these tokens would have cost at the metered tier. NOT a saving: the local GPU is a fixed cost
+   * this plugin neither pays for nor reduces. See the audit line in `recordUsage`.
+   */
+  cloudEquivUSD: number
+  outcome?: string
+  succeeded?: boolean
+  bytesWritten?: number
   elapsedMs?: number
   tokensPerSecond?: number
 }
@@ -58,7 +76,22 @@ export interface LedgerSummary {
   totalCloudTokens: number
   totalSpendUSD?: number
   totalCostUSD: number
-  totalSavedUSD: number
+  /** Cumulative metered-tier equivalent of the delegated work. Not money saved. */
+  totalCloudEquivUSD: number
+  /** Delegations recorded, and how many of them came back as failures. */
+  delegations?: number
+  failedDelegations?: number
+  /**
+   * File bytes produced by delegated work -- content that never entered the architect's context. This,
+   * not any dollar figure, is what the plugin claims: code and churn stay in the worker so the
+   * architect's window holds decisions. See `docs/experiment.md`.
+   */
+  bytesKeptOut?: number
+  /**
+   * What this file covers. Stated in the file because four of its fields were once read as session-wide
+   * when the ledger only ever records delegated work.
+   */
+  scope?: string
   recentEvents?: TurnRecord[]
   history: TurnRecord[]
 }
@@ -113,17 +146,17 @@ export class SavingsTracker {
     const cacheMissTokens = Math.max(0, promptTokens - cacheHitTokens)
 
     let costUSD = 0
-    let savedUSD = 0
+    let cloudEquivUSD = 0
 
     const isLocal = route === 'WORKER_LOCAL' || route === 'local'
 
     if (isLocal) {
       costUSD = 0
-      savedUSD = parseFloat(
+      cloudEquivUSD = parseFloat(
         (promptTokens * PRICING.INPUT_CACHE_MISS + completionTokens * PRICING.OUTPUT_GENERATION).toFixed(6)
       )
     } else {
-      savedUSD = 0
+      cloudEquivUSD = 0
       costUSD = parseFloat(
         (
           cacheHitTokens * PRICING.INPUT_CACHE_HIT +
@@ -153,7 +186,13 @@ export class SavingsTracker {
       totalTokensEst: totalTokens,
       cacheHitRateEst,
       costUSD,
-      savedUSD,
+      cloudEquivUSD,
+      // The verdict, when there is one. Its presence is what marks this record a delegation rather than
+      // a bare model call, which is how the ledger counts delegations and absorbed failures without
+      // having to parse the routing reason.
+      ...(usage.outcome !== undefined ? { outcome: usage.outcome } : {}),
+      ...(usage.succeeded !== undefined ? { succeeded: usage.succeeded } : {}),
+      ...(usage.bytesWritten !== undefined ? { bytesWritten: usage.bytesWritten } : {}),
       ...(elapsedMs !== undefined ? { elapsedMs } : {}),
       ...(tokensPerSecond !== undefined ? { tokensPerSecond } : {}),
     }
@@ -168,7 +207,7 @@ export class SavingsTracker {
     // reduces, so nothing here is money saved: a local card does not pay for itself against a
     // metered plan. This figure is what those tokens would have cost at the metered tier, which
     // measures the plan's exposure rather than a saving.
-    const auditMsg = `[LEDGER_AUDIT] Step ${turn} [${route.toUpperCase()}] -> Model: ${model} | Reason: ${reason} | Tokens: ${totalTokens} (Prompt: ${promptTokens}, Completion: ${completionTokens}, CacheHit: ${cacheHitTokens})${rateText} | Cost: $${costUSD.toFixed(6)} | CloudEquiv: $${savedUSD.toFixed(6)} | Metered: ${ledger.totalCloudTokens} tok | Local: ${ledger.totalLocalTokens} tok`
+    const auditMsg = `[LEDGER_AUDIT] Step ${turn} [${route.toUpperCase()}] -> Model: ${model} | Reason: ${reason} | Tokens: ${totalTokens} (Prompt: ${promptTokens}, Completion: ${completionTokens}, CacheHit: ${cacheHitTokens})${rateText} | Cost: $${costUSD.toFixed(6)} | CloudEquiv: $${cloudEquivUSD.toFixed(6)} | Metered: ${ledger.totalCloudTokens} tok | Local: ${ledger.totalLocalTokens} tok | Delegations: ${ledger.delegations ?? 0} (failed ${ledger.failedDelegations ?? 0}) | Kept out: ${ledger.bytesKeptOut ?? 0} B`
     console.log(auditMsg)
 
     return record
@@ -258,7 +297,11 @@ export class SavingsTracker {
       totalCloudTokens: 0,
       totalSpendUSD: 0,
       totalCostUSD: 0,
-      totalSavedUSD: 0,
+      totalCloudEquivUSD: 0,
+      delegations: 0,
+      failedDelegations: 0,
+      bytesKeptOut: 0,
+      scope: '',
       recentEvents: [],
       history: [],
     }
@@ -270,6 +313,14 @@ export class SavingsTracker {
       }
     } catch {}
 
+    // Carried forward from the name this used to have. The name was wrong, not the number: the local GPU
+    // is a fixed cost, so nothing here is money saved. Losing the history to a rename would be its own
+    // small dishonesty.
+    if (ledger.totalCloudEquivUSD === undefined && (ledger as any).totalSavedUSD !== undefined) {
+      ledger.totalCloudEquivUSD = (ledger as any).totalSavedUSD
+    }
+    delete (ledger as any).totalSavedUSD
+
     ledger.totalTurns += 1
     ledger.totalTokens = (ledger.totalTokens || 0) + record.totalTokensEst
 
@@ -277,7 +328,9 @@ export class SavingsTracker {
       ledger.localTurns += 1
       if (record.route === 'WORKER_LOCAL') ledger.workerTurns = (ledger.workerTurns || 0) + 1
       ledger.totalLocalTokens += record.totalTokensEst
-      ledger.totalSavedUSD = parseFloat(((ledger.totalSavedUSD || 0) + record.savedUSD).toFixed(6))
+      ledger.totalCloudEquivUSD = parseFloat(
+        ((ledger.totalCloudEquivUSD || 0) + record.cloudEquivUSD).toFixed(6)
+      )
     } else if (record.route === 'cloud-failover') {
       ledger.failoverTurns = (ledger.failoverTurns || 0) + 1
       ledger.totalCloudTokens += record.totalTokensEst
@@ -290,6 +343,22 @@ export class SavingsTracker {
       ledger.totalCostUSD = parseFloat(((ledger.totalCostUSD || 0) + record.costUSD).toFixed(6))
       ledger.totalSpendUSD = ledger.totalCostUSD
     }
+
+    // Context hygiene, not money. These count what the architect never had to carry: content the worker
+    // produced, and attempts that came back as failures. The compounding is the point -- what is kept out
+    // of the window is kept out of every later call, not only the one that produced it.
+    if (record.outcome !== undefined) {
+      ledger.delegations = (ledger.delegations || 0) + 1
+      if (record.succeeded === false) ledger.failedDelegations = (ledger.failedDelegations || 0) + 1
+    }
+    if (record.bytesWritten) {
+      ledger.bytesKeptOut = (ledger.bytesKeptOut || 0) + record.bytesWritten
+    }
+
+    // Stated in the file, because four of these fields were once read as session-wide when the ledger has
+    // only ever recorded delegated work. A measurement whose scope is implicit will be misread.
+    ledger.scope =
+      'cumulative across sessions; records delegated worker calls, not architect turns or a session total'
 
     ledger.history.push(record)
 

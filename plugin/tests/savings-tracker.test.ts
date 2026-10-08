@@ -38,7 +38,7 @@ describe('SavingsTracker Test Suite', () => {
     expect(summary.completionTokensEst).toBe(2000)
     expect(summary.totalTokensEst).toBe(12000)
     expect(summary.costUSD).toBeGreaterThan(0)
-    expect(summary.savedUSD).toBe(0)
+    expect(summary.cloudEquivUSD).toBe(0)
 
     // Cost calc: 8000 * 0.014/1M + 2000 * 0.14/1M + 2000 * 0.28/1M = 0.000112 + 0.000280 + 0.000560 = 0.000952
     expect(summary.costUSD).toBe(0.000952)
@@ -55,7 +55,10 @@ describe('SavingsTracker Test Suite', () => {
     expect(ledger.recentEvents).toHaveLength(1)
   })
 
-  it('Calculates positive savings for WORKER_LOCAL turns', () => {
+  // Named for what it computes. The field used to be called `savedUSD`, which claimed something the
+  // code's own audit line had already stopped claiming: a local GPU is a fixed cost, so this is the
+  // metered-tier equivalent of the work, not money saved.
+  it('Computes a non-zero metered-tier equivalent for WORKER_LOCAL turns', () => {
     const tracker = new SavingsTracker(tmpDir)
 
     const summary = tracker.recordUsage({
@@ -71,14 +74,14 @@ describe('SavingsTracker Test Suite', () => {
     expect(summary).not.toBeNull()
     expect(summary.route).toBe('WORKER_LOCAL')
     expect(summary.costUSD).toBe(0)
-    // Saved calc: 10000 * 0.14/1M + 2000 * 0.28/1M = 0.001400 + 0.000560 = 0.00196
-    expect(summary.savedUSD).toBe(0.00196)
+    // CloudEquiv calc: 10000 * 0.14/1M + 2000 * 0.28/1M = 0.001400 + 0.000560 = 0.00196
+    expect(summary.cloudEquivUSD).toBe(0.00196)
 
     const ledgerFile = path.join(tmpDir, 'savings-ledger.json')
     const ledger = JSON.parse(fs.readFileSync(ledgerFile, 'utf8'))
     expect(ledger.totalTurns).toBe(1)
     expect(ledger.workerTurns).toBe(1)
     expect(ledger.totalLocalTokens).toBe(12000)
-    expect(ledger.totalSavedUSD).toBe(0.00196)
+    expect(ledger.totalCloudEquivUSD).toBe(0.00196)
   })
 })

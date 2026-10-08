@@ -78,14 +78,14 @@ class SavingsTracker {
         const cacheHitTokens = Math.min(promptTokens, usage.cacheHitTokens ?? 0);
         const cacheMissTokens = Math.max(0, promptTokens - cacheHitTokens);
         let costUSD = 0;
-        let savedUSD = 0;
+        let cloudEquivUSD = 0;
         const isLocal = route === 'WORKER_LOCAL' || route === 'local';
         if (isLocal) {
             costUSD = 0;
-            savedUSD = parseFloat((promptTokens * exports.PRICING.INPUT_CACHE_MISS + completionTokens * exports.PRICING.OUTPUT_GENERATION).toFixed(6));
+            cloudEquivUSD = parseFloat((promptTokens * exports.PRICING.INPUT_CACHE_MISS + completionTokens * exports.PRICING.OUTPUT_GENERATION).toFixed(6));
         }
         else {
-            savedUSD = 0;
+            cloudEquivUSD = 0;
             costUSD = parseFloat((cacheHitTokens * exports.PRICING.INPUT_CACHE_HIT +
                 cacheMissTokens * exports.PRICING.INPUT_CACHE_MISS +
                 completionTokens * exports.PRICING.OUTPUT_GENERATION).toFixed(6));
@@ -107,7 +107,13 @@ class SavingsTracker {
             totalTokensEst: totalTokens,
             cacheHitRateEst,
             costUSD,
-            savedUSD,
+            cloudEquivUSD,
+            // The verdict, when there is one. Its presence is what marks this record a delegation rather than
+            // a bare model call, which is how the ledger counts delegations and absorbed failures without
+            // having to parse the routing reason.
+            ...(usage.outcome !== undefined ? { outcome: usage.outcome } : {}),
+            ...(usage.succeeded !== undefined ? { succeeded: usage.succeeded } : {}),
+            ...(usage.bytesWritten !== undefined ? { bytesWritten: usage.bytesWritten } : {}),
             ...(elapsedMs !== undefined ? { elapsedMs } : {}),
             ...(tokensPerSecond !== undefined ? { tokensPerSecond } : {}),
         };
@@ -119,7 +125,7 @@ class SavingsTracker {
         // reduces, so nothing here is money saved: a local card does not pay for itself against a
         // metered plan. This figure is what those tokens would have cost at the metered tier, which
         // measures the plan's exposure rather than a saving.
-        const auditMsg = `[LEDGER_AUDIT] Step ${turn} [${route.toUpperCase()}] -> Model: ${model} | Reason: ${reason} | Tokens: ${totalTokens} (Prompt: ${promptTokens}, Completion: ${completionTokens}, CacheHit: ${cacheHitTokens})${rateText} | Cost: $${costUSD.toFixed(6)} | CloudEquiv: $${savedUSD.toFixed(6)} | Metered: ${ledger.totalCloudTokens} tok | Local: ${ledger.totalLocalTokens} tok`;
+        const auditMsg = `[LEDGER_AUDIT] Step ${turn} [${route.toUpperCase()}] -> Model: ${model} | Reason: ${reason} | Tokens: ${totalTokens} (Prompt: ${promptTokens}, Completion: ${completionTokens}, CacheHit: ${cacheHitTokens})${rateText} | Cost: $${costUSD.toFixed(6)} | CloudEquiv: $${cloudEquivUSD.toFixed(6)} | Metered: ${ledger.totalCloudTokens} tok | Local: ${ledger.totalLocalTokens} tok | Delegations: ${ledger.delegations ?? 0} (failed ${ledger.failedDelegations ?? 0}) | Kept out: ${ledger.bytesKeptOut ?? 0} B`;
         console.log(auditMsg);
         return record;
     }
@@ -187,7 +193,11 @@ class SavingsTracker {
             totalCloudTokens: 0,
             totalSpendUSD: 0,
             totalCostUSD: 0,
-            totalSavedUSD: 0,
+            totalCloudEquivUSD: 0,
+            delegations: 0,
+            failedDelegations: 0,
+            bytesKeptOut: 0,
+            scope: '',
             recentEvents: [],
             history: [],
         };
@@ -198,6 +208,13 @@ class SavingsTracker {
             }
         }
         catch { }
+        // Carried forward from the name this used to have. The name was wrong, not the number: the local GPU
+        // is a fixed cost, so nothing here is money saved. Losing the history to a rename would be its own
+        // small dishonesty.
+        if (ledger.totalCloudEquivUSD === undefined && ledger.totalSavedUSD !== undefined) {
+            ledger.totalCloudEquivUSD = ledger.totalSavedUSD;
+        }
+        delete ledger.totalSavedUSD;
         ledger.totalTurns += 1;
         ledger.totalTokens = (ledger.totalTokens || 0) + record.totalTokensEst;
         if (record.route === 'WORKER_LOCAL' || record.route === 'local') {
@@ -205,7 +222,7 @@ class SavingsTracker {
             if (record.route === 'WORKER_LOCAL')
                 ledger.workerTurns = (ledger.workerTurns || 0) + 1;
             ledger.totalLocalTokens += record.totalTokensEst;
-            ledger.totalSavedUSD = parseFloat(((ledger.totalSavedUSD || 0) + record.savedUSD).toFixed(6));
+            ledger.totalCloudEquivUSD = parseFloat(((ledger.totalCloudEquivUSD || 0) + record.cloudEquivUSD).toFixed(6));
         }
         else if (record.route === 'cloud-failover') {
             ledger.failoverTurns = (ledger.failoverTurns || 0) + 1;
@@ -221,6 +238,21 @@ class SavingsTracker {
             ledger.totalCostUSD = parseFloat(((ledger.totalCostUSD || 0) + record.costUSD).toFixed(6));
             ledger.totalSpendUSD = ledger.totalCostUSD;
         }
+        // Context hygiene, not money. These count what the architect never had to carry: content the worker
+        // produced, and attempts that came back as failures. The compounding is the point -- what is kept out
+        // of the window is kept out of every later call, not only the one that produced it.
+        if (record.outcome !== undefined) {
+            ledger.delegations = (ledger.delegations || 0) + 1;
+            if (record.succeeded === false)
+                ledger.failedDelegations = (ledger.failedDelegations || 0) + 1;
+        }
+        if (record.bytesWritten) {
+            ledger.bytesKeptOut = (ledger.bytesKeptOut || 0) + record.bytesWritten;
+        }
+        // Stated in the file, because four of these fields were once read as session-wide when the ledger has
+        // only ever recorded delegated work. A measurement whose scope is implicit will be misread.
+        ledger.scope =
+            'cumulative across sessions; records delegated worker calls, not architect turns or a session total';
         ledger.history.push(record);
         if (ledger.history.length > 500) {
             ledger.history = ledger.history.slice(-500);
