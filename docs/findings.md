@@ -673,3 +673,45 @@ exists to prevent — the architect authoring its own verdicts. The wrong verdic
 two files ask with a reason that is not true, and the next write of each file supersedes it. Verifications are
 written as plain commands from now on.
 
+## The contract that could not be satisfied, and the guard that called it sound
+
+The experiment written up in `docs/experiment.md` spent three consecutive runs of its implementation loop at
+**13/14, 12/14, 12/14**, and the obvious reading — the local worker has hit its ceiling — was wrong. The
+artefact that was failing was the contract, and it was failing in a way no implementation could have fixed:
+
+| line | assertion | state of the entry |
+| --- | --- | --- |
+| `tests/ttl-cache.test.js:91` | `has('b') === false` — *"b is expired, has returns false"* | expired |
+| `tests/ttl-cache.test.js:132` | `has('b') === true` — *"b (MRU, expired) should NOT be evicted"* | expired |
+
+One predicate, opposite expectations. The second test wanted to show that an entry had **not been evicted**,
+and reached for `has` to show it — but `has` answers liveness, so an expired entry answers `false` whether
+or not it is still sitting in the cache. The probe was wrong, and every assertion built on it was
+unsatisfiable. A second pair of failures came from the same contract counting **total** entries against
+`maxEntries` where the specification counts live ones; a spec-faithful module is *required* not to evict
+there, so the test could only pass by being wrong.
+
+What makes this worth recording is not the bug but how long it survived every check the project has.
+`contractFiles` hashing proved the file never changed during a unit. The null-implementation guard
+(`scripts/check-contract.cjs`) reported **"OK: the contract is well-formed and discriminating"** for it,
+because the contract does assert and does discriminate — the guard decides vacuity and malfunction, and has
+no access to the specification, so it cannot decide *faithfulness* to it. And the architect, the one party
+holding both the specification and a reason to check, cannot read the contract at all (rule 3).
+
+The consequence is the part that generalises. Where a contract fault is real, the loop has **no terminating
+condition**: it keeps delegating fixes to a module that already conforms, and the plateau it produces is
+indistinguishable from a limit on the worker. Catching it needs a question the guard does not ask today —
+*is this contract satisfiable, and does it test what the specification says?* — and the only evidence
+available to the architect is the specification itself. That is what settled this one: the specification's
+requirements, written as checks and run against the module independently of the contract, passed **16 of
+16** while the contract still failed two tests.
+
+It was closed by leaving the contract untouched as evidence and transcribing a sibling,
+`tests/ttl-cache.spec.test.js`, from the specification — 14/14 against the unchanged module, 14/14 by
+assertion against a null one, guard-clean. The one part of that transcription to go wrong first is the
+useful part. The two tests that had to be corrected were specified **scenario by scenario**, with every
+clock advance and every expected counter written out. The one area left as a description — `purge` — came
+back with a scenario whose own comment declared an entry live at `t=110` when its expiry made it expired at
+`t=100`, so the assertion contradicted the scenario it was written to test. Specifying an area does not
+transfer the reasoning; specifying a scenario does.
+

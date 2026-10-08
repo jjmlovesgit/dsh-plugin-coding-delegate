@@ -1,85 +1,149 @@
-class TTLCache {
-  constructor({ maxEntries = Infinity, ttlMs = Infinity } = {}) {
-    if (!Number.isInteger(maxEntries) || maxEntries < 1) {
-      throw new TypeError('maxEntries must be a positive integer');
-    }
-    if (!Number.isFinite(ttlMs) || ttlMs < 0) {
-      throw new TypeError('ttlMs must be a non-negative number');
-    }
-    this._maxEntries = maxEntries;
-    this._ttlMs = ttlMs;
-    this._map = new Map();
-    this._now = 0;
-    this._stats = { hits: 0, misses: 0, evictions: 0, expirations: 0 };
+'use strict';
+
+function createTtlCache(options) {
+  if (options === null || typeof options !== 'object') {
+    throw new TypeError('options must be an object');
   }
 
-  set now(ms) {
-    if (!Number.isFinite(ms) || ms < 0) {
-      throw new TypeError('now must be a non-negative number');
-    }
-    this._now = ms;
+  const { maxEntries, ttlMs, now } = options;
+
+  if (!Number.isInteger(maxEntries) || maxEntries <= 0) {
+    throw new TypeError('maxEntries must be a positive integer');
+  }
+  if (typeof ttlMs !== 'number' || !Number.isFinite(ttlMs) || ttlMs <= 0) {
+    throw new TypeError('ttlMs must be a positive finite number');
+  }
+  if (typeof now !== 'function') {
+    throw new TypeError('now must be a function');
   }
 
-  get now() {
-    return this._now;
+  // Map preserves insertion order. We maintain it so that the first key is
+  // the least-recently-used and the last key is the most-recently-used.
+  const store = new Map();
+
+  const stats = {
+    hits: 0,
+    misses: 0,
+    evictions: 0,
+    expirations: 0,
+  };
+
+  function isExpired(entry) {
+    return now() >= entry.expiry;
   }
 
-  set(key, value) {
-    const existing = this._map.get(key);
-    if (existing) {
-      existing.value = value;
-      existing.expiresAt = this._now + this._ttlMs;
-      this._map.delete(key);
-      this._map.set(key, existing);
-      return;
+  function liveCount() {
+    let count = 0;
+    for (const entry of store.values()) {
+      if (!isExpired(entry)) count += 1;
     }
-    if (this._map.size >= this._maxEntries) {
-      const lruKey = this._map.keys().next().value;
-      this._map.delete(lruKey);
-      this._stats.evictions++;
-    }
-    this._map.set(key, { value, expiresAt: this._now + this._ttlMs });
+    return count;
   }
 
-  get(key) {
-    const entry = this._map.get(key);
-    if (!entry) {
-      this._stats.misses++;
+  function evictUntilWithinBound() {
+    // Evict least-recently-used first (front of the Map), strictly by recency,
+    // until the number of live entries is at or below maxEntries.
+    while (liveCount() > maxEntries) {
+      const oldestKey = store.keys().next().value;
+      store.delete(oldestKey);
+      stats.evictions += 1;
+    }
+  }
+
+  function set(key, value) {
+    const expiry = now() + ttlMs;
+
+    if (store.has(key)) {
+      // Replace: refresh value + expiry, and move to most-recently-used.
+      store.delete(key);
+      store.set(key, { value, expiry });
+    } else {
+      store.set(key, { value, expiry });
+    }
+
+    evictUntilWithinBound();
+  }
+
+  function get(key) {
+    if (!store.has(key)) {
+      stats.misses += 1;
       return undefined;
     }
-    if (this._now >= entry.expiresAt) {
-      this._map.delete(key);
-      this._stats.expirations++;
-      this._stats.misses++;
+
+    const entry = store.get(key);
+
+    if (isExpired(entry)) {
+      store.delete(key);
+      stats.expirations += 1;
+      stats.misses += 1;
       return undefined;
     }
-    this._map.delete(key);
-    this._map.set(key, entry);
-    this._stats.hits++;
+
+    // Live: refresh recency by re-inserting at the end.
+    store.delete(key);
+    store.set(key, entry);
+    stats.hits += 1;
     return entry.value;
   }
 
-  has(key) {
-    const entry = this._map.get(key);
-    if (!entry) return false;
-    return this._now < entry.expiresAt;
+  function has(key) {
+    if (!store.has(key)) return false;
+    const entry = store.get(key);
+    return !isExpired(entry);
   }
 
-  delete(key) {
-    return this._map.delete(key);
+  function deleteKey(key) {
+    if (!store.has(key)) return false;
+    store.delete(key);
+    return true;
   }
 
-  clear() {
-    this._map.clear();
+  function clear() {
+    store.clear();
   }
 
-  get size() {
-    return this._map.size;
+  function purge() {
+    let removed = 0;
+    for (const [key, entry] of store) {
+      if (isExpired(entry)) {
+        store.delete(key);
+        removed += 1;
+      }
+    }
+    stats.expirations += removed;
+    return removed;
   }
 
-  stats() {
-    return { ...this._stats };
+  function size() {
+    return liveCount();
   }
+
+  function statsSnapshot() {
+    return {
+      hits: stats.hits,
+      misses: stats.misses,
+      evictions: stats.evictions,
+      expirations: stats.expirations,
+    };
+  }
+
+  const cache = {
+    set,
+    get,
+    has,
+    delete: deleteKey,
+    clear,
+    purge,
+    stats: statsSnapshot,
+  };
+
+  Object.defineProperty(cache, 'size', {
+    enumerable: true,
+    configurable: true,
+    get: size,
+  });
+
+  return cache;
 }
 
-module.exports = { TTLCache };
+module.exports = { createTtlCache };

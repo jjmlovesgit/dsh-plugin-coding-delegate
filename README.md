@@ -317,6 +317,13 @@ discriminating, and still test the wrong behaviours; this guard removes one clas
 them. See [`docs/experiment.md`](docs/experiment.md), where it exonerated a contract the architect had
 already published a misdiagnosis of.
 
+**And it cannot see an unsatisfiable contract.** That is no longer hypothetical. The experiment's own
+contract passes this guard **OK** while asserting `has(b) === false` for an expired entry on one line and
+`has(b) === true` for an expired entry on another, so no implementation could ever have satisfied it. The
+guard decides vacuity and malfunction; it has no access to the specification, so it cannot decide
+faithfulness to it. Three rounds of the loop were blocked by exactly that, and the guard called the
+blocking artefact sound every time.
+
 ## What this does not claim
 
 - **A patch must match exactly, and a stale one fails.** The worker returns either a whole file or a

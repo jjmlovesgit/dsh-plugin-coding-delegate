@@ -8,9 +8,13 @@ specifies, the local worker implements, the tree is judged by a contract the arc
 implementation code enters the metered context.
 
 Artifacts live in [`experiments/contract-first/`](../experiments/contract-first/). They are an experiment,
-not shipped code. The `src/ttl-cache.js` committed there is the rewritten module from step 5 — the one that
-fails 11 of 14 — kept as evidence rather than repaired. The contract's sha256 is `561cf664…` and is the
-same in every run above, which is Finding 2 stated as a hash.
+not shipped code. Two contracts sit there side by side, and the pair is the point. `tests/ttl-cache.test.js`
+— sha256 `561cf664…`, the same in every run above, which is Finding 2 stated as a hash — is the transcribed
+contract those runs were judged by, **kept untouched as the evidence for Finding 5**. Beside it,
+`tests/ttl-cache.spec.test.js` (sha256 `e62f280c…`) is the corrected contract that follows the
+specification and passes 14 of 14. `src/ttl-cache.js` is now the specification-faithful module; the step-5
+mutant that fails 11 of 14 is retrievable with
+`git show 1548f75:experiments/contract-first/src/ttl-cache.js`.
 
 ## What was run
 
@@ -106,16 +110,74 @@ An architect that cannot rely on a stated edit boundary being honoured cannot ru
 do the kinds of refactor that depend on a change being local, and cannot expect "fix this one line" to mean
 what it says. That is worth knowing independently of this module.
 
+## Finding 5 — the transcribed contract was unsatisfiable, and the guard cannot see that
+
+This is the experiment's strongest result, and it was found by refusing to read a plateau as a limit on the
+worker.
+
+Three further runs of the implementation loop ended at **13/14, 12/14 and 12/14**. The natural reading — the
+worker is not good enough — is wrong, and two questions settle it. Neither needs the architect to read the
+contract.
+
+The first: does the module satisfy the specification? Writing the specification's requirements as checks and
+running them against the module answers it: **16 of 16 pass**, including the live-count eviction bound, the
+rule that an expired entry is not a preferred victim, replace-revival and replace-recency. The module is
+faithful to the specification it was written from.
+
+The second: is the contract satisfiable at all? The answer is two lines of the contract.
+
+| line | assertion | state of the entry |
+| --- | --- | --- |
+| `tests/ttl-cache.test.js:91` | `has('b') === false` — *"b is expired, has returns false"* | expired |
+| `tests/ttl-cache.test.js:132` | `has('b') === true` — *"b (MRU, expired) should NOT be evicted"* | expired |
+
+One predicate, opposite expectations, on the same function. **No implementation satisfies both**, so the
+green run was not missed: it was unreachable, and the loop could have run for as long as anyone was willing
+to pay for it.
+
+The second defect is quieter. Line 150 expects `evictions === 1` in a scenario whose *live* count is exactly
+`maxEntries`, and `SPEC.md` says eviction runs when "the number of **live** entries exceeds `maxEntries`".
+The contract is testing a cache bounded by *total* entries. Test 9 asks for the same thing.
+
+`scripts/check-contract.cjs` reports **OK: the contract is well-formed and discriminating** for that file,
+and it is not wrong to. The contract does assert, and every failure against a null implementation is a
+behavioural disagreement. But it decides vacuity and malfunction, and **never faithfulness to the
+specification**, so a contradiction introduced during transcription is invisible to it — and invisible to
+the architect, who under rule 3 cannot read the file to find it. `README.md` already said a contract can be
+"well-formed, discriminating, and still test the wrong behaviours"; this is that sentence with an instance
+attached.
+
+So Finding 5 is Finding 2 with its consequence made concrete. Finding 2 said the architect cannot tell a
+contract fault from a module fault. Finding 5 shows what that costs when the contract fault is **real**: the
+loop has no terminating condition, and the plateau it produces is indistinguishable from a limit on the
+worker.
+
+### Closing it, and the part that generalises
+
+The contract was preserved rather than repaired, because it is the evidence. A sibling contract,
+`tests/ttl-cache.spec.test.js` (sha256 `e62f280c…`), was transcribed from `SPEC.md` and passes **14 of 14**
+against the module, which was not changed to suit it; against a null implementation it fails 14 of 14 by
+assertion, so it still discriminates and still passes the guard.
+
+One detail is worth more than the result. The two tests that had to be corrected were given to the
+transcriber **scenario by scenario** — every clock advance and every expected counter written out. The one
+area left to prose, `purge`, came back with a scenario whose own comment called an entry live at `t=110`
+when its expiry made it expired at `t=100`; the assertion then contradicted the scenario it was written to
+test. The architect's contribution is not the *area* to be tested but the *scenario* that tests it, and a
+transcribed contract is only as good as the scenarios it was handed.
+
 ## What the experiment does not show
 
-- **No green run was reached.** The endpoint is a contract that discriminates and an implementation that
-  does not satisfy it. The loop carried the unit a long way; it did not close it.
+- **The green run was reached only after the contract was corrected** (Finding 5). It shows that a
+  specification-faithful contract and a conforming module can be brought together. It does **not** show that
+  the loop closes a unit unaided, because what blocked this one was a defect in the artefact the architect
+  is forbidden to read.
 - **The B1 coherence check was not exercised.** It is operator configuration, is not set in the live
   profile, and enabling it needs a profile edit plus a restart. "Checks from outside the contract" was
   therefore satisfied by `contractFiles` integrity only — a real outside check, since the worker cannot
   alter what judges it, but the project-level variant this item was originally framed around did not run.
-- **Nothing here proves the module could ever be made to pass.** The contract was shown to discriminate;
-  reaching green was not attempted further once the mutation step failed to isolate a change.
+- **Nothing here proves the module could have been made to pass the original contract.** It could not: that
+  contract is unsatisfiable, and the failure was never the module's (Finding 5).
 
 ## The guard, and what it found when pointed back at this experiment
 
