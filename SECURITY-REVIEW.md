@@ -255,8 +255,14 @@ whether that was still true. It can now.
   fenced source block. Loaded is not verified.
 - **Rule 8's `ask` path**, which relies on the approval seam reached from `agent/request` — a different
   hook from the one the write guard uses, and not exercised.
-- **The lead tier.** `leadProviders` is empty in both live profiles, so no lead request has been made
-  and no DSH agent preset has been created. The plugin half is oracle-tested; the host half is not.
+- **The lead tier — withdrawn, because there is nothing left to verify.** This bullet used to read "no lead
+  request has been made and no DSH agent preset has been created". Both halves are still true, but for a
+  reason that removes the gap rather than leaving it open: the tier was built, mounted, measured and
+  **retired**, and the preset directory that implemented it is gone ([`docs/lead-tier.md`](docs/lead-tier.md)
+  is the record). `leadTier` survives in the active profile as a routing-correctness measure only — a request
+  the host resolves to a declared lead provider is left as configured instead of being repinned to the cloud
+  and told it is the architect. With no `LEAD` profile present, `leadProviders` is empty, so no lead request
+  has ever been routed. This is no longer an unverified claim; it is a claim about a feature that does not run.
 
 ## Containers are optional
 
@@ -272,6 +278,16 @@ The architecture this plugin is built for has three tiers: a cloud architect tha
 thinking *coding lead* that reads the repository and authors each unit's contract, and a local worker
 that implements. Tiers 1 and 3 exist. **Tier 2 cannot be built yet, and the reason is a host
 capability rather than missing plugin work.**
+
+> **Status: still a host limitation, currently blocking nothing.** Both features below were written for the
+> lead tier, which was built, measured and retired — the preset directory is gone
+> ([`docs/lead-tier.md`](docs/lead-tier.md)). The read half has since been answered *without* lineage: the
+> guard still fails closed for every agent, but **what an agent is no longer decides what it may read** — the
+> settled rule does, reading a file a passing unit left unchanged silently and asking about failed,
+> unverified and since-edited ones. Nothing in the current two-tier plan needs the discriminator, so this
+> section is kept as the record of a real host limitation rather than as blocking work. It becomes blocking
+> again the moment a second requestable tier returns, and option 3 below is the workaround until the host
+> exposes lineage.
 
 Two features need the same answer -- *is this agent the architect, or a subagent?* -- and neither can
 get it:
