@@ -578,3 +578,36 @@ other operator gets. And the open question is narrower and answerable — with `
 relative-path match does nothing at all, and it starts mattering the moment the hatch is closed, which is
 the decision the hatch exists to defer and the `SOURCE_READ` trace is what keeps answerable.
 
+## The settled rule is enforced, which is what makes the hatch closable
+
+**Phase 3 is built.** The read guard no longer asks about every delegated file. It asks about the ones in
+flight and reads the settled ones silently:
+
+| state of a file | what the guard does now |
+| --- | --- |
+| a unit passed it, content unchanged since that verdict | read it, no prompt |
+| the unit failed | ask, naming the verdict |
+| no verification command was ever given | ask |
+| the registry holds no verdict for it at all | ask |
+| changed after the verdict was reached | ask, naming the content |
+| not delegated at all | not gated |
+
+`succeeded` alone is deliberately not the test, because a verdict describes CONTENT: a passed file that was
+edited afterwards is not the version anything verified, so the hash is compared too, and a file that cannot
+be hashed fails closed. `matchDelegatedPaths` returns *every* candidate rather than a boolean, because the
+guard infers the workspace instead of being told it — one relative target can name a file in more than one
+workspace, and the answer is the worst match. Taking the first would have waved a failed file through, which
+is the shape of hole this file keeps finding. The shell route shares the same helper, so the two routes
+cannot drift into disagreeing about one file.
+
+**This is what makes `delegateReadPolicy: 'allow'` removable.** The hatch exists because `ask` used to mean
+"ask about everything", finished work included, and its comment records that reasoning. With the settled rule
+in place, deleting the line gives: verified and unchanged reads silently, everything else asks. The cost is
+now specific rather than total, and it is worth naming — the 107 registry records written before the verdict
+fields existed carry no verdict, so their files will ask until they are written again.
+
+**One half the oracle still cannot reach, and it is the same limitation as last time.** These tests inject
+`delegatedRecordFor`, so they exercise the rule against synthetic verdicts rather than against the index the
+delegation actually maintains. The live check has to supply that half, and it needs a restart first: the host
+holds the `dist` it loaded at startup.
+
