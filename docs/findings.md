@@ -628,14 +628,22 @@ naming the target means that branch was never taken — the same discriminator t
 Here the two traces come out opposite ways round, which is what the rule predicts. `[LOCAL_ROUTER_INIT]` also
 appears ahead of the probe's ledger line, so the reload had taken effect rather than the result being stale.
 
-**Two limits found while doing it, both worth keeping.**
+**Two things found while doing it: one limit, and one correction to this record.**
 
-The first is that the shell route cannot tell a filename used as a *search pattern* from one being read.
-Grepping the debug log for the string `role-lineage` was itself gated as a read of `role-lineage.test.cjs`,
-and `node -e "require('./dist/contracts.js')"` was gated as a read of that file, because each command contains
-a relative spelling of a delegated path and `isReadArgument` sees a read-only inspector in front of it. Both
-were `ask`s and both were approved, so nothing leaked — but a guard that reports a grep as a read is reporting
-something untrue, and that is the kind of noise that gets a gate switched off.
+The first was written down wrongly here, and the correction is the useful part. The prompts did not come from
+the shell route mistaking a *search pattern* for a read. `hasCommandWriteSignal` treats ANY command line
+carrying `-e`, `-c`, `--eval`, `-Command` or `-EncodedCommand` as write-capable — deliberately, because inline
+program text can write a file the command line never names, and that was a real hole once — so the `node -e`
+one-liners were gated by the *write* rule, and their `longestCodeReference` (`./dist/contracts.js`, then
+`role-lineage.test.cjs`) became the target. The targets in the log keep their leading `./`, which is that
+branch's shape and not the delegated matcher's, and that is what identified it.
+
+`plugin/tests/oracles/shell-inline-eval.test.cjs` pins the behaviour: a read-only inspection carries no write
+signal, inspecting text for a code filename is not gated, and the same filename inside `node -e` is. Two
+narrower rules were considered and refused — scanning the inline body for write primitives, and ignoring
+tokens that follow a pattern parameter — because `require('fs')['write' + 'FileSync']` walks past the first and
+the second re-opens the same hole from the other side. The cost is named rather than hidden: a read-only
+one-liner that mentions a code file asks for approval.
 
 The second is a defect in how verifications were being written, and it is now visible as bad data.
 `plugin/src/guard.ts` and `plugin/src/contracts.ts` both carry `UNIT_FAILED` in the registry, and both hashes
