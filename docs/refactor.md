@@ -123,7 +123,8 @@ The predicted eighth pass for `LocalRouter` / routing and the DLP rules in `inde
   every delegation into `experiments/` reported `INCOHERENT` while its own contract passed, which reads as a
   unit failure when the unit is fine. Measured — the relative form exits 1 from `experiments/contract-first`,
   `cd /d C:\Projects\DSHLaya\plugin && …` exits 0 with the full gate green. The profile carries the absolute
-  form; loader patches apply at boot, so it takes effect on the next restart.
+  form, and it is live-verified: after the restart, a delegation into `experiments/contract-first` reported
+  `SUCCESS` with `Coherence check: Passed 313, Failed 0` where the relative form had reported `INCOHERENT`.
 - **Run the oracles as `npm run test:oracles`, never as a bare `node --test`.** That script carries a
   `--require` preload (`plugin/scripts/isolate-oracle-data-dir.cjs`) which redirects the plugin's data
   directory to a temp home. `vitest.config.ts` covers the unit tests, but `node --test` never loads it, so a
