@@ -41,3 +41,12 @@ jobs:
         # Exercises the guard, DLP gate, redaction, containment and verification paths against
         # the built artefact.
         run: npm run test:oracles
+
+      - name: README consistency
+        # The repository-root scripts never ran in CI: this job's default working-directory is `plugin`,
+        # so everything under `scripts/` was local-only. That is how the two READMEs drifted to seven
+        # policy rules against eight without anything noticing, and why the check written to catch it
+        # would only ever have run if someone remembered to. Overridden per step rather than by moving
+        # the job, because the scripts resolve the repository root from their own location, not the cwd.
+        working-directory: .
+        run: node scripts/check-readme-consistency.cjs
