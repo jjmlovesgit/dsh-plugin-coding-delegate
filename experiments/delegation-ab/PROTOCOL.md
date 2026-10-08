@@ -471,11 +471,29 @@ investigation:
 
 - A shell command containing any token that resolves to an **ancestor** of a delegated file — a bare
   `src`, or `C:\Projects` — matches every delegated file beneath it and is refused. Plain `Test-Path`,
-  `Get-ChildItem` and `Get-Content` on the workspace were all rejected for this reason.
+  `Get-ChildItem` and `Get-Content` on the workspace were all rejected for this reason. The culprit is
+  `guard.ts:543`, which runs `delegatedUnder` over every token of a shell command. `delegatedUnder`'s
+  containment inference is *correct where it was written* — a search scoped to a directory really does
+  read every delegated file under it, and that is the hole rule 3 exists to close. Reusing it for shell
+  commands is what is wrong, and `READ_ONLY_INSPECTORS` is the wrong discriminator: `grep x src` and
+  `Get-ChildItem src` are both "reads" on that axis, while one returns content and the other returns
+  file names. **Fixing this is a judgement about the rule, not a bug fix**: is listing a directory that
+  contains delegated files "reading it back"? Answering it changes what the guard permits, which is the
+  operator's decision, so it is recorded rather than decided.
 - A command combining a delete verb with a source-file reference anywhere on the same line is refused as
   "would delete source file X" even when the delete targets an unrelated temp file, and the guard named
   a file that was never at risk.
 
 Both refusals are fail-closed, so nothing was harmed; the cost is that ordinary housekeeping commands
-stop working once a delegation has landed. They are recorded as findings, not fixed here: the
-experiment's own validity depends on the plugin being the same instrument across all four arms.
+stop working once a delegation has landed. The first is left as-is deliberately. The experiment's own
+validity depended on the plugin being the same instrument across all four arms, and changing the guard
+*after* the runs would have made the recorded arm incomparable with any arm run later.
+
+**The verdict defect is fixed, and the fix is one commit** (`7bbac6b`), because unlike the guard question
+above it has a single right answer: `delegation.ts` now folds the gate case into the same predicate
+`resolveDelegateStatus` already uses, so a delegation whose verification was refused records
+`UNIT_UNVERIFIED` rather than `UNIT_FAILED`. The read guard's message for that outcome was reworded for
+the same reason — it claimed no command had been given, which was false whenever the gate was what
+stopped it — and the outcome type now documents both routes, since a registry record does not carry
+which was taken. The regression test uses the default policy (`mode: 'ask'`, no approver), which is the
+ordinary operator case rather than a contrived one; it failed with `UNIT_FAILED` before the change.
