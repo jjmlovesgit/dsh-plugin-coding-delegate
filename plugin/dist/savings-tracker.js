@@ -243,8 +243,12 @@ class SavingsTracker {
         // of the window is kept out of every later call, not only the one that produced it.
         if (record.outcome !== undefined) {
             ledger.delegations = (ledger.delegations || 0) + 1;
-            if (record.succeeded === false)
+            // Only a genuine failure. `succeeded === false` also covers an UNVERIFIED unit, which this plugin
+            // distinguishes everywhere else -- and counting those would make the "churn the architect never saw"
+            // figure meaningless, because an unverified edit is the common case rather than the exception.
+            if (record.outcome === 'UNIT_FAILED') {
                 ledger.failedDelegations = (ledger.failedDelegations || 0) + 1;
+            }
         }
         if (record.bytesWritten) {
             ledger.bytesKeptOut = (ledger.bytesKeptOut || 0) + record.bytesWritten;

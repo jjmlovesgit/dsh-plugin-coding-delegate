@@ -749,7 +749,10 @@ export async function delegateWorker(
         completionTokens,
         totalTokens,
         elapsedMs,
-        outcome: unitSuccess ? 'UNIT_PASSED' : 'UNIT_FAILED',
+        // Three outcomes, not two. An unverified unit is deliberately not a success in this plugin, but it
+        // is not a failure either -- and counting it as one would inflate the very figure this field exists
+        // to produce, because an edit delegated without a verification command is the common case.
+        outcome: unitSuccess ? 'UNIT_PASSED' : unverified ? 'UNIT_UNVERIFIED' : 'UNIT_FAILED',
         succeeded: unitSuccess,
         bytesWritten: filesWritten.reduce((sum: number, f: any) => sum + (f.bytes || 0), 0),
       })

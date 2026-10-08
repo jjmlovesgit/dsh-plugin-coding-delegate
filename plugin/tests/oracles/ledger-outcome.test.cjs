@@ -154,3 +154,32 @@ test('the ledger says what it covers, so it is not read as a session record', ()
     'the ledger must state its own scope rather than implying one'
   );
 });
+
+test('an UNVERIFIED unit is not counted as a failed attempt', async () => {
+  const { SavingsTracker } = require(DIST);
+  const dir = tmp();
+  const tracker = new SavingsTracker(LEDGER_DIR);
+  const before = readLedger();
+  const failedBefore = before.failedDelegations || 0;
+
+  const verdict = await runAgainstWorker(emitted('unverified.ts'), {
+    taskName: 'ledger-unverified',
+    instruction: 'Write unverified.ts.',
+    targetFiles: ['unverified.ts'],
+    workspaceDir: dir,
+  }, tracker);
+  assert.equal(verdict.status, 'UNVERIFIED', 'no verification was requested');
+
+  const ledger = readLedger();
+  const record = ledger.history.find(
+    (r) => r.routingReason && r.routingReason.includes('ledger-unverified')
+  );
+  assert.ok(record, 'the record exists');
+  assert.equal(record.succeeded, false, 'unverified is deliberately not a success');
+  assert.notEqual(record.outcome, 'UNIT_FAILED', 'but it is not a failure either');
+  assert.equal(
+    ledger.failedDelegations || 0,
+    failedBefore,
+    'so an unverified unit must not inflate the count of absorbed failures'
+  );
+});
