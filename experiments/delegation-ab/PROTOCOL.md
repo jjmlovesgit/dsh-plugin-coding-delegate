@@ -281,6 +281,86 @@ The measurement is parked, not abandoned. The instrument that would settle it is
 plugin **disabled**, which measures unimproved DSH rather than a within-plugin standard arm — a
 different claim, and one that must be labelled as such if it is ever made.
 
+## Run 1b: moving the evaluation loop INSIDE the unit
+
+`Run 1` is not only a measurement, it is a diagnosis. Read its trajectory call by call and the
+architect's 1,050,313 tokens break down as:
+
+| phase | calls | tokens | share |
+| --- | --- | --- | --- |
+| seed prompt, before any tool call | — | 11,963 | 1.1% |
+| recon and exploration | 13 | 375,747 | 35.8% |
+| the delegation itself | 1 | 54,226 | 5.2% |
+| **the architect running the judge itself** | 3 | 179,840 | 17.1% |
+| hashing, cleanup and reporting after the judge was already green | 7 | 440,500 | 41.9% |
+
+So the delegation — the thing the plugin exists to do — was the *cheapest* line item, and the architect
+spent 17% of the run doing the worker's iteration by hand. The cause is in the contract, not the pattern:
+that delegation carried `contractFiles` but **no `runVerification`**, so the unit could not check itself,
+and the architect ran the judge five times instead.
+
+`Run 1b` is the same task and the same judge with one difference: the delegation declares
+`runVerification` and `coherenceVerification`, so the verdict comes back from the unit and the architect
+never invokes the judge. The prediction, written before the run: **materially fewer architect calls and
+fewer tokens**, because the judge loop leaves its window entirely.
+
+### The precondition, which is an operator setting and not a contract clause
+
+The first attempt could not work, and the reason is structural rather than a configuration mistake.
+Whether a delegated verification command may run is decided by the plugin options `verificationApproval`
+(`index.ts:901`, default `'ask'`) and `verificationAllowlist`. Neither is a `delegate_worker` argument.
+An architect therefore **cannot** grant itself the ability to have a unit verified — correctly, since the
+code says a caller must not be able to switch a safety setting off. Nor can a subagent resolve it from
+inside: with approval prompts disabled in that session the seam refuses, and the plugin overrides any
+caller-supplied approval hook.
+
+Measured: with `verificationAllowlist: ['node']` on the plugin entry in `~/.dsh/config.json`, the same
+delegation goes from `UNIT_FAILED` to `SUCCESS` with `testResults: passed 1, failed 0`. Two further facts
+came out of that probe:
+
+- **DSH reloads plugin options without a restart.** The setting took effect on the next call, which is
+  why this run was possible at all in the same session.
+- **The allowlist is the narrow lever; `verificationApproval: 'allow'` is not.** The README documents
+  that the allowlist matches the program rather than its arguments, so allowing `node` also allows
+  `node -e "<anything>"`. That is a real hole and it is the operator's to accept. Recorded here rather
+  than glossed, because this run is the first thing in the repository to depend on it.
+
+### Attempt 2, and the finding that stops the measurement here
+
+The run was repeated with the allowlist live. All four delegations returned
+`VERIFICATION_NOT_APPROVED` with the reason string from `verification.ts:399` — the `ask` branch — so the
+`node` entry did not match. That pointed at the config, and the subagent reported the config as the cause
+and recommended a server restart. **That diagnosis was wrong, and the evidence against it was one call
+away**: the same session ran `node --test --experimental-test-isolation=none` as a delegated
+`runVerification` and it executed unattended — `passed 1, failed 0`, `status: SUCCESS`. The allowlist was
+live; it simply never got consulted in the other session.
+
+The real reason is in DSH, not in this plugin, and it is deliberate. `dsh-subagent`'s
+`child-agent.d.ts` records that a delegated child's `approvalPolicy` is **pinned to `'never'`**:
+
+> `'never'` whenever the approval capability is composed, `undefined` otherwise: a delegated child acts
+> only within the sandbox scope fixed at delegation, so **its asks are rejected deterministically**. ...
+> the approval policy is pinned to `'never'` regardless of the parent's own policy.
+
+So the chain is: a delegated unit's verification needs an approver → the plugin asks the host's approval
+seam → a subagent session has no seam, and cannot get one → the request is refused deterministically →
+`VERIFICATION_NOT_APPROVED` → the worker never iterates. **No plugin setting can change this**, because
+the pin is on the child, and it is not the plugin's to override. Both failures in this experiment — Arm S
+and this run — bottom out in the same place, and neither is an operator misconfiguration.
+
+**Consequence for the measurement, stated plainly.** `Run 1b` cannot be run from a subagent, and a
+subagent is the only clean instrument available to an agent-driven session: a *top-level* session is the
+only place approvals exist, and the only top-level session here is the one holding this entire
+conversation, so its token count is not comparable to `Run 1`'s clean 24-call subagent session. What
+follows is that **the loop-inside-the-unit hypothesis is untested, and cannot be tested by this
+operator from this session.** It needs a top-level DSH session with a human at the approval prompt, which
+is a person running it, not an agent measuring it.
+
+That is a more useful result than the number would have been. It says the plugin's own central
+mechanism — a delegation that verifies itself — **is unreachable in any delegated child agent**, which is
+precisely the context `delegate_worker` creates. The one configuration that could exercise it is the one
+where the architect is also the approver.
+
 ## Procedure
 
 1. Copy `SPEC.md` and `tests/spec-conformance.test.cjs` nowhere — reference them in place, so both
