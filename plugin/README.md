@@ -420,6 +420,17 @@ nothing decides which files a unit needs, and nothing checks that two units agre
   pass. What remains missing is what this section opened with: nothing detects that a unit touching an
   existing boundary declared no interface contract. The pattern is available; adopting it is judgement.
 
+  **A programmatic check for that was designed and rejected, because it aimed at the wrong thing.** The
+  obvious version compares a unit's declared `targetFiles` against the delegated registry and reports a
+  boundary that was neither injected nor pinned. It does not fire on the failure it was meant to catch: when
+  unit B calls an interface unit A wrote, B's targets name B's own new file and never mention A, so there is
+  nothing to compare. It would fire only when a unit's target *is* an already-delegated file — and that case
+  is closed already, by the emission rule two sections up: a whole-file emission cannot modify an existing
+  file, and a patch must match content the worker was shown, so a worker cannot rewrite or blind-edit a file
+  it never saw. What is left is a choice — declare the boundary or inject it — which is judgement, and the
+  two paragraphs above are where the judgement is written down. The enforcement that does exist is the one
+  that counts: the contract, once declared, is hashed, unwritable and re-checked.
+
 ### Verification
 
 - **Verification** runs `runVerification` with the resolved workspace as cwd, and the
