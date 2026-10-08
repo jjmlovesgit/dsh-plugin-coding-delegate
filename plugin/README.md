@@ -662,6 +662,118 @@ npm run build     # tsc -> dist
 npm test          # vitest
 ```
 
+## The host contract
+
+`src/session-events.ts` holds every DSH session event this plugin reads, checked at compile time
+against the host's own `SessionEventMap`:
+
+```ts
+] as const satisfies readonly SessionEventType[]
+```
+
+So a DSH release that renames an event fails `npm run build` and names the offending literal, instead of
+the plugin quietly ceasing to count. The payload fields each counter reads are typed from the same map, so
+a moved *field* fails the build too.
+
+That is worth exactly as much as the pinned types are accurate, so two devDependencies are pinned
+**exactly** — `@deepseek-ai/dsh-session` and `@deepseek-ai/dsh-compaction`, no caret — and
+`scripts/check-host-types-pin.cjs` fails when they stop matching the core that is actually running. It
+resolves the host through `%APPDATA%/dsh-tauri/dependencies.json`, the same way the Desktop does, because
+`dsh` on `PATH` may be a different installation entirely.
+
+Both packages are `devDependencies`: nothing they provide survives into `dist`, and the plugin has no
+runtime dependency on the harness. When you move DSH, re-pin and rebuild:
+
+```bash
+cd plugin
+npm install --save-dev --save-exact @deepseek-ai/dsh-session@<host version>
+npm install --save-dev --save-exact @deepseek-ai/dsh-compaction@<host version>
+npm run build && npm run test:oracles
+```
+
+Hook **names** are checked too. Subscriptions go through `onHost(ctx, 'agent/request', handler)`, which
+constrains the name to `keyof Events` — with `Events` augmented by the pinned host packages — so a
+subscription the host does not offer cannot compile. That is what caught `ctx.on('tool/call')`: not a
+Cordis hook at all, but a session event type, and a "fallback" that had never run and could not have.
+
+Hook **payloads** are checked as well, because the handlers no longer annotate their parameters — both are
+inferred from the host's signature for that event. That is how `payload.session` was found: a fallback read
+in the routing hook for a field `agent/request` has never carried, which had never once matched.
+
+Three limits, stated rather than left to be discovered:
+
+- **The two unreachable guards are asserted, not checked.** `agent/request` and `agent/pre-step` each keep a
+  runtime fallback for a condition the host's types say cannot happen (`next` is always a function). Those
+  two branches now say `as any` out loud instead of quietly widening the whole handler.
+- **Return values are asserted, not proven.** `applyAgentRole` hands back a looser record than the host's
+  `LlmCallConfig`, so the routing hook cannot demonstrate that it returns a valid config — and DSH does not
+  verify it either. The payload on the way *in* is checked; the config on the way out is trusted.
+- **Only the four handlers this plugin registers are covered.** Anything added later keeps the check only if
+  it goes through `onHost` and leaves its parameters unannotated.
+
+## Judging a transcribed contract
+
+Contracts are specified by the architect and transcribed by the worker, because the guard forbids
+cloud-authored source. The architect then cannot read the contract back — that would put
+implementation-shaped code into the metered context — so it cannot tell a contract that caught a real bug
+from a contract that is itself broken. Both look like "tests failed".
+
+Run it from the repository root (`scripts/` is not part of the published package):
+
+```bash
+node scripts/check-contract.cjs --contract path/to/spec.test.js --module path/to/module.js
+```
+
+It judges the contract against a **null implementation** that answers every property with itself, every
+call with itself, and never throws. That condition is the design: the module cannot be blamed there, so a
+test that fails by *malfunctioning* is the contract's own fault, which against a real module it might not
+be. Two checks, only the first deciding:
+
+| | against the null implementation | rejected when |
+| --- | --- | --- |
+| discriminates | at least one assertion failure | it passes a module that returns itself for everything |
+| well-formed | no malfunction failures | a test never reached an assertion |
+
+The run against the real module is printed and deliberately not judged — a malfunction there may be the
+module throwing rather than the contract failing, and nothing in the output distinguishes the two. A
+contract can be well-formed, discriminating, and still test the wrong behaviours; this guard removes one
+class of failure, not all of them. It exonerated a contract the architect had already published a
+misdiagnosis of — see [`../docs/experiment.md`](../docs/experiment.md).
+
+**The second check closes the failure that costs the most.** Add `--spec`, and the guard also runs a
+**specification conformance suite** the architect owns: the same trick, run backwards. The null
+implementation proves the module cannot be blamed; the suite proves the module *can* be trusted — and then a
+contract that still rejects a conforming module is the artifact at fault.
+
+```bash
+node scripts/check-contract.cjs --contract path/to/spec.test.js --module path/to/module.js \
+  --spec path/to/spec-conformance.test.cjs
+```
+
+That is not hypothetical either; it is the defect this project actually shipped. The experiment's
+transcribed contract asserted `has(b) === false` for an expired entry on one line and `has(b) === true` for
+an expired entry on another, so no implementation could ever have satisfied it — while the null run called
+it sound every time. Measured against the specification suite, the guard now says so, and names what did it:
+
+```
+C. the specification suite against the real module: 16 test(s), 16 passed, 0 failed by assertion, 0 failed by malfunction
+D. the specification suite against a null implementation: 16 test(s), 0 passed, 16 failed by assertion, 0 failed by malfunction
+   ok: it asserts, and every failure is a behavioural disagreement
+
+DISAGREEMENT: the module satisfies the specification suite, and the contract still rejects it.
+Either the contract demands more than the specification states, or the specification suite is incomplete.
+Resolve which before delegating another fix. Contract tests that failed against a conforming module:
+     not ok 9 - eviction chooses strictly by recency, not by expiry
+     not ok 10 - replacing an existing key refreshes expiry and recency, not counted as eviction
+```
+
+The suite gets judged too, by the rule the contract is judged by: one that passes a module returning itself
+for everything is refused, because it constrains nothing and cannot serve as the reference. And the verdict
+deliberately names both possibilities rather than condemning the contract, because it is only as strong as
+the suite — an incomplete suite makes a non-conforming module look conformant, and the contract may simply
+require more than the specification states. Those seven assertions are in
+[`tests/oracles/contract-spec-conformance.test.cjs`](tests/oracles/contract-spec-conformance.test.cjs).
+
 ## Limitations
 
 - Reading a file into the architect's context is also egress; local-first routing does not
