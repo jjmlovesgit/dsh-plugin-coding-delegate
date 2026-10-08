@@ -29,11 +29,12 @@ cannot be evaluated, or the approval service cannot be reached, the answer is no
 | --- | --- | --- |
 | 1 | A credential may not reach the cloud | DLP gate on every outbound request; refused, or pinned local |
 | 2 | The architect may not author or delete source | code guard on `tools/pre-execute`; denied, or approval-gated |
-| 3 | The architect may not read back what it delegated | reads of worker-written files require approval |
+| 3 | The architect may not read back what it delegated | the **settled rule**: a file a passing unit left unchanged reads silently, and failed, unverified and since-edited ones ask. `delegateReadPolicy: 'allow'` relaxes all of it |
 | 4 | The worker may not write outside the workspace | containment on every emitted path, symlinks included |
 | 5 | The worker's code may not run inside the server | subprocess only; the in-process fallback is off |
 | 6 | A command the architect proposes may not run unchecked | approval seam via `verificationApproval` |
 | 7 | A delegated result is a verdict, not a claim | files written without verification report `UNVERIFIED`, never `SUCCESS` |
+| 8 | Source may not reach the cloud | cloud-bound requests carrying fenced source are refused by default; `sourceEgress` decides |
 
 The division is meant to be mutual and is enforced in both directions: rule 2 stops the architect
 typing code into your repository, rules 3–5 stop the worker reaching outside the work it was given,
@@ -47,11 +48,13 @@ the guard is a deterrent at the tool layer, not an airtight boundary.
 
 1. **Gates what may leave the machine.** Every outbound request is scanned for credentials. A hit
    is refused or pinned to the local provider; absent a hit, the request goes to the cloud
-   provider. This is the only rule that changes the destination.
+   provider. The other rule that decides a destination is the architect pin — see
+   [Routing](#routing).
 2. **Provides a `delegate_worker` tool** that dispatches code-generation subtasks to the
    local model, writes the emitted files, and optionally runs a verification command.
-3. **Guards code authorship** with a `tools/pre-execute` hook that refuses cloud-authored
-   writes to source files.
+3. **Guards code authorship in both directions** with a `tools/pre-execute` hook: cloud-authored writes and
+   deletions of source are denied or sent for approval, and so is reading back a file the worker wrote, since
+   that pulls the delegated code into the very context the delegation kept it out of.
 
 ## Requirements
 
@@ -158,8 +161,9 @@ Two things to know here:
 
 ## Routing
 
-There is **one enforced rule**, and it is a permission rule rather than a cost or capability
-heuristic:
+Routing enforces **permission rather than preference**: no model is chosen because it is cheaper or faster.
+This section is the rule that inspects the payload; the architect pin is the other one, and it is under
+[Running a lead alongside the architect](#running-a-lead-alongside-the-architect).
 
 | Condition | Result |
 | --- | --- |
@@ -242,8 +246,8 @@ When you call `predictRoute` directly, its decision output is
 | `localModel` | `qwen/qwen3.8-27b` | Local model id, used for the local reroute *and* for `delegate_worker` |
 | `localEndpoint` | `http://127.0.0.1:1234/v1` | Base URL `delegate_worker` posts to (a full `/chat/completions` URL is also accepted). Operator configuration — a caller-supplied `endpoint` argument is ignored, so a model cannot redirect the task |
 | `cloudModel` | `deepseek-chat` | Cloud model id |
-| `contextThreshold` / `contextTokenThreshold` | `30000` | Tokens above which requests go straight to cloud |
-| `timeoutMs` | `2000` | Timeout for the worker HTTP call |
+| `contextThreshold` / `contextTokenThreshold` | `30000` | **Inert.** Read only inside `LocalRouter.predictRoute`, which nothing in `src/` calls — see [The classifier is available but not wired in](#the-classifier-is-available-but-not-wired-in). Setting it changes nothing |
+| `timeoutMs` | `2000` | **Inert, and never read at all.** The value is stored on the router's config and no code path reads it. The only timeout that binds a delegation is `verificationTimeoutMs` |
 | `enforceDLP` | `true` | Enable the credential firewall |
 | `dlpAction` | `'block'` | `block` refuses a credential-bearing request; `local` pins it to the local worker |
 | `entropyCheck` | `true` | Enable the high-entropy backstop |
@@ -347,9 +351,9 @@ coherence: nothing decides which files a unit needs, and nothing checks that two
 
 - **File emission** is driven by fenced code blocks whose header names the target, e.g.
   ```` ```ts file="src/thing.ts" ```` or a `// FILE: src/thing.ts` first line.
-- **Safety**: output that does not look like source code is refused rather than written, and
-  a rewrite more than 50% smaller than an existing file is rejected — both exist because an
-  earlier version silently replaced a working module with a tool-call transcript.
+- **Safety**: output that does not look like source code is refused rather than written, and a whole-file
+  emission may create a file but never modify one. Both exist because an earlier version silently replaced a
+  working module with a tool-call transcript.
 - **`workspaceDir`** selects the destination explicitly. Pass it. Automatic resolution
   cannot see the DSH session workspace (the Cordis `Agent` exposes only an id, and the path
   lives in session metadata behind a store the plugin cannot reach), so omitting it resolves
@@ -635,9 +639,11 @@ All local state derives from one directory, never a hard-coded path:
 3. otherwise `~/.dsh/local-router`
 
 It holds `router-debug.log` and `savings-ledger.json` — per-step and cumulative token accounting,
-split local versus cloud, plus a cost column. The dollar figure is the **cloud-equivalent** of work
-run locally: it measures the metered plan's exposure, and it is not money saved, because the GPU is a
-fixed cost this plugin neither pays for nor reduces.
+split local versus cloud, plus a cost column — along with `delegated-registry.json` (the recorded verdict
+per delegated file), and `last-verification.log` and `last-coherence.log`, the raw output of the two
+commands that judge a unit. The dollar figure is the **cloud-equivalent** of work run locally: it measures
+the metered plan's exposure, and it is not money saved, because the GPU is a fixed cost this plugin neither
+pays for nor reduces.
 
 ## Throughput reference
 

@@ -86,9 +86,12 @@ Stated plainly, because these limits decide whether it fits your work:
 - **The contract is signed, and the worker cannot touch it.** `contractFiles` are hashed before the
   worker runs, refused as emission targets, and re-hashed afterwards, so a change voids the verdict. A
   passing result therefore means the architect's tests, unmodified, passed against the worker's code.
-- **Coherence is still the architect's job.** The plugin enforces the boundaries between the roles; it
-  does not supply the judgement. Work that is locally correct and globally inconsistent is the usual
-  failure mode of splitting work up, and splitting it here does not remove it.
+- **Coherence is partly checked, and mostly still the architect's job.** `coherenceVerification` runs a
+  project-level command after each unit's contract and can void it: a unit whose own tests passed while the
+  tree did not is reported **`INCOHERENT`**, which is a different instruction to the architect from "your
+  unit failed". That catches a tree broken by a unit. It does not catch work that is locally correct and
+  globally inconsistent — the usual failure mode of splitting work up, and splitting it here does not remove
+  it.
 
 > The mechanism above is well established — attention dilution and lossy compaction are properties of
 > how these models and harnesses behave. What this plugin reports is the **harness's own accounting
@@ -119,7 +122,7 @@ the answer is no.
 | --- | --- | --- |
 | 1 | A credential may not reach the cloud | DLP gate: refused, or pinned local |
 | 2 | The architect may not author or delete source | code guard: denied, or approval-gated |
-| 3 | The architect may not read back what it delegated | reads of worker-written files need approval; `delegateReadPolicy: 'allow'` relaxes this for every agent, and says so |
+| 3 | The architect may not read back what it delegated | the **settled rule**: a file a passing unit left unchanged reads silently, and failed, unverified and since-edited ones ask; `delegateReadPolicy: 'allow'` relaxes all of it, for every agent, and says so |
 | 4 | The worker may not write outside the workspace | containment on every emitted path |
 | 5 | The worker's code may not run inside the server | subprocess only; in-process fallback off |
 | 6 | A command the architect proposes may not run unchecked | approval seam |
@@ -128,7 +131,7 @@ the answer is no.
 
 ## What it does
 
-Four things, in the order they act:
+Five things, in the order they act:
 
 1. **In-process, no sidecar.** No daemon, no extra port, nothing to supervise. The gate and the
    authorship guard run inside the plugin.
@@ -144,8 +147,13 @@ Four things, in the order they act:
    OpenAI-compatible server (LM Studio, Ollama, vLLM, llama.cpp, a remote gateway). File writes are
    contained to the workspace, verification output is redacted to structure before it travels, and the
    verification command itself requires approval. The worker has no repository read, so it only ever sees
-   what the architect declares with `contextFiles`, and it answers with a whole file or a search/replace
-   delta.
+   what the architect declares with `contextFiles`.
+5. **A unit is judged, not reported.** The contract is pinned with `contractFiles` — hashed before the
+   worker runs, refused as a write target, re-hashed afterwards, so a change voids the verdict — and a unit
+   that writes files without verifying reports `UNVERIFIED`. A whole-file emission may **create** a file and
+   may not **modify** one: changing an existing file means sending a search/replace block that matches what
+   is there byte-for-byte. Then `coherenceVerification` runs the project's own command, with the power to
+   void a unit whose own tests passed while the tree did not.
 
 ## Requirements
 
@@ -210,7 +218,7 @@ Two properties worth stating plainly:
 
 ```
 plugin/                     the publishable package (src, dist, tests, README, LICENSE)
-plugin/tests/oracles/       regression oracles: guard, DLP, redaction, containment, verification
+plugin/tests/oracles/       regression oracles — one file per behaviour the plugin promises
 plugin/cordis.patch.yml     registers the plugin; ships no provider or model config
 plugin/cordis.patch.example.yml  a complete configuration example, NOT applied automatically
 scripts/register-plugin.ps1 registers the plugin into a DSH profile
@@ -242,115 +250,16 @@ preload that redirects the plugin's data directory to a temp home: `vitest.confi
 but `node --test` never loads it, so a bare invocation writes test fixtures into your live
 `~/.dsh/local-router/router-debug.log`. `scripts/check-oracle-isolation.cjs` is the contract check for it.
 
-### The host contract
+### The host contract, and judging a contract
 
-`plugin/src/session-events.ts` holds every DSH session event this plugin reads, checked at compile time
-against the host's own `SessionEventMap`:
+Both are documented with the thing they check, in [`plugin/README.md`](plugin/README.md):
 
-```ts
-] as const satisfies readonly SessionEventType[]
-```
-
-So a DSH release that renames an event fails `npm run build` and names the offending literal, instead of
-the plugin quietly ceasing to count. The payload fields each counter reads are typed from the same map, so
-a moved *field* fails the build too.
-
-That is worth exactly as much as the pinned types are accurate, so two devDependencies are pinned
-**exactly** — `@deepseek-ai/dsh-session` and `@deepseek-ai/dsh-compaction`, no caret — and
-`scripts/check-host-types-pin.cjs` fails when they stop matching the core that is actually running. It
-resolves the host through `%APPDATA%/dsh-tauri/dependencies.json`, the same way the Desktop does, because
-`dsh` on `PATH` may be a different installation entirely.
-
-Both packages are `devDependencies`: nothing they provide survives into `dist`, and the plugin has no
-runtime dependency on the harness. When you move DSH, re-pin and rebuild:
-
-```bash
-cd plugin
-npm install --save-dev --save-exact @deepseek-ai/dsh-session@<host version>
-npm install --save-dev --save-exact @deepseek-ai/dsh-compaction@<host version>
-npm run build && npm run test:oracles
-```
-
-Hook **names** are checked too. Subscriptions go through `onHost(ctx, 'agent/request', handler)`, which
-constrains the name to `keyof Events` — with `Events` augmented by the pinned host packages — so a
-subscription the host does not offer cannot compile. That is what caught `ctx.on('tool/call')`: not a
-Cordis hook at all, but a session event type, and a "fallback" that had never run and could not have.
-
-Hook **payloads** are checked as well, because the handlers no longer annotate their parameters — both are
-inferred from the host's signature for that event. That is how `payload.session` was found: a fallback read
-in the routing hook for a field `agent/request` has never carried, which had never once matched.
-
-Three limits, stated rather than left to be discovered:
-
-- **The two unreachable guards are asserted, not checked.** `agent/request` and `agent/pre-step` each keep a
-  runtime fallback for a condition the host's types say cannot happen (`next` is always a function). Those
-  two branches now say `as any` out loud instead of quietly widening the whole handler.
-- **Return values are asserted, not proven.** `applyAgentRole` hands back a looser record than the host's
-  `LlmCallConfig`, so the routing hook cannot demonstrate that it returns a valid config — and DSH does not
-  verify it either. The payload on the way *in* is checked; the config on the way out is trusted.
-- **Only the four handlers this plugin registers are covered.** Anything added later keeps the check only if
-  it goes through `onHost` and leaves its parameters unannotated.
-
-### Judging a transcribed contract
-
-Contracts are specified by the architect and transcribed by the worker, because the guard forbids
-cloud-authored source. The architect then cannot read the contract back — that would put
-implementation-shaped code into the metered context — so it cannot tell a contract that caught a real bug
-from a contract that is itself broken. Both look like "tests failed".
-
-```bash
-node scripts/check-contract.cjs --contract path/to/spec.test.js --module path/to/module.js
-```
-
-It judges the contract against a **null implementation** that answers every property with itself, every
-call with itself, and never throws. That condition is the design: the module cannot be blamed there, so a
-test that fails by *malfunctioning* is the contract's own fault, which against a real module it might not
-be. Two checks, only the first deciding:
-
-| | against the null implementation | rejected when |
-| --- | --- | --- |
-| discriminates | at least one assertion failure | it passes a module that returns itself for everything |
-| well-formed | no malfunction failures | a test never reached an assertion |
-
-The run against the real module is printed and deliberately not judged — a malfunction there may be the
-module throwing rather than the contract failing, and nothing in the output distinguishes the two. A
-contract can be well-formed, discriminating, and still test the wrong behaviours; this guard removes one
-class of failure, not all of them. It exonerated a contract the architect had already published a
-misdiagnosis of — see [`docs/experiment.md`](docs/experiment.md).
-
-**The second check closes the failure that costs the most.** Add `--spec`, and the guard also runs a
-**specification conformance suite** the architect owns: the same trick, run backwards. The null
-implementation proves the module cannot be blamed; the suite proves the module *can* be trusted — and then a
-contract that still rejects a conforming module is the artifact at fault.
-
-```bash
-node scripts/check-contract.cjs --contract path/to/spec.test.js --module path/to/module.js \
-  --spec path/to/spec-conformance.test.cjs
-```
-
-That is not hypothetical either; it is the defect this project actually shipped. The experiment's
-transcribed contract asserted `has(b) === false` for an expired entry on one line and `has(b) === true` for
-an expired entry on another, so no implementation could ever have satisfied it — while the null run called
-it sound every time. Measured against the specification suite, the guard now says so, and names what did it:
-
-```
-C. the specification suite against the real module: 16 test(s), 16 passed, 0 failed by assertion, 0 failed by malfunction
-D. the specification suite against a null implementation: 16 test(s), 0 passed, 16 failed by assertion, 0 failed by malfunction
-   ok: it asserts, and every failure is a behavioural disagreement
-
-DISAGREEMENT: the module satisfies the specification suite, and the contract still rejects it.
-Either the contract demands more than the specification states, or the specification suite is incomplete.
-Resolve which before delegating another fix. Contract tests that failed against a conforming module:
-     not ok 9 - eviction chooses strictly by recency, not by expiry
-     not ok 10 - replacing an existing key refreshes expiry and recency, not counted as eviction
-```
-
-The suite gets judged too, by the rule the contract is judged by: one that passes a module returning itself
-for everything is refused, because it constrains nothing and cannot serve as the reference. And the verdict
-deliberately names both possibilities rather than condemning the contract, because it is only as strong as
-the suite — an incomplete suite makes a non-conforming module look conformant, and the contract may simply
-require more than the specification states. Those seven assertions are in
-[`plugin/tests/oracles/contract-spec-conformance.test.cjs`](plugin/tests/oracles/contract-spec-conformance.test.cjs).
+- **The host contract.** `plugin/src/session-events.ts` types every DSH event this plugin reads against the
+  host's own `SessionEventMap`, so a DSH release that renames an event — or moves a payload field — fails
+  `npm run build` naming the offending literal, instead of the plugin quietly ceasing to count.
+- **Judging a transcribed contract.** `scripts/check-contract.cjs` decides whether a contract is fit to
+  judge at all, without the architect reading it: against a null implementation, and against a
+  specification conformance suite the architect owns.
 
 ## What this does not claim
 
@@ -359,10 +268,17 @@ require more than the specification states. Those seven assertions are in
   miss is refused rather than approximated — if the code changed after the worker was given it, the
   edit fails and the unit is re-delegated. Nothing here lets the worker *discover* code; it only ever
   edits what it was given.
-- **The read guard cannot tell the architect from a lead.** Until the host says which agent is which,
-  `delegateReadPolicy: 'allow'` is the only way to let a lead read the code it writes contracts about,
-  and it grants that to every agent. That is a deliberate weakening of rule 3 with the cost written
-  down, not a boundary.
+- **A whole-file emission creates; it does not modify.** Writing over a path that already exists is refused,
+  however large the new content is. The worker cannot see a file unless the architect injected it, and a
+  file it has not seen can only be replaced blindly — which is how a "make exactly one change" unit once
+  returned a rewritten 86-line module in place of a 129-line one and had the write land. A whole file can
+  still be replaced wholesale, by sending a patch whose search text is its entire current content.
+- **The read guard cannot tell one agent from another.** DSH does not expose agent lineage to plugins, so
+  the guard fails closed for every agent rather than distinguishing the architect from a subagent. What an
+  agent *is* no longer decides what it may read — the settled rule does, reading a file a passing unit left
+  unchanged silently and asking about failed, unverified and since-edited ones. `delegateReadPolicy: 'allow'`
+  remains as an escape hatch for an operator running a local lead, and it relaxes rule 3 for every agent
+  alike: a deliberate weakening with the cost written down, not a boundary.
 - **Rule 8 is a heuristic, and it has a hole.** It looks for fenced blocks with a source language tag of
   at least three lines. Source pasted without a language tag, described in prose, or split across short
   blocks is not detected. It is also the one rule that can refuse a request you typed yourself, which is
