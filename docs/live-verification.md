@@ -129,9 +129,15 @@ the leak still being open.
 
 ## What remains unverified live
 
-- **The compaction counters.** No compaction has occurred in any observed session, so `compaction/summary`,
-  `compaction/prune` and `compaction/end` are oracle-tested only. The event shapes are read from
-  `dsh-compaction`'s own types, but no live event has been folded.
+- **The failed-compaction counter.** This used to read "no compaction has occurred in any observed session",
+  and that is now false. Read back out of `router-debug.log`, session `f0387683` carries **2
+  `compaction/summary` events and 9 `compaction/prune` events**, and the fold tracked every one of them
+  exactly: the prune counter stepping 1→9 with `shadowedTokenCount` accumulating 2,529 → 50,937, and each
+  summary counting one compaction, the later reading `1 compaction(s), 9 prune(s), 712,892 token(s)
+  reclaimed`. So `compaction/summary` and `compaction/prune` are live-verified. What remains is
+  `compaction/end`, which is the only source of the *failure* signal — it is the case that increments
+  `failedCompactions`, no such event appears anywhere in the log, and that counter has therefore only ever
+  been observed reading 0. A counter only ever seen at zero is oracle-tested, not verified.
 - **`contextWindow`.** The summary shows `681499 token(s) at the last call` with no denominator, because
   `request/context` is logged only when the route, capacity or system prompt mode *changes* — one such
   event in 3,397 in the previous session. The absolute figure works; the fraction of capacity is
