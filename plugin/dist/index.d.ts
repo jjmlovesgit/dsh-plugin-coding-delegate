@@ -13,7 +13,7 @@ export { resolveDataDir, trace } from './logging';
 export { isPathWithin } from './paths';
 export { evaluateEmissionPath, evaluateUnitScope, extractAndEmitFiles } from './emission';
 export { DELETE_PRIMITIVES, evaluateCodeWriteGuard, evaluateDelegatedReadPolicy, hasCommandDeleteSignal, hasCommandWriteSignal, } from './guard';
-export { AGENT_ROLE_LIMIT, DEFAULT_SOURCE_EGRESS_MIN_LINES, applyAgentRole, applyArchitectConfig, describeSourceRead, detectSourceEgress, evaluateSourceEgress, rememberAgentRole, resetAgentRoles, resolveAgentRole, resolveLeadProviders, roleForAgent, } from './roles';
+export { AGENT_ROLE_LIMIT, DEFAULT_SOURCE_EGRESS_MIN_LINES, agentLineageRole, applyAgentRole, applyArchitectConfig, describeSourceRead, detectSourceEgress, evaluateSourceEgress, rememberAgentRole, resetAgentRoles, resolveAgentRole, resolveLeadProviders, roleForAgent, roleFromLineage, } from './roles';
 export { ContextInjection, ContextRequest, ContextResolution, DEFAULT_CONTEXT_MAX_BYTES, resolveContextFiles, } from './context';
 export { contractFileHashes, contractViolations, loadDelegatedRegistry, mergeDelegatedRecords, parseDelegatedRegistry, pruneDelegatedRecords, rememberDelegated, resolveContractFiles, resolveDelegatedRegistryPath, saveDelegatedRegistry, sha256File, } from './contracts';
 export { DEFAULT_VERIFICATION_POLICY, DEFAULT_VERIFICATION_TIMEOUT_MS, commandProgram, describeFailures, evaluateVerificationPolicy, parseTestOutput, redactVerificationOutput, resolveVerificationTimeoutMs, runInProcessFallback, runSandboxVerification, } from './verification';

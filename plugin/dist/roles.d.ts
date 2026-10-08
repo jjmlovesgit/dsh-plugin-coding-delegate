@@ -35,7 +35,31 @@ export declare const AGENT_ROLE_LIMIT = 200;
  * record degrades honestly instead of inventing an attribution.
  */
 export declare function rememberAgentRole(agentId: string | undefined, role: 'architect' | 'lead'): void;
-export declare function roleForAgent(agentId: string | undefined): 'architect' | 'lead' | 'unknown';
+/**
+ * The role as the host's session lineage records it.
+ *
+ * `Session.header` carries `origin?: 'subagent'` and `delegationDepth?: number`, so the host says outright
+ * whether this is a root agent or one spawned beneath another. A root agent is the architect; anything the
+ * host has marked as spawned is not.
+ *
+ * A missing header returns 'unknown' rather than 'architect'. Absence of evidence is not evidence of
+ * rootness, and a plugin that guesses here is guessing about who may read source.
+ */
+export declare function roleFromLineage(header: unknown): 'architect' | 'lead' | 'unknown';
+/** The lineage role for a live agent, when the host hands one over. */
+export declare function agentLineageRole(agent: unknown): 'architect' | 'lead' | 'unknown';
+/**
+ * The role for an agent, preferring the host's lineage over the observed correlation.
+ *
+ * Lineage first, because it is what the host recorded. The correlation map below remains as the fallback
+ * for a host that says nothing -- which, before `Session.header` existed, was the only signal this plugin
+ * had, and the comment on `rememberAgentRole` said so honestly.
+ */
+export declare function roleForAgent(agentId: string | undefined, agent?: {
+    session?: {
+        header?: unknown;
+    };
+}): 'architect' | 'lead' | 'unknown';
 /** The map is module state, so tests need a way to clear it. */
 export declare function resetAgentRoles(): void;
 export interface SourceReadObservation {

@@ -108,6 +108,7 @@ export {
 export {
   AGENT_ROLE_LIMIT,
   DEFAULT_SOURCE_EGRESS_MIN_LINES,
+  agentLineageRole,
   applyAgentRole,
   applyArchitectConfig,
   describeSourceRead,
@@ -118,6 +119,7 @@ export {
   resolveAgentRole,
   resolveLeadProviders,
   roleForAgent,
+  roleFromLineage,
 } from './roles'
 export {
   ContextInjection,
@@ -1141,7 +1143,10 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
         const observed = describeSourceRead({
           tool: exec?.name,
           target: extractWriteTarget(exec?.arguments),
-          role: roleForAgent(exec?.agent?.id),
+          // The live agent is passed as well as its id, so the guard can read the host's session lineage
+          // instead of relying only on the observed correlation. That is the whole of item 1: before
+          // `Session.header` existed there was nothing to read, and the plugin said so.
+          role: roleForAgent(exec?.agent?.id, exec?.agent),
         })
         if (observed.track) {
           trace('SOURCE_READ', {

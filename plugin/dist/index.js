@@ -33,8 +33,8 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.describeContextQuality = exports.EMPTY_CONTEXT_QUALITY = exports.runSandboxVerification = exports.runInProcessFallback = exports.resolveVerificationTimeoutMs = exports.redactVerificationOutput = exports.parseTestOutput = exports.evaluateVerificationPolicy = exports.describeFailures = exports.commandProgram = exports.DEFAULT_VERIFICATION_TIMEOUT_MS = exports.DEFAULT_VERIFICATION_POLICY = exports.sha256File = exports.saveDelegatedRegistry = exports.resolveDelegatedRegistryPath = exports.resolveContractFiles = exports.rememberDelegated = exports.pruneDelegatedRecords = exports.parseDelegatedRegistry = exports.mergeDelegatedRecords = exports.loadDelegatedRegistry = exports.contractViolations = exports.contractFileHashes = exports.resolveContextFiles = exports.DEFAULT_CONTEXT_MAX_BYTES = exports.roleForAgent = exports.resolveLeadProviders = exports.resolveAgentRole = exports.resetAgentRoles = exports.rememberAgentRole = exports.evaluateSourceEgress = exports.detectSourceEgress = exports.describeSourceRead = exports.applyArchitectConfig = exports.applyAgentRole = exports.DEFAULT_SOURCE_EGRESS_MIN_LINES = exports.AGENT_ROLE_LIMIT = exports.hasCommandWriteSignal = exports.hasCommandDeleteSignal = exports.evaluateDelegatedReadPolicy = exports.evaluateCodeWriteGuard = exports.DELETE_PRIMITIVES = exports.extractAndEmitFiles = exports.evaluateUnitScope = exports.evaluateEmissionPath = exports.isPathWithin = exports.trace = exports.resolveDataDir = exports.SavingsTracker = exports.PROFILES = void 0;
-exports.LocalRouter = exports.name = exports.using = exports.inject = exports.retryContextRequests = exports.parseFailureLocations = exports.RETRY_CONTEXT_WINDOW_LINES = exports.resolveDelegateStatus = exports.resolveChatCompletionsUrl = exports.parseSearchReplaceBlocks = exports.extractPromptText = exports.estimateTokenCount = exports.delegateWorker = exports.applySearchReplaceBlocks = exports.MIN_SEARCH_CHARS = exports.DEFAULT_LOCAL_ENDPOINT = exports.DELEGATE_WORKER_SCHEMA = exports.DELEGATE_WORKER_OPENAI_SCHEMA = exports.foldContextQuality = void 0;
+exports.runSandboxVerification = exports.runInProcessFallback = exports.resolveVerificationTimeoutMs = exports.redactVerificationOutput = exports.parseTestOutput = exports.evaluateVerificationPolicy = exports.describeFailures = exports.commandProgram = exports.DEFAULT_VERIFICATION_TIMEOUT_MS = exports.DEFAULT_VERIFICATION_POLICY = exports.sha256File = exports.saveDelegatedRegistry = exports.resolveDelegatedRegistryPath = exports.resolveContractFiles = exports.rememberDelegated = exports.pruneDelegatedRecords = exports.parseDelegatedRegistry = exports.mergeDelegatedRecords = exports.loadDelegatedRegistry = exports.contractViolations = exports.contractFileHashes = exports.resolveContextFiles = exports.DEFAULT_CONTEXT_MAX_BYTES = exports.roleFromLineage = exports.roleForAgent = exports.resolveLeadProviders = exports.resolveAgentRole = exports.resetAgentRoles = exports.rememberAgentRole = exports.evaluateSourceEgress = exports.detectSourceEgress = exports.describeSourceRead = exports.applyArchitectConfig = exports.applyAgentRole = exports.agentLineageRole = exports.DEFAULT_SOURCE_EGRESS_MIN_LINES = exports.AGENT_ROLE_LIMIT = exports.hasCommandWriteSignal = exports.hasCommandDeleteSignal = exports.evaluateDelegatedReadPolicy = exports.evaluateCodeWriteGuard = exports.DELETE_PRIMITIVES = exports.extractAndEmitFiles = exports.evaluateUnitScope = exports.evaluateEmissionPath = exports.isPathWithin = exports.trace = exports.resolveDataDir = exports.SavingsTracker = exports.PROFILES = void 0;
+exports.LocalRouter = exports.name = exports.using = exports.inject = exports.retryContextRequests = exports.parseFailureLocations = exports.RETRY_CONTEXT_WINDOW_LINES = exports.resolveDelegateStatus = exports.resolveChatCompletionsUrl = exports.parseSearchReplaceBlocks = exports.extractPromptText = exports.estimateTokenCount = exports.delegateWorker = exports.applySearchReplaceBlocks = exports.MIN_SEARCH_CHARS = exports.DEFAULT_LOCAL_ENDPOINT = exports.DELEGATE_WORKER_SCHEMA = exports.DELEGATE_WORKER_OPENAI_SCHEMA = exports.foldContextQuality = exports.describeContextQuality = exports.EMPTY_CONTEXT_QUALITY = void 0;
 exports.scanDLP = scanDLP;
 exports.requestApprovalForWrite = requestApprovalForWrite;
 exports.resolveVerificationPolicy = resolveVerificationPolicy;
@@ -76,6 +76,7 @@ Object.defineProperty(exports, "hasCommandWriteSignal", { enumerable: true, get:
 var roles_2 = require("./roles");
 Object.defineProperty(exports, "AGENT_ROLE_LIMIT", { enumerable: true, get: function () { return roles_2.AGENT_ROLE_LIMIT; } });
 Object.defineProperty(exports, "DEFAULT_SOURCE_EGRESS_MIN_LINES", { enumerable: true, get: function () { return roles_2.DEFAULT_SOURCE_EGRESS_MIN_LINES; } });
+Object.defineProperty(exports, "agentLineageRole", { enumerable: true, get: function () { return roles_2.agentLineageRole; } });
 Object.defineProperty(exports, "applyAgentRole", { enumerable: true, get: function () { return roles_2.applyAgentRole; } });
 Object.defineProperty(exports, "applyArchitectConfig", { enumerable: true, get: function () { return roles_2.applyArchitectConfig; } });
 Object.defineProperty(exports, "describeSourceRead", { enumerable: true, get: function () { return roles_2.describeSourceRead; } });
@@ -86,6 +87,7 @@ Object.defineProperty(exports, "resetAgentRoles", { enumerable: true, get: funct
 Object.defineProperty(exports, "resolveAgentRole", { enumerable: true, get: function () { return roles_2.resolveAgentRole; } });
 Object.defineProperty(exports, "resolveLeadProviders", { enumerable: true, get: function () { return roles_2.resolveLeadProviders; } });
 Object.defineProperty(exports, "roleForAgent", { enumerable: true, get: function () { return roles_2.roleForAgent; } });
+Object.defineProperty(exports, "roleFromLineage", { enumerable: true, get: function () { return roles_2.roleFromLineage; } });
 var context_2 = require("./context");
 Object.defineProperty(exports, "DEFAULT_CONTEXT_MAX_BYTES", { enumerable: true, get: function () { return context_2.DEFAULT_CONTEXT_MAX_BYTES; } });
 Object.defineProperty(exports, "resolveContextFiles", { enumerable: true, get: function () { return context_2.resolveContextFiles; } });
@@ -741,7 +743,10 @@ function apply(ctx, options = {}) {
                 const observed = (0, roles_1.describeSourceRead)({
                     tool: exec?.name,
                     target: (0, guard_1.extractWriteTarget)(exec?.arguments),
-                    role: (0, roles_1.roleForAgent)(exec?.agent?.id),
+                    // The live agent is passed as well as its id, so the guard can read the host's session lineage
+                    // instead of relying only on the observed correlation. That is the whole of item 1: before
+                    // `Session.header` existed there was nothing to read, and the plugin said so.
+                    role: (0, roles_1.roleForAgent)(exec?.agent?.id, exec?.agent),
                 });
                 if (observed.track) {
                     (0, logging_1.trace)('SOURCE_READ', {

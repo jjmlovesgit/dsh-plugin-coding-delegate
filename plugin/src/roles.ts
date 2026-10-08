@@ -124,7 +124,43 @@ export function rememberAgentRole(agentId: string | undefined, role: 'architect'
   }
 }
 
-export function roleForAgent(agentId: string | undefined): 'architect' | 'lead' | 'unknown' {
+/**
+ * The role as the host's session lineage records it.
+ *
+ * `Session.header` carries `origin?: 'subagent'` and `delegationDepth?: number`, so the host says outright
+ * whether this is a root agent or one spawned beneath another. A root agent is the architect; anything the
+ * host has marked as spawned is not.
+ *
+ * A missing header returns 'unknown' rather than 'architect'. Absence of evidence is not evidence of
+ * rootness, and a plugin that guesses here is guessing about who may read source.
+ */
+export function roleFromLineage(header: unknown): 'architect' | 'lead' | 'unknown' {
+  if (!header || typeof header !== 'object') return 'unknown'
+  const h = header as { origin?: unknown; delegationDepth?: unknown }
+  if (h.origin === 'subagent') return 'lead'
+  if (typeof h.delegationDepth === 'number' && h.delegationDepth > 0) return 'lead'
+  return 'architect'
+}
+
+/** The lineage role for a live agent, when the host hands one over. */
+export function agentLineageRole(agent: unknown): 'architect' | 'lead' | 'unknown' {
+  const session = (agent as { session?: { header?: unknown } } | undefined)?.session
+  return roleFromLineage(session?.header)
+}
+
+/**
+ * The role for an agent, preferring the host's lineage over the observed correlation.
+ *
+ * Lineage first, because it is what the host recorded. The correlation map below remains as the fallback
+ * for a host that says nothing -- which, before `Session.header` existed, was the only signal this plugin
+ * had, and the comment on `rememberAgentRole` said so honestly.
+ */
+export function roleForAgent(
+  agentId: string | undefined,
+  agent?: { session?: { header?: unknown } }
+): 'architect' | 'lead' | 'unknown' {
+  const byLineage = agentLineageRole(agent)
+  if (byLineage !== 'unknown') return byLineage
   const id = String(agentId ?? '').trim()
   if (!id) return 'unknown'
   return agentRoles.get(id) ?? 'unknown'
