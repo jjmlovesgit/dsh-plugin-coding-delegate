@@ -200,6 +200,49 @@ The two settings people most often need:
 **Full configuration reference, provider setups and every security key: [`plugin/README.md`](plugin/README.md).**
 It is the real documentation; this file is the summary.
 
+## A first unit
+
+Delegation is one tool call from the architect's side. A unit declares what to build, which files it may
+touch, what to show the worker, and the command that decides whether it passed:
+
+```json
+{
+  "taskName": "parse-iso-duration",
+  "instruction": "Implement parseIsoDuration(text) in src/duration.ts. Return milliseconds; throw a TypeError on malformed input.",
+  "targetFiles": ["src/duration.ts"],
+  "contextFiles": [{ "path": "src/duration.ts", "startLine": 1, "endLine": 40 }],
+  "contractFiles": ["tests/duration.test.ts"],
+  "runVerification": "npx vitest run tests/duration.test.ts"
+}
+```
+
+The code never comes back. The verdict does — illustrative, but every field name and phrasing below is what
+the plugin actually prints:
+
+```
+Task 'parse-iso-duration' completed. Wrote 1 file(s):
+  - src/duration.ts (84 lines, 2410 bytes, patched in place with 1 hunk(s))
+Workspace: C:\Projects\app (resolved via caller-supplied workspaceDir)
+Verification Results: Passed 12, Failed 0.
+Coherence check: Passed 305, Failed 0.
+Contract: 1 declared file(s), unchanged.
+```
+
+Read that as four claims, because they are checked separately:
+
+- **`Wrote 1 file(s)`** — the emission landed, inside the workspace, and only at a path the unit declared.
+- **`patched in place with 1 hunk(s)`** — the worker edited the file it was shown rather than replacing it.
+  That verb is the boundary: a whole-file emission may create a file, never modify one.
+- **`Passed 12, Failed 0`** — your verification command passed. Nothing about it is taken on trust; the
+  command itself was approved, and `Coherence check` is the project-level gate that can void the unit even
+  when its own tests passed.
+- **`Contract: 1 declared file(s), unchanged`** — the test that judged the unit is byte-identical to the one
+  you pinned. If it were not, the verdict would be void.
+
+What is *missing* from a receipt is the finding. A unit that writes files without verifying reports
+`UNVERIFIED`; one whose tests passed while the tree did not reports `INCOHERENT`. Neither is `SUCCESS`, and
+neither is reported as one — a delegated result is a verdict, not a claim.
+
 ## Security
 
 The plugin was reviewed externally, and the response to that review — including the defects found
