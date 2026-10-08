@@ -50,8 +50,9 @@ the guard is a deterrent at the tool layer, not an airtight boundary.
    is refused or pinned to the local provider; absent a hit, the request goes to the cloud
    provider. The other rule that decides a destination is the architect pin — see
    [Routing](#routing).
-2. **Provides a `delegate_worker` tool** that dispatches code-generation subtasks to the
-   local model, writes the emitted files, and optionally runs a verification command.
+2. **Provides a `delegate_worker` tool** that dispatches code-generation subtasks to the local model and
+   writes the emitted files. The verification command is the caller's to declare, and omitting it is not
+   neutral: a unit that writes files without one is reported **`UNVERIFIED`**, never `SUCCESS`.
 3. **Guards code authorship in both directions** with a `tools/pre-execute` hook: cloud-authored writes and
    deletions of source are denied or sent for approval, and so is reading back a file the worker wrote, since
    that pulls the delegated code into the very context the delegation kept it out of.
