@@ -265,10 +265,14 @@ npm install --save-dev --save-exact @deepseek-ai/dsh-compaction@<host version>
 npm run build && npm run test:oracles
 ```
 
-Still untyped, and honestly so: the hooks registered with `ctx.on` — `agent/request`, `tools/pre-execute`,
-`tool/call`, `session/event` and the rest — are cast through `any` at the registration site, because the
-host's Cordis `Events` interface is not part of the pinned packages yet. Event *payloads* on the session
-log are checked; hook payloads are not.
+Hook **names** are checked too. Subscriptions go through `onHost(ctx, 'agent/request', handler)`, which
+constrains the name to `keyof Events` — with `Events` augmented by the pinned host packages — so a
+subscription the host does not offer cannot compile. That is what caught `ctx.on('tool/call')`: not a
+Cordis hook at all, but a session event type, and a "fallback" that had never run and could not have.
+
+Hook **payloads** remain loosely typed: the handlers take `any`, because consuming the host's payload
+shapes exactly is a larger change. Session-log event payloads are checked, through `session-events.ts`;
+hook payloads are not, and that is the gap that is left.
 
 ### Judging a transcribed contract
 

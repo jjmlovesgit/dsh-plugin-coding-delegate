@@ -27,8 +27,21 @@ const path = require('node:path')
 const REPO = path.resolve(__dirname, '..')
 const PLUGIN = path.join(REPO, 'plugin')
 
-/** The host packages whose types this plugin compiles against. */
-const HOST_TYPE_PACKAGES = ['@deepseek-ai/dsh-session', '@deepseek-ai/dsh-compaction']
+/**
+ * The host packages whose types this plugin compiles against.
+ *
+ * `session-events.ts` needs `dsh-session` for session event TYPES and `dsh-compaction` for the
+ * declaration-merged `compaction/*` events. `host-events.ts` needs `cordis` for the `Events` interface
+ * and `dsh-agent`/`dsh-tools` for the augmentations that put `agent/*` and `tools/*` into it. A pin that
+ * drifts on any of them silently describes a host that is not running.
+ */
+const HOST_TYPE_PACKAGES = [
+  '@deepseek-ai/cordis',
+  '@deepseek-ai/dsh-agent',
+  '@deepseek-ai/dsh-compaction',
+  '@deepseek-ai/dsh-session',
+  '@deepseek-ai/dsh-tools',
+]
 
 function readJson(file) {
   try {

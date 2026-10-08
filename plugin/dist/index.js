@@ -57,6 +57,7 @@ const delegation_1 = require("./delegation");
 const contracts_1 = require("./contracts");
 const context_quality_1 = require("./context-quality");
 const session_events_1 = require("./session-events");
+const host_events_1 = require("./host-events");
 var logging_2 = require("./logging");
 Object.defineProperty(exports, "resolveDataDir", { enumerable: true, get: function () { return logging_2.resolveDataDir; } });
 Object.defineProperty(exports, "trace", { enumerable: true, get: function () { return logging_2.trace; } });
@@ -688,39 +689,17 @@ function apply(ctx, options = {}) {
         }
     }
     else {
-        console.log("[LOCAL_ROUTER_INIT] Service ctx.tools not available. Registering fallback event listener for 'delegate_worker'.");
+        // There is NO fallback. The listener that used to sit here subscribed to `ctx.on('tool/call')`, which
+        // is not a Cordis hook at all: `tool/call` is a SESSION EVENT type, delivered through `session/event`,
+        // and an observer of the session log cannot answer a tool invocation in any case. So the fallback
+        // could never have run, and if `ctx.tools.register` ever fails this plugin simply has no tool.
+        console.warn('[LOCAL_ROUTER_INIT] ctx.tools is unavailable. There is no fallback path: this plugin can only ' +
+            'serve delegate_worker through ctx.tools.register.');
     }
-    // Fallback listener for tool execution calls in DSH microkernel
-    ctx.on('tool/call', async (payload) => {
-        if (payload?.name === 'delegate_worker' || payload?.tool === 'delegate_worker') {
-            const args = payload.args || payload.arguments || {};
-            const resolved = resolveWorkspaceDir(ctx);
-            const explicitDir = args?.workspaceDir;
-            // `endpoint: options.localProvider` used to sit here, which set the POST URL to the
-            // provider *id* ('lm-studio') rather than a URL. delegateWorker's default is correct.
-            const { endpoint: _ignoredEndpoint, ...callerArgs } = args || {};
-            return await (0, delegation_1.delegateWorker)({
-                ...callerArgs,
-                // Same operator settings as the registered tool path above.
-                ...(options?.localEndpoint ? { endpoint: options.localEndpoint } : {}),
-                ...(options?.localModel ? { model: options.localModel } : {}),
-                workspaceDir: explicitDir || resolved.dir,
-                workspaceSource: explicitDir ? 'caller-supplied workspaceDir' : resolved.source,
-                // This path has no agent or call id, so no approval can be requested: with the
-                // default 'ask' policy the verification command is refused rather than run.
-                verificationPolicy: resolveVerificationPolicy(options),
-                emitAllowlist: options?.emitAllowlist,
-                retryContext: options?.retryContext ?? 'auto',
-                // Operator setting, placed after the caller args deliberately: a caller that sent its own
-                // `unitScope` must not be able to switch off the boundary that keeps it in its lane.
-                unitScope: options?.unitScope ?? 'enforce',
-            }, tracker);
-        }
-    });
     // Local-only code guard: refuse cloud-authored source writes so that all code
     // work routes through delegate_worker to the local worker.
     if (options?.localCodeGuard !== false) {
-        ctx.on('tools/pre-execute', async (exec, next) => {
+        (0, host_events_1.onHost)(ctx, 'tools/pre-execute', async (exec, next) => {
             const decision = typeof next === 'function' ? await next() : { kind: 'allow' };
             if (!decision || decision.kind !== 'allow')
                 return decision;
@@ -783,7 +762,7 @@ function apply(ctx, options = {}) {
         console.log('[LOCAL_ROUTER_INIT] Local-code guard registered on tools/pre-execute.');
     }
     // 1. Lightweight agent/pre-step prompt capture & DLP scanner ONLY
-    ctx.on('agent/pre-step', async (payload, next) => {
+    (0, host_events_1.onHost)(ctx, 'agent/pre-step', async (payload, next) => {
         const turn = payload?.turn;
         const prompt = extractTextFromClaimedMessages(payload?.messages);
         if (turn !== undefined && prompt) {
@@ -815,7 +794,7 @@ function apply(ctx, options = {}) {
         const id = session?.id ?? session?.header?.id;
         return typeof id === 'string' && id.length > 0 ? id : '__global__';
     };
-    ctx.on('session/event', (session, event) => {
+    (0, host_events_1.onHost)(ctx, 'session/event', (session, event) => {
         const key = qualityKeyFor(session);
         const current = contextQuality.get(key) ?? context_quality_1.EMPTY_CONTEXT_QUALITY;
         const next = (0, context_quality_1.foldContextQuality)(current, event);
@@ -847,7 +826,7 @@ function apply(ctx, options = {}) {
         }
     });
     // 2. Primary Thread (Architect) Request Hook: Pin primary thread to DeepSeek Cloud with native uncapped context and tool schema injection
-    ctx.on('agent/request', async (payload, next) => {
+    (0, host_events_1.onHost)(ctx, 'agent/request', async (payload, next) => {
         const resolvedConfig = typeof next === 'function' ? await next() : {};
         const turn = payload?.turn;
         const agent = payload?.agent;
