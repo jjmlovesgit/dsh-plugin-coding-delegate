@@ -433,8 +433,21 @@ assertion at the boundary is therefore not laziness and not a shortcut; it is th
 of a guarantee this plugin is not in a position to make. A cast that says "I am claiming this" is better
 than a type that says "this is proven" when it is not.
 
-The residual question is a runtime one, not a typing one, and is worth a live check: **what does DSH do
-with a `provider` of `undefined`?** Nothing in the plugin or its oracles exercises that path.
+The residual question was a runtime one, not a typing one: **what does DSH do with a `provider` of
+`undefined`?** It is now closed by removing the dependency rather than by answering it. `applyArchitectConfig`
+no longer writes a route it does not have — with no provider configured the host's own selection is left
+alone, and `provider` is not added to the config at all, so an absent route cannot become
+present-and-undefined. That mattered more than it looked: the plugin's entry in `config.json` carries no
+options at all, so a plugin registered without a profile patch was writing `provider: undefined` over every
+request's route.
+
+Tracing the host as far as it went found that `agent/request` has its own handler which re-pins
+`provider`/`model` from its selected route, and that the loop records the provider rather than validating it;
+the LLM layer's own handling of an undefined provider was not reached. None of that is needed now, because
+the plugin no longer produces one on the default path. **One case still writes `undefined` deliberately:**
+`rerouteLocal` with no `localProvider`. That request was meant to stay off the cloud, so falling back to the
+host's route could send source there; the plugin warns and leaves the misconfiguration to fail loudly rather
+than succeed somewhere wrong. `tests/oracles/architect-route.test.cjs` pins all five cases.
 
 ## A gate whose default may not be a gate
 
