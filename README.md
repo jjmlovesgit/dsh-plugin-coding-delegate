@@ -16,6 +16,32 @@ see [What this does not claim](#what-this-does-not-claim).
 > the honest limits are documented rather than glossed. See
 > [What this does not claim](#what-this-does-not-claim).
 
+## What it does
+
+Five things, in the order they act:
+
+1. **In-process, no sidecar.** No daemon, no extra port, nothing to supervise. The gate and the
+   authorship guard run inside the plugin.
+2. **A DLP gate on every outbound request.** Prompts are scanned for credentials and
+   high-entropy tokens before the cloud sees them. A hit is refused or rerouted to the local
+   worker, never transmitted. The gate accumulates the user messages it has seen, so a credential
+   from an earlier turn keeps it closed instead of scrolling out of view.
+3. **A code guard, in both directions.** Cloud-authored writes *and deletions* of source are denied
+   or sent for approval — and so is reading back a file the worker wrote, since that pulls the
+   delegated code into the very context the delegation kept it out of. Shell forms are covered,
+   including inline program text (`python -c`, `node -e`).
+4. **`delegate_worker`.** A tool the architect calls to hand one unit of implementation to a local
+   OpenAI-compatible server (LM Studio, Ollama, vLLM, llama.cpp, a remote gateway). File writes are
+   contained to the workspace, verification output is redacted to structure before it travels, and the
+   verification command itself requires approval. The worker has no repository read, so it only ever sees
+   what the architect declares with `contextFiles`.
+5. **A unit is judged, not reported.** The contract is pinned with `contractFiles` — hashed before the
+   worker runs, refused as a write target, re-hashed afterwards, so a change voids the verdict — and a unit
+   that writes files without verifying reports `UNVERIFIED`. A whole-file emission may **create** a file and
+   may not **modify** one: changing an existing file means sending a search/replace block that matches what
+   is there byte-for-byte. Then `coherenceVerification` runs the project's own command, with the power to
+   void a unit whose own tests passed while the tree did not.
+
 ## How it works: a contract out, a verdict back
 
 Coding needs two different jobs done, and they want two different contexts. The plugin gives each one
@@ -128,32 +154,6 @@ the answer is no.
 | 6 | A command the architect proposes may not run unchecked | approval seam |
 | 7 | A delegated result is a verdict, not a claim | files written without verification report `UNVERIFIED` |
 | 8 | Source may not reach the cloud | cloud-bound requests carrying fenced source are refused by default; `sourceEgress` decides |
-
-## What it does
-
-Five things, in the order they act:
-
-1. **In-process, no sidecar.** No daemon, no extra port, nothing to supervise. The gate and the
-   authorship guard run inside the plugin.
-2. **A DLP gate on every outbound request.** Prompts are scanned for credentials and
-   high-entropy tokens before the cloud sees them. A hit is refused or rerouted to the local
-   worker, never transmitted. The gate accumulates the user messages it has seen, so a credential
-   from an earlier turn keeps it closed instead of scrolling out of view.
-3. **A code guard, in both directions.** Cloud-authored writes *and deletions* of source are denied
-   or sent for approval — and so is reading back a file the worker wrote, since that pulls the
-   delegated code into the very context the delegation kept it out of. Shell forms are covered,
-   including inline program text (`python -c`, `node -e`).
-4. **`delegate_worker`.** A tool the architect calls to hand one unit of implementation to a local
-   OpenAI-compatible server (LM Studio, Ollama, vLLM, llama.cpp, a remote gateway). File writes are
-   contained to the workspace, verification output is redacted to structure before it travels, and the
-   verification command itself requires approval. The worker has no repository read, so it only ever sees
-   what the architect declares with `contextFiles`.
-5. **A unit is judged, not reported.** The contract is pinned with `contractFiles` — hashed before the
-   worker runs, refused as a write target, re-hashed afterwards, so a change voids the verdict — and a unit
-   that writes files without verifying reports `UNVERIFIED`. A whole-file emission may **create** a file and
-   may not **modify** one: changing an existing file means sending a search/replace block that matches what
-   is there byte-for-byte. Then `coherenceVerification` runs the project's own command, with the power to
-   void a unit whose own tests passed while the tree did not.
 
 ## Requirements
 

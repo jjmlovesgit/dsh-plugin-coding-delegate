@@ -17,6 +17,17 @@ that dependency was removed, and the credential rules are now TypeScript in this
 > else — it adds no provider, no model and no API key. Provider setup is entirely yours.
 > `cordis.patch.example.yml` ships as an **unapplied** starting point you can copy from.
 
+## Contents
+
+- [The policy](#the-policy) · [Requirements](#requirements) · [Install](#install)
+- [Configuring providers](#configuring-providers) · [Routing](#routing) · [Configuration](#configuration)
+- [Rule 8: source may not reach the cloud](#rule-8-source-may-not-reach-the-cloud)
+- [The `delegate_worker` tool](#the-delegate_worker-tool) · [Local-code guard](#local-code-guard)
+- [Delegated verification and file writes](#delegated-verification-and-file-writes) · [State](#state)
+- [Throughput reference](#throughput-reference) · [Development](#development)
+- [The host contract](#the-host-contract) · [Judging a transcribed contract](#judging-a-transcribed-contract)
+- [Limitations](#limitations)
+
 ## The policy
 
 **The architect may reason but not author. The worker may author but not stray. Neither may execute
@@ -43,19 +54,6 @@ and rule 7 stops an unchecked result being reported as a pass.
 What the policy does **not** cover is listed under [Limitations](#limitations) rather than left
 implied: code in prose is not mediated, files this plugin did not write remain freely readable, and
 the guard is a deterrent at the tool layer, not an airtight boundary.
-
-## What it does
-
-1. **Gates what may leave the machine.** Every outbound request is scanned for credentials. A hit
-   is refused or pinned to the local provider; absent a hit, the request goes to the cloud
-   provider. The other rule that decides a destination is the architect pin — see
-   [Routing](#routing).
-2. **Provides a `delegate_worker` tool** that dispatches code-generation subtasks to the local model and
-   writes the emitted files. The verification command is the caller's to declare, and omitting it is not
-   neutral: a unit that writes files without one is reported **`UNVERIFIED`**, never `SUCCESS`.
-3. **Guards code authorship in both directions** with a `tools/pre-execute` hook: cloud-authored writes and
-   deletions of source are denied or sent for approval, and so is reading back a file the worker wrote, since
-   that pulls the delegated code into the very context the delegation kept it out of.
 
 ## Requirements
 
@@ -346,19 +344,22 @@ context, and `contractFiles` and `contractViolations` when it declared a contrac
 
 The worker receives the `instruction`, the `targetFiles` **paths**, the verification command, and any
 `contextFiles` the architect declared — and nothing else. It has no repository read, so it cannot
-discover anything; it only ever sees what it was shown. Declaring `contextFiles` is how a unit closes
-on existing code without that code entering the architect's context. What remains unsolved is cross-unit
-coherence: nothing decides which files a unit needs, and nothing checks that two units agree.
+discover anything; it only ever sees what it was shown. What remains unsolved is cross-unit coherence:
+nothing decides which files a unit needs, and nothing checks that two units agree.
 
-- **File emission** is driven by fenced code blocks whose header names the target, e.g.
-  ```` ```ts file="src/thing.ts" ```` or a `// FILE: src/thing.ts` first line.
-- **Safety**: output that does not look like source code is refused rather than written, and a whole-file
-  emission may create a file but never modify one. Both exist because an earlier version silently replaced a
-  working module with a tool-call transcript.
+### Where the files go
+
 - **`workspaceDir`** selects the destination explicitly. Pass it. Automatic resolution
   cannot see the DSH session workspace (the Cordis `Agent` exposes only an id, and the path
   lives in session metadata behind a store the plugin cannot reach), so omitting it resolves
   to the server's working directory and says so in `summary`.
+- **File emission** is driven by fenced code blocks whose header names the target, e.g.
+  ```` ```ts file="src/thing.ts" ```` or a `// FILE: src/thing.ts` first line.
+- **Safety**: output that does not look like source code is refused rather than written. That check exists
+  because an earlier version silently replaced a working module with a tool-call transcript.
+
+### Creating and modifying
+
 - **A patch edits in place; a code block creates.** To change part of an existing file the worker emits
   a fenced block headed `patch file="…"` whose body holds `<<<<<<< SEARCH`, `=======` and
   `>>>>>>> REPLACE` markers. The SEARCH text must match the file exactly and **exactly once**: zero
@@ -379,6 +380,9 @@ coherence: nothing decides which files a unit needs, and nothing checks that two
   match what was there. Verified live after a restart, in all three directions: creating a new file
   succeeded, a whole-file rewrite of that same path was refused with `filesWritten: []`, and the same change
   sent as one patch applied.
+
+### Declaring what the worker may see
+
 - **`contextFiles` shows the worker the code it must change, without showing it to you.** Entries are
   `{ path, startLine?, endLine? }` with 1-based inclusive ranges. The plugin reads them into the worker
   prompt and returns a record of what it injected — path, range, lines, bytes, sha256 — and never the
@@ -386,6 +390,9 @@ coherence: nothing decides which files a unit needs, and nothing checks that two
   that would exceed its byte budget is refused rather than quietly truncated. A credential found in the
   declared context refuses the delegation rather than transmitting it: the endpoint may be a vLLM port
   on another machine, and a "local" endpoint that is remote is a cloud.
+
+### Declaring the contract that judges it
+
 - **`contractFiles` declares the contract's tests, and the architect owns them.** Each is hashed
   before the worker runs, refused as a worker emission target, and re-hashed afterwards. Any change
   voids the verdict and reports `status: 'CONTRACT_MODIFIED'`, which outranks even a passing
@@ -396,9 +403,14 @@ coherence: nothing decides which files a unit needs, and nothing checks that two
   Enforcement is **opt-in**, and that is a real limit. A unit that declares no `contractFiles` gets no
   protection, and nothing detects that the architect should have declared one. The mechanism makes a
   declared contract unrewritable; it cannot make declaring one mandatory.
+
+### Verification
+
 - **Verification** runs `runVerification` with the resolved workspace as cwd, and the
   command's **exit code is authoritative** — unrecognised output can never be scored a pass,
   because `tsc`-style failures would otherwise report success.
+- **A unit that writes files without a command is reported `UNVERIFIED`**, never `SUCCESS`. The command is
+  the caller's to declare and is approval-gated because it is model-selected; there is no default one.
 
 ### Failure reports are redacted
 
