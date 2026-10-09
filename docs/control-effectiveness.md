@@ -293,7 +293,28 @@ lines**, and it falls through to *"the registry holds no verdict for it"* rather
 attestation. That file cannot be patched from a cloud context: `.cjs` is in `CODE_EXTENSIONS`, so the write
 guard refuses it as source.
 
+## Two containment layers, and only one of them is unconditional
+
+Stated because a summary that says "the worker writes only within its declared boundary" reads as five
+unconditional perimeters, and the unit boundary is not one of them.
+
+| layer | mechanism | invariant |
+| --- | --- | --- |
+| **workspace boundary** | `workspaceDir` + `emitAllowlist` roots | **unconditional** — the worker cannot write outside these roots, on any dispatch |
+| **task unit scope** | `targetFiles`, with `unitScope: 'enforce'` by default | **conditional** — a write to a path the unit did not declare is refused, but **a unit that declares nothing is unrestricted across the workspace** |
+
+The second is an opt-in contract property, not a perimeter. The plugin's own documentation says so twice — in
+`plugin/README.md` and in the `targetFiles` schema — and both say it plainly: *"Omit the field to leave the
+unit unrestricted."* So the accurate claim is **contained to the workspace unconditionally, and to the
+declared unit scope when one was declared**, and nothing forces an architect to declare one.
+
+That distinction is worth keeping in view for the same reason the others in this file are: a boundary count
+is only meaningful if each item is the kind of boundary it claims to be. This row is the sixth claim in this
+project found stronger than its mechanism, and the pattern that caught it is unchanged — reading the
+artifact rather than the summary of it.
+
 ## The question that found every defect here
+
 
 **"What would this look like if it were checking nothing?"**
 
