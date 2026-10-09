@@ -62,6 +62,14 @@ jobs:
         working-directory: .
         run: node --test plugin/tests/oracles/attestation-identity.oracle.mjs
 
+      - name: Tool surface oracle
+        # Guards the schema duplication that already cost a false test: `attestTargets` was added to the
+        # inline copy in index.ts and not to the canonical export, so the parameter was silently stripped
+        # from every call while the tool reported success. The duplication is now removed, and this asserts
+        # the property that makes the removal safe -- that there is ONE object, not two that agree today.
+        working-directory: .
+        run: node --test plugin/tests/oracles/tool-surface.oracle.mjs
+
       - name: README consistency
         # The repository-root scripts never ran in CI: this job's default working-directory is `plugin`,
         # so everything under `scripts/` was local-only. That is how the two READMEs drifted to seven

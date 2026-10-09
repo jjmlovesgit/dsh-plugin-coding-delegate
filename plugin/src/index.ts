@@ -1032,72 +1032,12 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
         name: 'delegate_worker',
         description:
           'Dispatches a discrete implementation, testing, or code-generation task to the configured local execution worker -- any OpenAI-compatible server (LM Studio, Ollama, vLLM, llama.cpp) -- with an isolated context window. The worker has no repository read: declare contextFiles for the code it must see, since it cannot discover anything itself.',
-        parameters: {
-          type: 'object',
-          properties: {
-            taskName: {
-              type: 'string',
-              description: 'A short descriptive identifier for the subtask',
-            },
-            instruction: {
-              type: 'string',
-              description: 'The complete technical prompt and specifications for the local worker',
-            },
-            attestTargets: {
-              type: 'array',
-              items: { type: 'string' },
-              description:
-                'Paths to record an OPERATOR_ATTESTED verdict for, IF this unit passes. This is a separate act from delegation and is refused for a unit that did not pass, because an attestation is a human claim about content and attaching one to a failed or unverified unit would launder a machine outcome into a human statement. Use it to settle a hand-edited file: the registry records the file current SHA-256, the attesting agent, and the evidence, with no keys and no signature, so it is tamper-evidence rather than cryptographic non-repudiation.',
-            },
-            attestEvidence: {
-              type: 'string',
-              description:
-                'What was actually checked, recorded verbatim against the attestation. An attestation that does not say what it covers is an anonymous stamp, so this is required for the record to be worth anything even though the field is optional.',
-            },
-            attestOperator: {
-              type: 'string',
-              description:
-                'The human to name for the attestation, overriding the plugin operatorIdentity. Required in practice: there is NO fallback to the calling agent id, because an autonomous session identifier cannot attest human review. If neither this nor operatorIdentity is set, the attestation is refused and the unit verdict is left intact.',
-            },
-            targetFiles: {
-              type: 'array',
-              items: { type: 'string' },
-              description:
-                'The files this unit may write. ENFORCED: an emission to any path not listed here is refused and reported, because a unit that writes outside what it declared is how two units come to disagree about the same code. Declare every file the unit creates or changes, including a directory if the unit chooses the filenames within it. Omit the field to leave the unit unrestricted.',
-            },
-            runVerification: {
-              type: 'string',
-              description:
-                'Optional shell command to verify the output. It executes with the authority of the DSH process and requires operator approval unless verificationApproval is set to allow.',
-            },
-            contractFiles: {
-              type: 'array',
-              items: { type: 'string' },
-              description:
-                'Paths to the tests that constitute this unit contract. They are hashed before the worker runs, the worker is forbidden to write them, and they are re-hashed afterwards: any change voids the verdict. The architect owns these files. If this unit has to agree with a file another unit already wrote, declare an interface contract for that boundary here and on every other unit that touches it, or inject the file itself with contextFiles. A unit that writes into a tree where delegated files already exist, while declaring neither, is the usual cause of two units that both pass and still disagree: the worker has no repository read, so it invents the interface, and this unit contract was written from the same mental model, so its tests agree with the invention.',
-            },
-            contextFiles: {
-              type: 'array',
-              description:
-                'Existing files the worker needs to see, as { path, startLine?, endLine? }. The plugin reads them into the worker prompt; you receive a record of what was injected and never the contents. Paths outside the workspace are refused, and context carrying a credential is refused rather than transmitted.',
-              items: {
-                type: 'object',
-                properties: {
-                  path: { type: 'string' },
-                  startLine: { type: 'number' },
-                  endLine: { type: 'number' },
-                },
-                required: ['path'],
-              },
-            },
-            workspaceDir: {
-              type: 'string',
-              description:
-                'Absolute path of the directory the worker may write into. Defaults to the session workspace; destinations outside it are refused.',
-            },
-          },
-          required: ['taskName', 'instruction'],
-        },
+        // SINGLE SOURCE OF TRUTH. These parameters were previously duplicated here and in
+        // DELEGATE_WORKER_OPENAI_SCHEMA in delegation.ts, and the duplication already cost a false test:
+        // adding attestTargets/attestEvidence to this copy alone left the tool listing unchanged and the
+        // delegated call was silently stripped of both -- the tool reported success while the parameters
+        // never arrived. delegation.ts owns the list; this file references it.
+        parameters: (DELEGATE_WORKER_OPENAI_SCHEMA as any).function.parameters,
         output: {
           schema: {
             type: 'object',
@@ -1205,6 +1145,44 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
           }
           return verdict
         },
+      }
+
+      // DRIFT ASSERTION for the duplicated tool schema, and it exists because the duplication already cost
+      // a false test. The parameters are declared twice: once inline here (the dev contract this file
+      // registers) and once in `DELEGATE_WORKER_OPENAI_SCHEMA` in delegation.ts, which is what the host
+      // receives. Adding `attestTargets`/`attestEvidence` to the inline copy alone left the tool listing
+      // unchanged, and the delegated call was SILENTLY stripped of both -- the tool reported success while
+      // the parameters never arrived.
+      //
+      // `delegation.ts` owns the canonical list. This asserts the local copy still agrees with it, so the
+      // next parameter added to one and not the other fails loudly at registration instead of quietly
+      // dropping an argument. Sorted key comparison plus the `required` list, because a missing parameter
+      // and a reordered one are not the same defect and only the first is worth waking anyone for.
+      {
+        const canonical = (DELEGATE_WORKER_OPENAI_SCHEMA as any)?.function?.parameters
+        const inlineParams = (dshToolDef as any)?.parameters
+        if (canonical && canonical.properties && inlineParams && inlineParams.properties) {
+          const a = Object.keys(canonical.properties).sort().join(',')
+          const b = Object.keys(inlineParams.properties).sort().join(',')
+          const reqA = JSON.stringify(canonical.required || [])
+          const reqB = JSON.stringify(inlineParams.required || [])
+          if (a !== b || reqA !== reqB) {
+            throw new Error(
+              'delegate_worker schema drift: the inline parameters in index.ts disagree with ' +
+                'DELEGATE_WORKER_OPENAI_SCHEMA in delegation.ts. ' +
+                'Canonical: [' +
+                a +
+                '] required ' +
+                reqA +
+                '. Inline: [' +
+                b +
+                '] required ' +
+                reqB +
+                '. Add the parameter to BOTH or neither -- a parameter present in only one is silently ' +
+                'dropped from the tool call, which is how attestTargets was lost the first time.'
+            )
+          }
+        }
       }
 
       try {
