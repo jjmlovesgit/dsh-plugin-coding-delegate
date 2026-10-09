@@ -117,7 +117,15 @@ function judge(target, records) {
   if (record.outcome === 'UNIT_UNVERIFIED') {
     return { ok: false, reason: 'the unit that wrote it was never verified' }
   }
-  if (record.outcome !== 'UNIT_PASSED' || record.succeeded !== true) {
+  if (record.outcome === 'OPERATOR_ATTESTED') {
+    const current = sha256File(target)
+    if (current === null) return { ok: false, reason: 'its content could not be read' }
+    if (String(record.sha256) !== current) {
+      return { ok: false, reason: 'its content changed after the operator attested it' }
+    }
+    const by = record.attestation && record.attestation.operator ? String(record.attestation.operator) : 'an operator'
+    return { ok: true, reason: 'attested by ' + by + ' and unchanged since', attested: true }
+  }  if (record.outcome !== 'UNIT_PASSED' || record.succeeded !== true) {
     return { ok: false, reason: 'the registry holds no verdict for it' }
   }
   const current = sha256File(target)
