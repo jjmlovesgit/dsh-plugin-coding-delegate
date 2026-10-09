@@ -13,7 +13,7 @@ tests and the code and then grading both. This plugin makes the specification an
 before implementation and re-hashed after, so a passing verdict means *the specification, unmodified,
 passed against the implementation* — and that is checkable after the fact from a local record.
 
-> **Status: 0.1.0, a personal project.** The mechanisms work and are tested. Its **limits are documented
+> **Status: 0.2.0, a personal project.** The mechanisms work and are tested. Its **limits are documented
 > rather than glossed**, including two that cannot be closed from inside the process — see
 > [What this control does not cover](#what-this-control-does-not-cover). Read that section before deciding
 > whether it fits your situation.
@@ -116,7 +116,7 @@ Stated here rather than discovered in a procurement conversation:
   correct semantics, since a verdict describes content, but it means a human attestation must be
   re-established and is not a permanent certificate.
 - **Task scoping is opt-in**, as above: nothing forces an architect to declare `targetFiles`.
-- **A personal project at 0.1.0.** The API is not frozen. The honest limits are documented rather than
+- **A personal project at 0.2.0.** The API is not frozen. The honest limits are documented rather than
   glossed, which is the trait an evaluation should weigh in its favour given how rare it is.
 
 The proposition is not that this shaves a metered bill — measured, that is worth about **fifteen cents**. It
