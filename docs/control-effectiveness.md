@@ -98,12 +98,22 @@ checkable against the emitted tree rather than inferred from good behaviour.
 contain **zero** `for`/`while`, `if`/`switch`, and `fs.` calls, against 16, 80 and 2 in the sources. That is
 the control's actual claim — not that a path resolves, but that bodies do not cross.
 
-**What is still not enforced: generation.** `sourceReadEgress` serves declarations that already exist; it
-does not produce them, and it is not wired into the build. A repository enabling it must emit declarations
-first (`tsc --declaration --emitDeclarationOnly`), and the option fails closed when a mapping misses rather
-than falling back. Two consequences worth stating: turning it on **refuses reads of files with no
-declaration**, which is correct and will be felt; and it is opt-in rather than default, because changing
-what every read returns is not a decision to make for the operator.
+**What is still not automated: generation as a separate step.** In this repository it already exists —
+`build` is `tsc`, `tsconfig.json` sets `"declaration": true`, so `plugin/dist` **is** the declarations tree
+and all 17 source modules resolve. `sourceReadEgress` needs only `declarationRoot` pointed at `dist` after a
+build. A repository that has no such step must add one, and the option fails closed when a mapping misses
+rather than falling back.
+
+**One operational limit, found by testing it rather than reasoning about it: this option is read at plugin
+REGISTRATION, so it needs a server restart.** A live test with `sourceReadEgress` added to the running
+plugin's config served raw source and registered no hook, because `apply()` had already run and the config
+object it captured did not contain the key. An earlier measurement in this repository concluded that DSH
+"reloads plugin options without a restart" — that is true for options consulted **per dispatch**, like
+`verificationAllowlist`, and false for options that gate **registration**, which is what this one is. The
+distinction was not written down at the time and cost a wasted live test; it is here now.
+
+**And it is opt-in rather than default**, because changing what every read returns is not a decision to make
+for the operator.
 
 **This is the largest gap in the design and the one with the most upside.** It is also not a plugin
 problem: the plugin cannot strip what has already entered the window. Closing it means a preprocessor that
@@ -208,7 +218,7 @@ Until it is, this row describes what a human should do when a deadlock occurs, n
 
 | # | control | state | test |
 | --- | --- | --- | --- |
-| 1 | inverted ingestion | **enforced for egress, opt-in**; no generator | `egress-guard.test.cjs` |
+| 1 | inverted ingestion | **enforced, opt-in, needs a restart**; generator is the existing `tsc` build | `egress-guard.test.cjs` |
 | 2 | downward delegation | enforced | `control-bypass.test.cjs` + 3 others |
 | 3 | on-box verification, sanitized receipts | enforced, with limits | `redaction` / `coherence` / `registry-verdict` |
 | 4 | flakiness containment | enforced, with limits | `flaky-verdict.test.cjs` |
@@ -216,8 +226,9 @@ Until it is, this row describes what a human should do when a deadlock occurs, n
 
 **Row 1 moved.** It was two gaps, and only one was usually noticed: no generator, and no egress control. The
 egress half is now enforced — the mechanical read filter that makes "the architect reads declarations" a
-property of the path rather than a promise — while **generation is still absent**, so the option requires
-declarations to exist already.
+property of the path rather than a promise. The generator turns out to be the build this repository already
+runs, though whether it is *sufficient* generation is untested: `declare` output preserves doc comments, and
+whether an architect can author a satisfiable contract from it alone is Run 2, which has not been run.
 
 **One row of five is unenforced: protocol models**, and the reason is unchanged — generating a finite-state
 model of cross-module behaviour is research-grade static analysis, and the ingest side being easy is what
