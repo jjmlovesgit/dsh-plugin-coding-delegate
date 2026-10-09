@@ -606,6 +606,15 @@ function apply(ctx, options = {}) {
                             type: 'string',
                             description: 'The complete technical prompt and specifications for the local worker',
                         },
+                        attestTargets: {
+                            type: 'array',
+                            items: { type: 'string' },
+                            description: 'Paths to record an OPERATOR_ATTESTED verdict for, IF this unit passes. This is a separate act from delegation and is refused for a unit that did not pass, because an attestation is a human claim about content and attaching one to a failed or unverified unit would launder a machine outcome into a human statement. Use it to settle a hand-edited file: the registry records the file current SHA-256, the attesting agent, and the evidence, with no keys and no signature, so it is tamper-evidence rather than cryptographic non-repudiation.',
+                        },
+                        attestEvidence: {
+                            type: 'string',
+                            description: 'What was actually checked, recorded verbatim against the attestation. An attestation that does not say what it covers is an anonymous stamp, so this is required for the record to be worth anything even though the field is optional.',
+                        },
                         targetFiles: {
                             type: 'array',
                             items: { type: 'string' },
@@ -658,9 +667,14 @@ function apply(ctx, options = {}) {
                     // `endpoint` is not a declared tool argument and is deliberately dropped:
                     // delegateWorker would otherwise POST the task to whatever URL a caller named.
                     const { endpoint: _ignoredEndpoint, ...callerArgs } = args || {};
+                    // Attestation is a SEPARATE act from delegation and must not be smuggled into it. A caller may
+                    // name paths to attest here so the operator's own review can be recorded through a tool call
+                    // rather than a shell one-liner -- the manual route was the only one available, which is exactly
+                    // why the promotion socket sat patched-but-unattested for so long.
+                    const { attestTargets, attestEvidence, ...delegationArgs } = callerArgs;
                     const policy = resolveVerificationPolicy(options);
-                    return await (0, delegation_1.delegateWorker)({
-                        ...callerArgs,
+                    const verdict = await (0, delegation_1.delegateWorker)({
+                        ...delegationArgs,
                         // Operator settings, not caller arguments. The local endpoint and model are
                         // trusted configuration; a caller-supplied `endpoint` was dropped just above.
                         ...(options?.localEndpoint ? { endpoint: options.localEndpoint } : {}),
@@ -675,6 +689,38 @@ function apply(ctx, options = {}) {
                         retryContext: options?.retryContext ?? 'auto',
                         verificationApproval: (command) => requestApprovalForVerification(ctx, exec, command),
                     }, tracker);
+                    if (Array.isArray(attestTargets) && attestTargets.length > 0) {
+                        // Only a PASSING unit may be attested from here. An attestation is a human claim about content;
+                        // attaching one to a unit that failed or was never verified would launder a machine outcome
+                        // into a human statement, which is the one thing this verdict must not become.
+                        if (verdict && verdict.status === 'UNIT_PASSED') {
+                            const who = String(exec?.agent?.id || 'architect').slice(0, 24);
+                            const evidence = String(attestEvidence || '').trim() ||
+                                'operator reviewed the passing unit from delegation ' + String(verdict.taskName || '');
+                            const attested = [];
+                            for (const target of attestTargets) {
+                                try {
+                                    const record = (0, contracts_1.recordOperatorAttestation)(String(target), who, evidence);
+                                    if (record)
+                                        attested.push(record.path);
+                                }
+                                catch (err) {
+                                    // The recorder throws when the registry cannot be written, deliberately: an unpersisted
+                                    // attestation must not be reported as one. Surfacing it here keeps that contract.
+                                    console.warn('[LOCAL_EGRESS] attestation failed for', target, err?.message || err);
+                                }
+                            }
+                            verdict.attested = attested;
+                            if (attested.length > 0) {
+                                verdict.summary = String(verdict.summary || '') + '\nAttested: ' + attested.join(', ') + '.';
+                            }
+                        }
+                        else {
+                            verdict.attestationSkipped =
+                                'attestTargets was provided but the unit did not pass, so nothing was attested';
+                        }
+                    }
+                    return verdict;
                 },
             };
             try {

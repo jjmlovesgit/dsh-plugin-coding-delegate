@@ -73,6 +73,17 @@ export const DELEGATE_WORKER_OPENAI_SCHEMA = {
           description:
             'How many times to run runVerification. Defaults to 3 and is capped at 20. Raise it for a rare race condition. Pass 1 ONLY for a suite you have measured as deterministic and whose three-fold cost you are deliberately declining -- a contract that runs once cannot disagree with itself, so a flaky oracle becomes invisible again.',
         },
+        attestTargets: {
+          type: 'array',
+          items: { type: 'string' },
+          description:
+            'Paths to record an OPERATOR_ATTESTED verdict for, IF this unit passes. A separate act from delegation, and refused for a unit that did not pass, because an attestation is a human claim about content and attaching one to a failed or unverified unit would launder a machine outcome into a human statement. Use it to settle a hand-edited file: the registry records the file current SHA-256, the attesting agent and the evidence, with no keys and no signature, so it is tamper-evidence rather than cryptographic non-repudiation.',
+        },
+        attestEvidence: {
+          type: 'string',
+          description:
+            'What was actually checked, recorded verbatim against the attestation. An attestation that does not say what it covers is an anonymous stamp, so this is worth supplying even though the field is optional.',
+        },
         contractFiles: {
           type: 'array',
           items: { type: 'string' },

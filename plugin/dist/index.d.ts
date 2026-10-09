@@ -404,6 +404,17 @@ declare const pluginExport: {
                         type: string;
                         description: string;
                     };
+                    attestTargets: {
+                        type: string;
+                        items: {
+                            type: string;
+                        };
+                        description: string;
+                    };
+                    attestEvidence: {
+                        type: string;
+                        description: string;
+                    };
                     contractFiles: {
                         type: string;
                         items: {
@@ -467,6 +478,17 @@ declare const pluginExport: {
                         description: string;
                     };
                     verificationRepeats: {
+                        type: string;
+                        description: string;
+                    };
+                    attestTargets: {
+                        type: string;
+                        items: {
+                            type: string;
+                        };
+                        description: string;
+                    };
+                    attestEvidence: {
                         type: string;
                         description: string;
                     };

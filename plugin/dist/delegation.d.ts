@@ -33,6 +33,17 @@ export declare const DELEGATE_WORKER_OPENAI_SCHEMA: {
                     type: string;
                     description: string;
                 };
+                attestTargets: {
+                    type: string;
+                    items: {
+                        type: string;
+                    };
+                    description: string;
+                };
+                attestEvidence: {
+                    type: string;
+                    description: string;
+                };
                 contractFiles: {
                     type: string;
                     items: {
@@ -96,6 +107,17 @@ export declare const DELEGATE_WORKER_SCHEMA: {
                     description: string;
                 };
                 verificationRepeats: {
+                    type: string;
+                    description: string;
+                };
+                attestTargets: {
+                    type: string;
+                    items: {
+                        type: string;
+                    };
+                    description: string;
+                };
+                attestEvidence: {
                     type: string;
                     description: string;
                 };
