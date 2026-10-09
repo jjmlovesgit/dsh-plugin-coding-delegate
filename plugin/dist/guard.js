@@ -490,6 +490,28 @@ function evaluateSettledFile(record, currentHash) {
             reason: 'the unit that wrote it was never verified, so nothing has been established about its content.',
         };
     }
+    // A hand-verified file reads back like a passing one, and the reason says which claim is behind it. The
+    // promotion socket treats both as promotable because both are a human-or-machine judgement made against
+    // recorded content; the read guard only needs to say that SOMEBODY with standing looked at it, and to
+    // name which kind of somebody so the distinction is never lost in a log.
+    if (record.outcome === 'OPERATOR_ATTESTED') {
+        if (currentHash === null) {
+            return { allowed: false, reason: 'its content could not be read, so nothing can be said about it.' };
+        }
+        if (record.sha256 !== currentHash) {
+            return {
+                allowed: false,
+                reason: 'its content changed after the operator attested it, so the attestation covers bytes that are no longer there.',
+            };
+        }
+        const by = record.attestation?.operator;
+        return {
+            allowed: true,
+            reason: by
+                ? 'an operator (' + by + ') attested this content and it is unchanged since.'
+                : 'the registry holds an operator attestation for it.',
+        };
+    }
     if (record.outcome !== 'UNIT_PASSED' || record.succeeded !== true) {
         return { allowed: false, reason: 'the registry holds no verdict for it.' };
     }

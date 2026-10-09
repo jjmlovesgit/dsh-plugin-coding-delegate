@@ -53,8 +53,26 @@ export declare function lookupDelegatedRecord(canonicalPath: string): DelegatedR
  * A flaky verdict is a statement about the ORACLE, not about the code: the contract disagreed with
  * itself across repeated runs, so nothing has been established about the content either way. It is not
  * a pass, it does not settle the file, and the reason names the oracle rather than the implementation.
+ *
+ * `OPERATOR_ATTESTED` is the fifth answer, and it exists because the other four all describe a DELEGATION.
+ * A module an engineer edited by hand has no delegation to judge it, and manufacturing one -- running a
+ * synthetic worker purely to stamp a hash -- would replace human-reviewed engineering with simulated
+ * machine origin in the audit trail. That is a worse record than no record.
+ *
+ * The two verdicts are epistemically different and this type keeps them apart on purpose:
+ *
+ *   UNIT_PASSED        a local model satisfied a MACHINE-CHECKED contract
+ *   OPERATOR_ATTESTED  a HUMAN verified the artifact, and the evidence of that is recorded verbatim
+ *
+ * A consumer may treat both as promotable, and must not treat them as the same claim.
  */
-export type DelegatedOutcome = 'UNIT_PASSED' | 'UNIT_FAILED' | 'UNIT_UNVERIFIED' | 'UNIT_FLAKY';
+export type DelegatedOutcome = 'UNIT_PASSED' | 'UNIT_FAILED' | 'UNIT_UNVERIFIED' | 'UNIT_FLAKY' | 'OPERATOR_ATTESTED';
+/** Who attested a hand-verified file, and what they said they checked. Auditable, not decorative. */
+export interface OperatorAttestation {
+    operator: string;
+    evidence: string;
+    at: number;
+}
 /** One delegated file as it is persisted: where it is, and what was written there. */
 export interface DelegatedRecord {
     path: string;
@@ -75,6 +93,12 @@ export interface DelegatedRecord {
     outcome?: DelegatedOutcome;
     succeeded?: boolean;
     verdictAt?: number;
+    /**
+     * Present only for `OPERATOR_ATTESTED`: who signed off on this content, what they say they checked, and
+     * when. Carried so a reviewer can tell a machine-checked receipt from a human judgement without reading
+     * the verdict name, because those are different claims and the difference is the point of the verdict.
+     */
+    attestation?: OperatorAttestation;
 }
 export declare function resolveDelegatedRegistryPath(): string;
 /**
@@ -109,3 +133,23 @@ export declare function rememberDelegated(paths: string[], mode?: 'created' | 'p
  * from a write.
  */
 export declare function recordDelegatedOutcome(paths: string[], outcome: DelegatedOutcome, succeeded: boolean, at?: number): number;
+/**
+ * Record that a HUMAN verified a file, with the evidence they gave.
+ *
+ * WHY THIS IS NOT `recordDelegatedOutcome`. That function stamps records that already exist, because a
+ * verdict is always the second half of a delegation that wrote the file first. A hand-edited module has no
+ * such record -- `guard.ts` in this repository is 786 lines of hand-written change with no delegation
+ * behind it -- so an attestation has to CREATE a record rather than stamp one.
+ *
+ * It creates it with `mode: 'created'`, which is the honest description: the architect has never been
+ * shown this content by a worker, and the read guard should treat reading it back the way it treats any
+ * other file the context did not write. Claiming `patched` would assert a history that did not happen.
+ *
+ * The hash is read from disk HERE, not supplied by the caller, so an attestation always describes the
+ * bytes that were present when it was made. A caller-supplied hash would let an attestation be recorded
+ * for content that was never on disk, which is the one thing this verdict must not allow.
+ *
+ * Returns the record it wrote, or null when the file could not be read -- never a bare count, because the
+ * caller needs the hash to show the operator what they just attested.
+ */
+export declare function recordOperatorAttestation(path: string, operator: string, evidence: string, at?: number): DelegatedRecord | null;

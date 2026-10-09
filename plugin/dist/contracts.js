@@ -47,6 +47,7 @@ exports.saveDelegatedRegistry = saveDelegatedRegistry;
 exports.loadDelegatedRegistry = loadDelegatedRegistry;
 exports.rememberDelegated = rememberDelegated;
 exports.recordDelegatedOutcome = recordDelegatedOutcome;
+exports.recordOperatorAttestation = recordOperatorAttestation;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const crypto = __importStar(require("crypto"));
@@ -166,6 +167,7 @@ const DELEGATED_OUTCOMES = new Set([
     'UNIT_FAILED',
     'UNIT_UNVERIFIED',
     'UNIT_FLAKY',
+    'OPERATOR_ATTESTED',
 ]);
 function resolveDelegatedRegistryPath() {
     return path.join((0, logging_1.resolveDataDir)(), 'delegated-registry.json');
@@ -207,6 +209,29 @@ function parseDelegatedRegistry(text) {
             record.succeeded = entry.succeeded === true;
             if (Number.isFinite(Number(entry.verdictAt)))
                 record.verdictAt = Number(entry.verdictAt);
+        }
+        // The attestation survives the round trip, because an attestation without its operator and evidence is
+        // not an audit record -- and this parser is where a field can be silently dropped, which is how a
+        // written verdict becomes an absence. Both fields are required for it to be carried: a record claiming
+        // OPERATOR_ATTESTED with nobody named is exactly the unattributable stamp this verdict exists to avoid.
+        const attestation = entry.attestation;
+        if (attestation && typeof attestation === 'object') {
+            const operator = String(attestation.operator ?? '').trim();
+            const evidence = String(attestation.evidence ?? '').trim();
+            if (operator && evidence) {
+                record.attestation = {
+                    operator,
+                    evidence,
+                    at: Number.isFinite(Number(attestation.at)) ? Number(attestation.at) : 0,
+                };
+            }
+            else {
+                // An unattributable attestation is not carried, and the verdict goes with it: keeping the verdict
+                // while dropping the attribution would leave a record that reads as human-verified with nobody
+                // accountable for it.
+                delete record.outcome;
+                delete record.succeeded;
+            }
         }
         records.push(record);
     }
@@ -322,4 +347,52 @@ function recordDelegatedOutcome(paths, outcome, succeeded, at = Date.now()) {
         indexDelegated(records);
     }
     return stamped;
+}
+/**
+ * Record that a HUMAN verified a file, with the evidence they gave.
+ *
+ * WHY THIS IS NOT `recordDelegatedOutcome`. That function stamps records that already exist, because a
+ * verdict is always the second half of a delegation that wrote the file first. A hand-edited module has no
+ * such record -- `guard.ts` in this repository is 786 lines of hand-written change with no delegation
+ * behind it -- so an attestation has to CREATE a record rather than stamp one.
+ *
+ * It creates it with `mode: 'created'`, which is the honest description: the architect has never been
+ * shown this content by a worker, and the read guard should treat reading it back the way it treats any
+ * other file the context did not write. Claiming `patched` would assert a history that did not happen.
+ *
+ * The hash is read from disk HERE, not supplied by the caller, so an attestation always describes the
+ * bytes that were present when it was made. A caller-supplied hash would let an attestation be recorded
+ * for content that was never on disk, which is the one thing this verdict must not allow.
+ *
+ * Returns the record it wrote, or null when the file could not be read -- never a bare count, because the
+ * caller needs the hash to show the operator what they just attested.
+ */
+function recordOperatorAttestation(path, operator, evidence, at = Date.now()) {
+    const target = typeof path === 'string' ? path.trim() : '';
+    const who = typeof operator === 'string' ? operator.trim() : '';
+    const why = typeof evidence === 'string' ? evidence.trim() : '';
+    // Attribution and evidence are both required. An attestation with neither is not a weaker attestation,
+    // it is an anonymous stamp, and the registry is better off without one.
+    if (!target || !who || !why)
+        return null;
+    const hash = sha256File(target);
+    if (!hash)
+        return null;
+    const canonical = (0, paths_1.canonicalisePath)(target);
+    const records = loadDelegatedRegistry();
+    const existing = records.find((record) => (0, paths_1.canonicalisePath)(record.path) === canonical);
+    const record = existing ?? { path: canonical, sha256: hash, at, mode: 'created' };
+    record.sha256 = hash;
+    record.outcome = 'OPERATOR_ATTESTED';
+    // Deliberately NOT `succeeded: true`. Success is a claim that a contract was met, and no contract ran
+    // here. A consumer that wants to promote an attested file must check the verdict, not a boolean whose
+    // meaning would otherwise quietly widen to include "a human looked at it".
+    record.succeeded = false;
+    record.verdictAt = at;
+    record.attestation = { operator: who, evidence: why, at };
+    if (!existing)
+        records.push(record);
+    saveDelegatedRegistry(records);
+    indexDelegated(records);
+    return record;
 }

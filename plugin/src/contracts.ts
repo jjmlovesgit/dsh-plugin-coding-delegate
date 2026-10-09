@@ -139,15 +139,40 @@ export function lookupDelegatedRecord(canonicalPath: string): DelegatedRecord | 
  * A flaky verdict is a statement about the ORACLE, not about the code: the contract disagreed with
  * itself across repeated runs, so nothing has been established about the content either way. It is not
  * a pass, it does not settle the file, and the reason names the oracle rather than the implementation.
+ *
+ * `OPERATOR_ATTESTED` is the fifth answer, and it exists because the other four all describe a DELEGATION.
+ * A module an engineer edited by hand has no delegation to judge it, and manufacturing one -- running a
+ * synthetic worker purely to stamp a hash -- would replace human-reviewed engineering with simulated
+ * machine origin in the audit trail. That is a worse record than no record.
+ *
+ * The two verdicts are epistemically different and this type keeps them apart on purpose:
+ *
+ *   UNIT_PASSED        a local model satisfied a MACHINE-CHECKED contract
+ *   OPERATOR_ATTESTED  a HUMAN verified the artifact, and the evidence of that is recorded verbatim
+ *
+ * A consumer may treat both as promotable, and must not treat them as the same claim.
  */
-export type DelegatedOutcome = 'UNIT_PASSED' | 'UNIT_FAILED' | 'UNIT_UNVERIFIED' | 'UNIT_FLAKY'
+export type DelegatedOutcome =
+  | 'UNIT_PASSED'
+  | 'UNIT_FAILED'
+  | 'UNIT_UNVERIFIED'
+  | 'UNIT_FLAKY'
+  | 'OPERATOR_ATTESTED'
 
 const DELEGATED_OUTCOMES = new Set<string>([
   'UNIT_PASSED',
   'UNIT_FAILED',
   'UNIT_UNVERIFIED',
   'UNIT_FLAKY',
+  'OPERATOR_ATTESTED',
 ])
+
+/** Who attested a hand-verified file, and what they said they checked. Auditable, not decorative. */
+export interface OperatorAttestation {
+  operator: string
+  evidence: string
+  at: number
+}
 
 /** One delegated file as it is persisted: where it is, and what was written there. */
 export interface DelegatedRecord {
@@ -169,6 +194,12 @@ export interface DelegatedRecord {
   outcome?: DelegatedOutcome
   succeeded?: boolean
   verdictAt?: number
+  /**
+   * Present only for `OPERATOR_ATTESTED`: who signed off on this content, what they say they checked, and
+   * when. Carried so a reviewer can tell a machine-checked receipt from a human judgement without reading
+   * the verdict name, because those are different claims and the difference is the point of the verdict.
+   */
+  attestation?: OperatorAttestation
 }
 
 export function resolveDelegatedRegistryPath(): string {
@@ -209,6 +240,28 @@ export function parseDelegatedRegistry(text: string): DelegatedRecord[] {
       record.outcome = entry.outcome as DelegatedOutcome
       record.succeeded = entry.succeeded === true
       if (Number.isFinite(Number(entry.verdictAt))) record.verdictAt = Number(entry.verdictAt)
+    }
+    // The attestation survives the round trip, because an attestation without its operator and evidence is
+    // not an audit record -- and this parser is where a field can be silently dropped, which is how a
+    // written verdict becomes an absence. Both fields are required for it to be carried: a record claiming
+    // OPERATOR_ATTESTED with nobody named is exactly the unattributable stamp this verdict exists to avoid.
+    const attestation = entry.attestation
+    if (attestation && typeof attestation === 'object') {
+      const operator = String(attestation.operator ?? '').trim()
+      const evidence = String(attestation.evidence ?? '').trim()
+      if (operator && evidence) {
+        record.attestation = {
+          operator,
+          evidence,
+          at: Number.isFinite(Number(attestation.at)) ? Number(attestation.at) : 0,
+        }
+      } else {
+        // An unattributable attestation is not carried, and the verdict goes with it: keeping the verdict
+        // while dropping the attribution would leave a record that reads as human-verified with nobody
+        // accountable for it.
+        delete record.outcome
+        delete record.succeeded
+      }
     }
     records.push(record)
   }
@@ -334,4 +387,57 @@ export function recordDelegatedOutcome(
     indexDelegated(records)
   }
   return stamped
+}
+
+/**
+ * Record that a HUMAN verified a file, with the evidence they gave.
+ *
+ * WHY THIS IS NOT `recordDelegatedOutcome`. That function stamps records that already exist, because a
+ * verdict is always the second half of a delegation that wrote the file first. A hand-edited module has no
+ * such record -- `guard.ts` in this repository is 786 lines of hand-written change with no delegation
+ * behind it -- so an attestation has to CREATE a record rather than stamp one.
+ *
+ * It creates it with `mode: 'created'`, which is the honest description: the architect has never been
+ * shown this content by a worker, and the read guard should treat reading it back the way it treats any
+ * other file the context did not write. Claiming `patched` would assert a history that did not happen.
+ *
+ * The hash is read from disk HERE, not supplied by the caller, so an attestation always describes the
+ * bytes that were present when it was made. A caller-supplied hash would let an attestation be recorded
+ * for content that was never on disk, which is the one thing this verdict must not allow.
+ *
+ * Returns the record it wrote, or null when the file could not be read -- never a bare count, because the
+ * caller needs the hash to show the operator what they just attested.
+ */
+export function recordOperatorAttestation(
+  path: string,
+  operator: string,
+  evidence: string,
+  at: number = Date.now()
+): DelegatedRecord | null {
+  const target = typeof path === 'string' ? path.trim() : ''
+  const who = typeof operator === 'string' ? operator.trim() : ''
+  const why = typeof evidence === 'string' ? evidence.trim() : ''
+  // Attribution and evidence are both required. An attestation with neither is not a weaker attestation,
+  // it is an anonymous stamp, and the registry is better off without one.
+  if (!target || !who || !why) return null
+  const hash = sha256File(target)
+  if (!hash) return null
+
+  const canonical = canonicalisePath(target)
+  const records = loadDelegatedRegistry()
+  const existing = records.find((record) => canonicalisePath(record.path) === canonical)
+  const record: DelegatedRecord = existing ?? { path: canonical, sha256: hash, at, mode: 'created' }
+  record.sha256 = hash
+  record.outcome = 'OPERATOR_ATTESTED'
+  // Deliberately NOT `succeeded: true`. Success is a claim that a contract was met, and no contract ran
+  // here. A consumer that wants to promote an attested file must check the verdict, not a boolean whose
+  // meaning would otherwise quietly widen to include "a human looked at it".
+  record.succeeded = false
+  record.verdictAt = at
+  record.attestation = { operator: who, evidence: why, at }
+  if (!existing) records.push(record)
+
+  saveDelegatedRegistry(records)
+  indexDelegated(records)
+  return record
 }
