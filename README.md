@@ -260,6 +260,48 @@ What is *missing* from a receipt is the finding. A unit that writes files withou
 `UNVERIFIED`; one whose tests passed while the tree did not reports `INCOHERENT`. Neither is `SUCCESS`, and
 neither is reported as one — a delegated result is a verdict, not a claim.
 
+## Operator requirement: self-verifying delegations need a top-level session
+
+**A delegated unit cannot verify itself from inside a subagent, and this is by design — not a bug to work
+around.** DSH pins a child agent's `approvalPolicy` to `'never'`, so the approval seam is absent and the
+verification command is refused deterministically. What you will see is
+`VERIFICATION_NOT_APPROVED` with the reason *"approval was not granted"*, and if your prompt forbids the
+architect from running the test itself, the unit will iterate without ever converging.
+
+Two things make the loop close:
+
+1. **Run the delegation from a top-level session**, not a subagent or a nested scope.
+2. **Allow the program.** A delegated verification command is refused unless its program is allowlisted or
+   approval is granted, and that is operator configuration rather than a tool argument — deliberately, so a
+   model cannot switch it off:
+
+```yaml
+- id: local-router
+  config:
+    verificationAllowlist: ['node']
+```
+
+The allowlist matches the **program, not its arguments**, so allowing `node` also allows
+`node -e "<anything>"`. Prefer it to `verificationApproval: 'allow'`, which is strictly wider.
+
+Without both, the architect falls back to running the judge itself — which, measured on one task, cost
+**179,840 tokens on the verification loop plus 440,500 around it**, against one delegation call when the
+loop stayed in the contract.
+
+## Checking that delegated work is verified
+
+A repository can gate on the verdicts without the plugin touching git:
+
+```powershell
+node scripts/check-promotion.cjs --changed        # pre-commit: nothing changed since its verdict
+node scripts/check-promotion.cjs --path src/x.ts  # one file
+```
+
+Exit **0** means settled; **1** means not; **2** means the question could not be answered — an unreadable
+registry is a refusal, never a pass. It recomputes each file's hash, because a verdict describes *content*:
+a file that passed and was then edited is not the version anything verified. It covers files a **delegated
+worker** wrote; one written by the architect or by hand has no record and reports as unknown.
+
 ## What this does not claim
 
 - **A patch must match exactly, and a stale one fails.** The worker returns either a whole file or a
@@ -285,13 +327,14 @@ neither is reported as one — a delegated result is a verdict, not a claim.
 | path | what it is |
 | --- | --- |
 | [`plugin/`](plugin/) | the plugin, its tests and its full documentation |
-| [`experiments/delegation-ab/`](experiments/delegation-ab/) | the A/B protocol that produced the retired claims, including the run that could not be taken and why |
-| [`experiments/contract-first/`](experiments/contract-first/) | an unsatisfiable contract preserved as evidence, and its corrected sibling |
+| [`experiments/delegation-ab/`](experiments/delegation-ab/) | the A/B protocol that produced the retired claims, including the run that could not be taken and why || [`experiments/contract-first/`](experiments/contract-first/) | an unsatisfiable contract preserved as evidence, and its corrected sibling |
 | [`docs/findings.md`](docs/findings.md) | defects found, with what each one cost |
 | [`docs/experiment.md`](docs/experiment.md) | measurements, including the ones that undercut the plugin |
 | [`docs/control-effectiveness.md`](docs/control-effectiveness.md) | the five-point design against what is actually enforced, tested, or only documented |
 | [`docs/verification-architecture.md`](docs/verification-architecture.md) | why the loop has to put verification on-box, and the one tier where that reasoning breaks |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | what was built, measured and retired |
+| [`scripts/check-promotion.cjs`](scripts/check-promotion.cjs) | the promotion socket: gate a commit on whether delegated work is verified |
+| [`scripts/measure-reading-cost.cjs`](scripts/measure-reading-cost.cjs) | what the architect actually reads, from the plugin's own audit trace |
 
 ## Development
 

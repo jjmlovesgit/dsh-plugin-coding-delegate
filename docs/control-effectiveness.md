@@ -27,6 +27,32 @@ architect happens to read or not read.
 | demonstrating test | none — there is nothing to test |
 | what actually happens today | the architect reads whatever files it chooses, and `SOURCE_READ` *records* that choice without restricting it |
 
+**What the trace actually carries, corrected.** An earlier revision of this row said `SOURCE_READ` records
+path, range and hash. It does not. The record is
+`{ role, agent, tool, target, extension }` — no byte count, no line range, no hash — and it fires only for
+`CODE_EXTENSIONS`, so reads of markdown, JSON, logs and configuration are invisible to it. Byte sizes in
+the measurement below are resolved from the file **on disk at analysis time**, which is faithful for files
+unchanged since the read and wrong for files that have been edited.
+
+**Measured, from telemetry rather than arranged** (`scripts/measure-reading-cost.cjs`, 136 records):
+
+| | |
+| --- | --- |
+| architect read events | **124** |
+| distinct files | **40** |
+| **reads per file** | **3.1** |
+| bytes, every read counted | 4,430,010 — **~1,107,503 tokens** |
+| bytes, each file counted once | 668,294 — **~167,074 tokens** |
+| hottest | `delegation.ts` **29×**, `index.ts` **22×**, `guard.ts` **15×** |
+
+**The split is the finding, and it partly undercuts the skeleton argument.** A skeleton replaces the
+*distinct* figure (~167k tokens) with something far smaller — that is the real prize, and it is exactly
+what inverted ingestion would buy. But the *per-read* figure is an order of magnitude larger, and it is not
+caused by the breadth of reading at all: **it is re-reading the same 40 files**, 3.1 times each. A skeleton
+does not fix that. Three reads of a skeleton still cost three reads; only reading less often does. So
+inverted ingestion attacks the smaller term, and reading hygiene — read late, read once, let the window die
+between units — attacks the larger one.
+
 **This is the largest gap in the design and the one with the most upside.** It is also not a plugin
 problem: the plugin cannot strip what has already entered the window. Closing it means a preprocessor that
 runs before the architect sees anything, and a measurement of the skeleton-to-source ratio on a real
@@ -80,9 +106,30 @@ a *merge* depends entirely on the downstream harness reading the verdict. Nothin
 intercepts `git commit`, and if a pipeline promotes on green CI rather than on a delegation verdict, a
 `UNIT_FLAKY` result is invisible to it.
 
-Closing that needs a promotion socket, not more plugin: either the pipeline reads
-`delegated-registry.json`, or the plugin emits a machine-readable promotion token. A DSH plugin reaching
-into git hooks is the wrong layer.
+**The socket now exists** — [`scripts/check-promotion.cjs`](../scripts/check-promotion.cjs) — and it is a
+separate program on purpose, because settling a file is the plugin's job and refusing a commit is the
+repository's:
+
+```
+node scripts/check-promotion.cjs --changed            # pre-commit: nothing changed since its verdict
+node scripts/check-promotion.cjs --path src/thing.ts  # one file
+node scripts/check-promotion.cjs --all                # everything registered
+```
+
+Exit **0** = every file asked about is settled. **1** = at least one is not. **2** = the question could not
+be answered, because "I could not check" and "it is fine" must never share an exit code.
+
+**It recomputes the hash rather than looking up the verdict**, which is what makes it useful in a hook: a
+file that passed and was then edited is not the version anything verified, so the recorded sha256 is
+compared against the current content. Verified against the live registry — a file whose content matches a
+`UNIT_PASSED` record exits 0; a file with no record exits 1; a file edited after its verdict exits 1 with
+that reason; and with no registry readable at all it exits 2 rather than passing.
+
+**Two limits its users need.** It records files a **delegated worker** wrote, so a file written by the
+architect or a human is reported unknown rather than passing — a repository gating on this is gating on
+delegated work being verified, not on all work. And `--changed` falls back to checking *every* registered
+path when it cannot diff against HEAD, because for a gate, failing closed means checking more than asked
+and never waving a commit through.
 
 **The short-circuit rule matters and the first implementation got it wrong.** Exiting as soon as a run
 failed would report a race that lost twice as `UNIT_FAILED` — a deterministic regression — masking the
