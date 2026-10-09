@@ -370,6 +370,10 @@ declare const pluginExport: {
                         type: string;
                         description: string;
                     };
+                    verificationRepeats: {
+                        type: string;
+                        description: string;
+                    };
                     contractFiles: {
                         type: string;
                         items: {
@@ -429,6 +433,10 @@ declare const pluginExport: {
                         description: string;
                     };
                     runVerification: {
+                        type: string;
+                        description: string;
+                    };
+                    verificationRepeats: {
                         type: string;
                         description: string;
                     };

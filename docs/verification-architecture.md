@@ -105,6 +105,14 @@ and what depends on the boundary — which is what designing a contract requires
 ingestion**, and it converts "the architect must read the repo" from a cost and privacy problem into a
 static-analysis problem that runs entirely on-box.
 
+**On the size of the saving — an earlier draft claimed "$O(10^3)$ rather than $O(10^6)$ tokens", and that
+is retracted.** Those are not the same quantity: the skeleton scales with the number of *declarations*
+while the repository scales with the number of *lines*, so the ratio is not a constant and cannot be
+quoted as an order of magnitude without measuring a corpus. On a module with few exports and long bodies
+the reduction is very large; a file of five hundred tiny exported functions has a skeleton close to its own
+size. The *shape* of the claim — far fewer tokens, no bodies — is right. The numbers are unmeasured, and
+the experiment that would measure them is below.
+
 **This repository already has evidence for the stronger version of the claim.** In the run where the loop
 closed, the architect authored a correct, satisfiable specification with **no code in view at all** — no
 signatures, no skeleton, only prose requirements — and the implementation passed 27/27 first attempt. An

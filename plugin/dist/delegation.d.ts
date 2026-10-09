@@ -29,6 +29,10 @@ export declare const DELEGATE_WORKER_OPENAI_SCHEMA: {
                     type: string;
                     description: string;
                 };
+                verificationRepeats: {
+                    type: string;
+                    description: string;
+                };
                 contractFiles: {
                     type: string;
                     items: {
@@ -91,6 +95,10 @@ export declare const DELEGATE_WORKER_SCHEMA: {
                     type: string;
                     description: string;
                 };
+                verificationRepeats: {
+                    type: string;
+                    description: string;
+                };
                 contractFiles: {
                     type: string;
                     items: {
@@ -129,11 +137,22 @@ export declare const DELEGATE_WORKER_SCHEMA: {
 /**
  * How many times a contract should run, from a caller-supplied value that cannot be trusted.
  *
- * Fail-silent rather than fail-loud on a bad value, because the safe direction here is the DEFAULT: one
- * run is the behaviour that predates this option, and a caller who passes nonsense has not asked for a
- * flakiness check. The ceiling is not cosmetic -- each repeat is a real subprocess with the host
- * process's authority, so an unbounded value would be a denial-of-service lever through a tool argument.
+ * **The default is 3, and that is a deliberate break with the previous behaviour.** It used to be 1,
+ * chosen to guarantee no caller saw a change. That was backwards for an integrity boundary: it left a
+ * non-deterministic oracle unprotected unless the caller happened to KNOW the contract was flaky -- and
+ * the caller who does not know is exactly the one whose race condition gets promoted by a lucky pass.
+ * A guardrail that has to be opted into is not a guardrail.
+ *
+ * The cost is real and worth naming: every delegated verification now runs three subprocesses instead of
+ * one. A deterministic suite pays that to prove its own stability, which is not wasted -- three agreeing
+ * runs are strictly more evidence than one. A caller who has measured their suite and wants the speed
+ * back passes `verificationRepeats: 1` explicitly, which is the honest way round: the fast path is the
+ * one that requires a decision.
+ *
+ * The ceiling is not cosmetic. Each repeat is a real subprocess with the host process's authority, so an
+ * unbounded value would be a denial-of-service lever through a tool argument.
  */
+export declare const DEFAULT_VERIFICATION_REPEATS = 3;
 export declare const MAX_VERIFICATION_REPEATS = 20;
 export declare function resolveVerificationRepeats(value: unknown): number;
 export interface DelegateWorkerParams {
@@ -168,11 +187,10 @@ export interface DelegateWorkerParams {
     /** Set false to return raw verification output. Raw output can carry source. */
     redactVerification?: boolean;
     /**
-     * How many times to run `runVerification`. Defaults to 1, which is the behaviour that predates this
-     * option. Raise it when the contract is a NON-DETERMINISTIC oracle -- a property test, a concurrency
-     * or race harness -- so that a run agreeing with itself can be distinguished from a run that passed
-     * because the defect did not trigger. Disagreement across runs produces `UNIT_FLAKY`, which settles
-     * nothing: without this, a flaky contract can report `UNIT_PASSED` and promote broken code.
+     * How many times to run `runVerification`. Defaults to 3: a contract that runs three times and agrees
+     * with itself has proved its own stability, and one that disagrees produces `UNIT_FLAKY` instead of a
+     * pass. Raise it for a genuinely rare race; pass 1 only for a suite you have measured as deterministic
+     * and whose three-fold cost you are deliberately declining.
      */
     verificationRepeats?: number;
     /** Policy for the model-supplied `runVerification` command. */

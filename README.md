@@ -283,6 +283,7 @@ neither is reported as one — a delegated result is a verdict, not a claim.
 | [`experiments/contract-first/`](experiments/contract-first/) | an unsatisfiable contract preserved as evidence, and its corrected sibling |
 | [`docs/findings.md`](docs/findings.md) | defects found, with what each one cost |
 | [`docs/experiment.md`](docs/experiment.md) | measurements, including the ones that undercut the plugin |
+| [`docs/control-effectiveness.md`](docs/control-effectiveness.md) | the five-point design against what is actually enforced, tested, or only documented |
 | [`docs/verification-architecture.md`](docs/verification-architecture.md) | why the loop has to put verification on-box, and the one tier where that reasoning breaks |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | what was built, measured and retired |
 

@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.MIN_SEARCH_CHARS = exports.DEFAULT_LOCAL_ENDPOINT = exports.MAX_VERIFICATION_REPEATS = exports.DELEGATE_WORKER_SCHEMA = exports.DELEGATE_WORKER_OPENAI_SCHEMA = void 0;
+exports.MIN_SEARCH_CHARS = exports.DEFAULT_LOCAL_ENDPOINT = exports.MAX_VERIFICATION_REPEATS = exports.DEFAULT_VERIFICATION_REPEATS = exports.DELEGATE_WORKER_SCHEMA = exports.DELEGATE_WORKER_OPENAI_SCHEMA = void 0;
 exports.resolveVerificationRepeats = resolveVerificationRepeats;
 exports.resolveChatCompletionsUrl = resolveChatCompletionsUrl;
 exports.parseSearchReplaceBlocks = parseSearchReplaceBlocks;
@@ -87,7 +87,11 @@ exports.DELEGATE_WORKER_OPENAI_SCHEMA = {
                 },
                 runVerification: {
                     type: 'string',
-                    description: 'Optional shell command to verify the output. It executes with the authority of the DSH process and requires operator approval unless verificationApproval is set to allow.',
+                    description: 'Optional shell command to verify the output. It executes with the authority of the DSH process and requires operator approval unless verificationApproval is set to allow. It runs THREE times by default: three agreeing runs prove the contract stable, and any disagreement reports UNIT_FLAKY rather than a pass, which is what stops a non-deterministic oracle promoting broken code on a lucky run.',
+                },
+                verificationRepeats: {
+                    type: 'number',
+                    description: 'How many times to run runVerification. Defaults to 3 and is capped at 20. Raise it for a rare race condition. Pass 1 ONLY for a suite you have measured as deterministic and whose three-fold cost you are deliberately declining -- a contract that runs once cannot disagree with itself, so a flaky oracle becomes invisible again.',
                 },
                 contractFiles: {
                     type: 'array',
@@ -120,15 +124,29 @@ exports.DELEGATE_WORKER_SCHEMA = exports.DELEGATE_WORKER_OPENAI_SCHEMA;
 /**
  * How many times a contract should run, from a caller-supplied value that cannot be trusted.
  *
- * Fail-silent rather than fail-loud on a bad value, because the safe direction here is the DEFAULT: one
- * run is the behaviour that predates this option, and a caller who passes nonsense has not asked for a
- * flakiness check. The ceiling is not cosmetic -- each repeat is a real subprocess with the host
- * process's authority, so an unbounded value would be a denial-of-service lever through a tool argument.
+ * **The default is 3, and that is a deliberate break with the previous behaviour.** It used to be 1,
+ * chosen to guarantee no caller saw a change. That was backwards for an integrity boundary: it left a
+ * non-deterministic oracle unprotected unless the caller happened to KNOW the contract was flaky -- and
+ * the caller who does not know is exactly the one whose race condition gets promoted by a lucky pass.
+ * A guardrail that has to be opted into is not a guardrail.
+ *
+ * The cost is real and worth naming: every delegated verification now runs three subprocesses instead of
+ * one. A deterministic suite pays that to prove its own stability, which is not wasted -- three agreeing
+ * runs are strictly more evidence than one. A caller who has measured their suite and wants the speed
+ * back passes `verificationRepeats: 1` explicitly, which is the honest way round: the fast path is the
+ * one that requires a decision.
+ *
+ * The ceiling is not cosmetic. Each repeat is a real subprocess with the host process's authority, so an
+ * unbounded value would be a denial-of-service lever through a tool argument.
  */
+exports.DEFAULT_VERIFICATION_REPEATS = 3;
 exports.MAX_VERIFICATION_REPEATS = 20;
 function resolveVerificationRepeats(value) {
-    if (typeof value !== 'number' || !Number.isInteger(value) || value < 1)
-        return 1;
+    if (value === undefined || value === null)
+        return exports.DEFAULT_VERIFICATION_REPEATS;
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
+        return exports.DEFAULT_VERIFICATION_REPEATS;
+    }
     return Math.min(value, exports.MAX_VERIFICATION_REPEATS);
 }
 /** Where the local worker is assumed to live when nothing else is configured. */
@@ -461,9 +479,11 @@ async function delegateWorker(params = {}, tracker) {
         const policy = params.verificationPolicy ?? verification_1.DEFAULT_VERIFICATION_POLICY;
         let testResults = undefined;
         let verificationGate = undefined;
-        // How many times the contract runs. One is the behaviour that predates this parameter; more than one
-        // is the operator declaring the oracle non-deterministic, so that disagreement can be detected.
+        // How many times the contract runs, and how many it actually took. The second is reported so a reader
+        // can tell a full consensus pass from one that short-circuited, which is the difference between
+        // "agreeing three times" and "failing immediately" -- the same verdict, different amounts of evidence.
         const verificationRepeats = resolveVerificationRepeats(params.verificationRepeats);
+        let verificationAttempts = 0;
         // Set when repeated runs of the same contract disagreed with each other.
         let flaky = false;
         if (params.runVerification) {
@@ -480,26 +500,44 @@ async function delegateWorker(params = {}, tracker) {
                 // A non-deterministic oracle -- a property test, a concurrency harness -- can pass a broken
                 // implementation on the run where the defect did not trigger, and a pass is what settles a file.
                 // Repeating the contract and requiring the runs to AGREE is what turns that from a silent false
-                // green into a verdict, without the plugin needing to know which oracles are deterministic: the
-                // operator declares it with `verificationRepeats`, and disagreement is detected rather than
-                // assumed. The default is 1, which is the behaviour that existed before this parameter.
+                // green into a verdict, without the plugin needing to know which oracles are deterministic.
+                //
+                // The loop short-circuits ONLY on disagreement, because disagreement is the one outcome that
+                // cannot be changed by running more. Consensus cannot be established early: a contract that
+                // agreed twice and flipped on the third run is flaky, so both PASS and FAIL have to spend the
+                // whole budget to mean what they say.
+                //
+                // Exiting early on a first-run failure was the first version of this loop, and it was a bug in
+                // the direction that matters. A race that happened to lose on runs 1 and 2 would be reported as
+                // UNIT_FAILED -- a deterministic regression -- which is exactly the non-determinism this state
+                // exists to expose. `FAIL` here means "failed every time we looked", not "failed once".
+                //
+                // The disagreement check is against the FIRST run rather than the previous one, so PASS-then-FAIL
+                // and FAIL-then-PASS both land on FLAKY: two runs, one disagreement, and the same truthful label.
                 const repeats = verificationRepeats;
-                const runs = [];
-                for (let attempt = 0; attempt < repeats; attempt++) {
-                    runs.push((0, verification_1.runSandboxVerification)(params.runVerification, workspaceBase, {
+                const first = (0, verification_1.runSandboxVerification)(params.runVerification, workspaceBase, {
+                    redact: params.redactVerification ?? process.env.DSH_LOCAL_ROUTER_RAW_VERIFICATION !== '1',
+                    rawLogPath: path.join((0, logging_1.resolveDataDir)(), 'last-verification.log'),
+                    allowInProcessFallback: policy.allowInProcessFallback,
+                    timeoutMs: policy.timeoutMs,
+                });
+                testResults = first;
+                const firstPassed = first.failed === 0;
+                let attempts = 1;
+                for (let attempt = 1; attempt < repeats; attempt++) {
+                    const next = (0, verification_1.runSandboxVerification)(params.runVerification, workspaceBase, {
                         redact: params.redactVerification ?? process.env.DSH_LOCAL_ROUTER_RAW_VERIFICATION !== '1',
                         rawLogPath: path.join((0, logging_1.resolveDataDir)(), 'last-verification.log'),
                         allowInProcessFallback: policy.allowInProcessFallback,
                         timeoutMs: policy.timeoutMs,
-                    }));
+                    });
+                    attempts++;
+                    if ((next.failed === 0) !== firstPassed) {
+                        flaky = true;
+                        break;
+                    }
                 }
-                testResults = runs[0];
-                // Disagreement in EITHER direction counts. A run that failed when another passed is as much a
-                // self-contradicting contract as the reverse, and only reporting the agreeing case would leave
-                // the false-green half of the defect unaddressed.
-                flaky =
-                    runs.length > 1 &&
-                        runs.some((run) => (run.failed === 0) !== (runs[0].failed === 0));
+                verificationAttempts = attempts;
             }
             else {
                 verificationGate =
@@ -725,6 +763,11 @@ async function delegateWorker(params = {}, tracker) {
                             : 'No verification requested.',
                 },
             ...(verificationGate ? { verificationSkipped: verificationGate } : {}),
+            // Reported so a consensus pass can be told from a short-circuit: the same verdict, different
+            // amounts of evidence behind it.
+            ...(verificationAttempts > 0
+                ? { verificationRuns: verificationAttempts, verificationRepeats }
+                : {}),
             // Metadata only. The architect learns what the worker was shown, never what it says.
             ...(context.injected.length > 0
                 ? {
