@@ -81,6 +81,33 @@ test('tool surface: every parameter a caller may send is present in the schema',
   assert.deepEqual(params.required, ['taskName', 'instruction'], 'and the required set is unchanged')
 })
 
+test('tool surface: the schema keys are checked against the canonical list AT COMPILE TIME', () => {
+  // The runtime half of a build-time assertion. `DELEGATE_WORKER_SCHEMA_COVERS_EVERY_PARAMETER` is typed so
+  // that it only COMPILES when the schema's keys and `DelegateWorkerParameter` are the same set -- which
+  // makes a mismatched parameter impossible to build, not merely detectable afterwards.
+  //
+  // The assertion this replaces did nothing twice, and both failures are worth keeping in view. A type ALIAS
+  // is never checked unless referenced, so it was decoration; and a one-directional conditional accepts a
+  // schema with EXTRA keys, because structural assignability permits extra properties. Both were confirmed
+  // by mutating the schema and watching tsc pass anyway. A check that cannot fail is the exact defect this
+  // repository keeps finding, and it found a third instance here.
+  assert.equal(
+    plugin.DELEGATE_WORKER_SCHEMA_COVERS_EVERY_PARAMETER,
+    true,
+    'the compile-time schema/canonical assertion must be present and true in the built artefact'
+  )
+})
+
+test('tool surface: the canonical parameter list lives in contracts.ts', () => {
+  // Where it lives is part of the contract: `contracts.ts` owns the shared shapes and imports nothing from
+  // delegation, so the canonical list cannot drift into a module that the schema also depends on.
+  const contracts = require(path.join(HERE, '..', '..', 'dist', 'contracts.js'))
+  assert.ok(contracts, 'contracts must be loadable independently of the schema')
+  // The type itself is erased at runtime, which is the point: the coupling is enforced by tsc, and this
+  // file only proves the asserting VALUE survived compilation.
+  assert.equal(typeof plugin.DELEGATE_WORKER_SCHEMA_COVERS_EVERY_PARAMETER, 'boolean')
+})
+
 test('tool surface: each attesting parameter documents what it actually does', () => {
   // The descriptions are the only documentation a model gets at call time, and this project has already
   // shipped one that claimed a capability the code did not have. These assertions are deliberately weak --

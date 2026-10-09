@@ -24,6 +24,7 @@ import {
   rememberDelegated,
   resolveContractFiles,
 } from './contracts'
+import type { DelegateWorkerParameter } from './contracts'
 // `scanDLP` deliberately stays in index.ts and is imported from there. Moving it here instead would
 // make verification.ts import from this module while this module imports verification.ts -- a cycle
 // between two leaves. A cycle through the composition root is the shape that already works.
@@ -121,6 +122,30 @@ export const DELEGATE_WORKER_OPENAI_SCHEMA = {
 }
 
 export const DELEGATE_WORKER_SCHEMA = DELEGATE_WORKER_OPENAI_SCHEMA
+
+/**
+ * Compile-time assertion that the schema's parameters are EXACTLY `DelegateWorkerParameter`.
+ *
+ * TWO earlier versions of this did nothing, and both failures are worth recording because they are the same
+ * mistake in different clothes:
+ *
+ *   1. A type alias asserting the same thing. An exported type alias is never checked unless referenced, so
+ *      it was decoration. Verified by mutating the schema and watching tsc pass.
+ *   2. A one-directional conditional. `Record<SchemaKeys, true> extends Record<Canonical, true>` only asks
+ *      whether the canonical keys are all present; structural assignability permits EXTRA properties, so a
+ *      schema key that is not canonical was still accepted. Verified by mutation again.
+ *
+ * This version requires set EQUALITY: both directions, expressed as one condition so there is no ordering to
+ * get wrong. It is a value, so it is always checked, and both mutations now fail the build.
+ */
+type SchemaKeys = Extract<keyof (typeof DELEGATE_WORKER_OPENAI_SCHEMA)['function']['parameters']['properties'], string>
+type SchemaMatchesCanonicalParameters = [SchemaKeys] extends [DelegateWorkerParameter]
+  ? [DelegateWorkerParameter] extends [SchemaKeys]
+    ? true
+    : never
+  : never
+
+export const DELEGATE_WORKER_SCHEMA_COVERS_EVERY_PARAMETER: SchemaMatchesCanonicalParameters = true
 
 /**
  * How many times a contract should run, from a caller-supplied value that cannot be trusted.

@@ -174,6 +174,37 @@ export interface OperatorAttestation {
   at: number
 }
 
+/**
+ * Every parameter `delegate_worker`'s tool schema may declare. The canonical list.
+ *
+ * WHY THIS EXISTS, and it is not tidiness. The schema is an inferred object literal, so before this there
+ * was nothing coupling its parameter names to any type: adding a property compiled cleanly whether or not
+ * the implementation had a matching argument, and adding an argument did not force the schema to expose it.
+ * Both directions failed silently.
+ *
+ * The direction that actually bit: `attestTargets` was added to an inline copy of the parameters in
+ * index.ts and not to the exported schema, so the host never received it, the delegated call was stripped
+ * of both attesting parameters, and the tool reported success while the feature did nothing. That
+ * duplication is gone -- index.ts now references the exported schema -- and this type is what stops the one
+ * remaining literal from drifting from the implementation.
+ *
+ * `delegation.ts` asserts the schema's keys are exactly these, so a parameter that is not on this list
+ * FAILS THE BUILD, rather than being visible to a model, accepted at call time, and discovered to do
+ * nothing weeks later.
+ */
+export type DelegateWorkerParameter =
+  | 'taskName'
+  | 'instruction'
+  | 'targetFiles'
+  | 'runVerification'
+  | 'verificationRepeats'
+  | 'contractFiles'
+  | 'contextFiles'
+  | 'workspaceDir'
+  | 'attestTargets'
+  | 'attestEvidence'
+  | 'attestOperator'
+
 /** One delegated file as it is persisted: where it is, and what was written there. */
 export interface DelegatedRecord {
   path: string

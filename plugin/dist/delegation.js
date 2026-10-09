@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.MIN_SEARCH_CHARS = exports.DEFAULT_LOCAL_ENDPOINT = exports.MAX_VERIFICATION_REPEATS = exports.DEFAULT_VERIFICATION_REPEATS = exports.DELEGATE_WORKER_SCHEMA = exports.DELEGATE_WORKER_OPENAI_SCHEMA = void 0;
+exports.MIN_SEARCH_CHARS = exports.DEFAULT_LOCAL_ENDPOINT = exports.MAX_VERIFICATION_REPEATS = exports.DEFAULT_VERIFICATION_REPEATS = exports.DELEGATE_WORKER_SCHEMA_COVERS_EVERY_PARAMETER = exports.DELEGATE_WORKER_SCHEMA = exports.DELEGATE_WORKER_OPENAI_SCHEMA = void 0;
 exports.resolveVerificationRepeats = resolveVerificationRepeats;
 exports.resolveChatCompletionsUrl = resolveChatCompletionsUrl;
 exports.parseSearchReplaceBlocks = parseSearchReplaceBlocks;
@@ -134,6 +134,7 @@ exports.DELEGATE_WORKER_OPENAI_SCHEMA = {
     },
 };
 exports.DELEGATE_WORKER_SCHEMA = exports.DELEGATE_WORKER_OPENAI_SCHEMA;
+exports.DELEGATE_WORKER_SCHEMA_COVERS_EVERY_PARAMETER = true;
 /**
  * How many times a contract should run, from a caller-supplied value that cannot be trusted.
  *

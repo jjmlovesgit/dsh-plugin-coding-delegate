@@ -18,7 +18,7 @@ export { ContextInjection, ContextRequest, ContextResolution, DEFAULT_CONTEXT_MA
 export { contractFileHashes, contractViolations, loadDelegatedRegistry, mergeDelegatedRecords, parseDelegatedRegistry, pruneDelegatedRecords, rememberDelegated, recordOperatorAttestation, resolveContractFiles, resolveDelegatedRegistryPath, saveDelegatedRegistry, sha256File, } from './contracts';
 export { DEFAULT_VERIFICATION_POLICY, DEFAULT_VERIFICATION_TIMEOUT_MS, commandProgram, describeFailures, evaluateVerificationPolicy, parseTestOutput, redactVerificationOutput, resolveVerificationTimeoutMs, runInProcessFallback, runSandboxVerification, } from './verification';
 export { ContextQuality, EMPTY_CONTEXT_QUALITY, describeContextQuality, foldContextQuality, } from './context-quality';
-export { DELEGATE_WORKER_OPENAI_SCHEMA, DELEGATE_WORKER_SCHEMA, DEFAULT_LOCAL_ENDPOINT, MIN_SEARCH_CHARS, applySearchReplaceBlocks, delegateWorker, estimateTokenCount, extractPromptText, parseSearchReplaceBlocks, resolveChatCompletionsUrl, resolveDelegateStatus, resolveVerificationRepeats, } from './delegation';
+export { DELEGATE_WORKER_OPENAI_SCHEMA, DELEGATE_WORKER_SCHEMA, DELEGATE_WORKER_SCHEMA_COVERS_EVERY_PARAMETER, DEFAULT_LOCAL_ENDPOINT, MIN_SEARCH_CHARS, applySearchReplaceBlocks, delegateWorker, estimateTokenCount, extractPromptText, parseSearchReplaceBlocks, resolveChatCompletionsUrl, resolveDelegateStatus, resolveVerificationRepeats, } from './delegation';
 export { FailureLocation, RETRY_CONTEXT_WINDOW_LINES, parseFailureLocations, retryContextRequests, } from './retry-context';
 export declare const inject: string[];
 export declare const using: readonly ["tools"];
