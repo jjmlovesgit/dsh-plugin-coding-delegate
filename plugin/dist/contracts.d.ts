@@ -43,8 +43,18 @@ export declare function lookupDelegatedRecord(canonicalPath: string): DelegatedR
  * and the second is a decision not to gather any, but both leave the content exactly as unestablished,
  * which is the only thing this field is for. Consumers must therefore word their explanations in terms
  * of the contract that went unchecked rather than of whether a command was written down.
+ *
+ * `UNIT_FLAKY` is the fourth answer, and it exists because the first three are unsafe for a
+ * NON-DETERMINISTIC oracle. A property test or a concurrency harness can pass a broken implementation
+ * on a run where the defect simply did not trigger, and `UNIT_PASSED` is what makes a file settled --
+ * so the old three-state taxonomy could promote a race condition into the codebase and present it as
+ * verified work. That is the most dangerous output this plugin can emit, and it is silent.
+ *
+ * A flaky verdict is a statement about the ORACLE, not about the code: the contract disagreed with
+ * itself across repeated runs, so nothing has been established about the content either way. It is not
+ * a pass, it does not settle the file, and the reason names the oracle rather than the implementation.
  */
-export type DelegatedOutcome = 'UNIT_PASSED' | 'UNIT_FAILED' | 'UNIT_UNVERIFIED';
+export type DelegatedOutcome = 'UNIT_PASSED' | 'UNIT_FAILED' | 'UNIT_UNVERIFIED' | 'UNIT_FLAKY';
 /** One delegated file as it is persisted: where it is, and what was written there. */
 export interface DelegatedRecord {
     path: string;

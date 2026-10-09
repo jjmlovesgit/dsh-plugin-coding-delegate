@@ -126,6 +126,16 @@ export declare const DELEGATE_WORKER_SCHEMA: {
         };
     };
 };
+/**
+ * How many times a contract should run, from a caller-supplied value that cannot be trusted.
+ *
+ * Fail-silent rather than fail-loud on a bad value, because the safe direction here is the DEFAULT: one
+ * run is the behaviour that predates this option, and a caller who passes nonsense has not asked for a
+ * flakiness check. The ceiling is not cosmetic -- each repeat is a real subprocess with the host
+ * process's authority, so an unbounded value would be a denial-of-service lever through a tool argument.
+ */
+export declare const MAX_VERIFICATION_REPEATS = 20;
+export declare function resolveVerificationRepeats(value: unknown): number;
 export interface DelegateWorkerParams {
     instruction?: string;
     taskPrompt?: string;
@@ -157,6 +167,14 @@ export interface DelegateWorkerParams {
     contextFiles?: ContextRequest[];
     /** Set false to return raw verification output. Raw output can carry source. */
     redactVerification?: boolean;
+    /**
+     * How many times to run `runVerification`. Defaults to 1, which is the behaviour that predates this
+     * option. Raise it when the contract is a NON-DETERMINISTIC oracle -- a property test, a concurrency
+     * or race harness -- so that a run agreeing with itself can be distinguished from a run that passed
+     * because the defect did not trigger. Disagreement across runs produces `UNIT_FLAKY`, which settles
+     * nothing: without this, a flaky contract can report `UNIT_PASSED` and promote broken code.
+     */
+    verificationRepeats?: number;
     /** Policy for the model-supplied `runVerification` command. */
     verificationPolicy?: VerificationPolicy;
     /**
@@ -241,6 +259,12 @@ export declare function resolveDelegateStatus(input: {
      * coherence check was configured, or it was skipped -- never "it passed".
      */
     coherenceFailed?: boolean;
+    /**
+     * The contract disagreed with itself across repeated runs. A statement about the ORACLE, not the
+     * code, and it is checked before the coherence result for the same reason `verificationGate` is:
+     * there is no trustworthy unit verdict to compare the project against.
+     */
+    flaky?: boolean;
 }): string;
 export declare function delegateWorker(params?: DelegateWorkerParams, tracker?: SavingsTracker): Promise<any>;
 export declare function extractPromptText(session: LLMSession | any): string;

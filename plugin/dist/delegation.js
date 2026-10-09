@@ -33,7 +33,8 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.MIN_SEARCH_CHARS = exports.DEFAULT_LOCAL_ENDPOINT = exports.DELEGATE_WORKER_SCHEMA = exports.DELEGATE_WORKER_OPENAI_SCHEMA = void 0;
+exports.MIN_SEARCH_CHARS = exports.DEFAULT_LOCAL_ENDPOINT = exports.MAX_VERIFICATION_REPEATS = exports.DELEGATE_WORKER_SCHEMA = exports.DELEGATE_WORKER_OPENAI_SCHEMA = void 0;
+exports.resolveVerificationRepeats = resolveVerificationRepeats;
 exports.resolveChatCompletionsUrl = resolveChatCompletionsUrl;
 exports.parseSearchReplaceBlocks = parseSearchReplaceBlocks;
 exports.applySearchReplaceBlocks = applySearchReplaceBlocks;
@@ -116,6 +117,20 @@ exports.DELEGATE_WORKER_OPENAI_SCHEMA = {
     },
 };
 exports.DELEGATE_WORKER_SCHEMA = exports.DELEGATE_WORKER_OPENAI_SCHEMA;
+/**
+ * How many times a contract should run, from a caller-supplied value that cannot be trusted.
+ *
+ * Fail-silent rather than fail-loud on a bad value, because the safe direction here is the DEFAULT: one
+ * run is the behaviour that predates this option, and a caller who passes nonsense has not asked for a
+ * flakiness check. The ceiling is not cosmetic -- each repeat is a real subprocess with the host
+ * process's authority, so an unbounded value would be a denial-of-service lever through a tool argument.
+ */
+exports.MAX_VERIFICATION_REPEATS = 20;
+function resolveVerificationRepeats(value) {
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < 1)
+        return 1;
+    return Math.min(value, exports.MAX_VERIFICATION_REPEATS);
+}
 /** Where the local worker is assumed to live when nothing else is configured. */
 exports.DEFAULT_LOCAL_ENDPOINT = 'http://127.0.0.1:1234/v1';
 /**
@@ -241,6 +256,11 @@ function resolveDelegateStatus(input) {
     // Nothing ran, so the outcome is unknown rather than a pass.
     if (input.verificationGate)
         return 'VERIFICATION_NOT_APPROVED';
+    // A contract that cannot agree with itself has not established anything about the content, so it
+    // outranks both the unit's own result and the project check. This is the clause that stops a
+    // non-deterministic oracle from being read as a pass on the run where the defect did not trigger.
+    if (input.flaky)
+        return 'FLAKY';
     // The project check is evaluated BEFORE `unverified`, and that order is the point. `unverified` is an
     // absence of evidence -- no command was supplied for the unit. A failed project check is positive
     // evidence: something was proven, and what was proven is that the tree is broken. Reporting
@@ -441,6 +461,11 @@ async function delegateWorker(params = {}, tracker) {
         const policy = params.verificationPolicy ?? verification_1.DEFAULT_VERIFICATION_POLICY;
         let testResults = undefined;
         let verificationGate = undefined;
+        // How many times the contract runs. One is the behaviour that predates this parameter; more than one
+        // is the operator declaring the oracle non-deterministic, so that disagreement can be detected.
+        const verificationRepeats = resolveVerificationRepeats(params.verificationRepeats);
+        // Set when repeated runs of the same contract disagreed with each other.
+        let flaky = false;
         if (params.runVerification) {
             const decision = (0, verification_1.evaluateVerificationPolicy)(params.runVerification, policy);
             let permitted = decision.kind === 'allow';
@@ -452,12 +477,29 @@ async function delegateWorker(params = {}, tracker) {
                     : false;
             }
             if (permitted) {
-                testResults = (0, verification_1.runSandboxVerification)(params.runVerification, workspaceBase, {
-                    redact: params.redactVerification ?? process.env.DSH_LOCAL_ROUTER_RAW_VERIFICATION !== '1',
-                    rawLogPath: path.join((0, logging_1.resolveDataDir)(), 'last-verification.log'),
-                    allowInProcessFallback: policy.allowInProcessFallback,
-                    timeoutMs: policy.timeoutMs,
-                });
+                // A non-deterministic oracle -- a property test, a concurrency harness -- can pass a broken
+                // implementation on the run where the defect did not trigger, and a pass is what settles a file.
+                // Repeating the contract and requiring the runs to AGREE is what turns that from a silent false
+                // green into a verdict, without the plugin needing to know which oracles are deterministic: the
+                // operator declares it with `verificationRepeats`, and disagreement is detected rather than
+                // assumed. The default is 1, which is the behaviour that existed before this parameter.
+                const repeats = verificationRepeats;
+                const runs = [];
+                for (let attempt = 0; attempt < repeats; attempt++) {
+                    runs.push((0, verification_1.runSandboxVerification)(params.runVerification, workspaceBase, {
+                        redact: params.redactVerification ?? process.env.DSH_LOCAL_ROUTER_RAW_VERIFICATION !== '1',
+                        rawLogPath: path.join((0, logging_1.resolveDataDir)(), 'last-verification.log'),
+                        allowInProcessFallback: policy.allowInProcessFallback,
+                        timeoutMs: policy.timeoutMs,
+                    }));
+                }
+                testResults = runs[0];
+                // Disagreement in EITHER direction counts. A run that failed when another passed is as much a
+                // self-contradicting contract as the reverse, and only reporting the agreeing case would leave
+                // the false-green half of the defect unaddressed.
+                flaky =
+                    runs.length > 1 &&
+                        runs.some((run) => (run.failed === 0) !== (runs[0].failed === 0));
             }
             else {
                 verificationGate =
@@ -502,6 +544,10 @@ async function delegateWorker(params = {}, tracker) {
         const unitSuccess = contractViolationsFound.length === 0 &&
             !verificationGate &&
             !unverified &&
+            // A contract that contradicted itself cannot be a success, whichever way the disagreement fell.
+            // `testResults` is the first run, so without this clause a flaky oracle that happened to pass on
+            // attempt one would read as a pass -- which is precisely the false green this state exists for.
+            !flaky &&
             (!testResults || testResults.failed === 0) &&
             emission.errors.length === 0;
         // What the caller is told: both the unit and the project have to hold.
@@ -625,11 +671,17 @@ async function delegateWorker(params = {}, tracker) {
         // tests passed but which was never allowed to run them was reported to the architect as having
         // failed -- a claim about content that nothing had established either way.
         const neverRan = Boolean(verificationGate) || unverified;
-        const unitOutcome = unitSuccess
-            ? 'UNIT_PASSED'
-            : neverRan
-                ? 'UNIT_UNVERIFIED'
-                : 'UNIT_FAILED';
+        // Four outcomes, and FLAKY is checked before PASSED for the reason it exists: a contract that
+        // disagreed with itself has not established anything about the content, and the run it agreed with
+        // itself on is exactly the run that could have passed a broken implementation. Reporting either
+        // UNIT_PASSED or UNIT_FAILED here would pick one arbitrary run and present it as the verdict.
+        const unitOutcome = flaky
+            ? 'UNIT_FLAKY'
+            : unitSuccess
+                ? 'UNIT_PASSED'
+                : neverRan
+                    ? 'UNIT_UNVERIFIED'
+                    : 'UNIT_FAILED';
         // Recorded here rather than when the model answered, because the OUTCOME is the point. A unit that
         // failed is a failed attempt, and without that the ledger cannot say how much churn the architect
         // never had to see. `unitSuccess` is the unit's own verdict, matching what `resolveDelegateStatus`
@@ -710,6 +762,7 @@ async function delegateWorker(params = {}, tracker) {
                 contractViolations: contractViolationsFound,
                 isSuccess: unitSuccess,
                 coherenceFailed,
+                flaky,
             }),
             taskName: params.taskName || 'Subtask',
             tokensUsed: totalTokens,

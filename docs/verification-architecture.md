@@ -147,7 +147,7 @@ from. "Payments double-post under concurrency" yields a clean invariant; "paymen
 Step 3 above assumes the failure materialises **deterministically**. For the concurrency example it often
 does not. A race that triggers on one run in three produces an oracle that alternates.
 
-This plugin's verdict model is a three-state taxonomy with no room for that:
+This plugin's verdict model was a three-state taxonomy with no room for that:
 
 | verdict | meaning |
 | --- | --- |
@@ -155,21 +155,26 @@ This plugin's verdict model is a three-state taxonomy with no room for that:
 | `UNIT_FAILED` | the contract was checked and failed |
 | `UNIT_UNVERIFIED` | the contract was never checked |
 
-**A flaky oracle poisons all three.** Worse than failing to verify, it can produce a **false
+**A flaky oracle poisoned all three.** Worse than failing to verify, it could produce a **false
 `UNIT_PASSED`** on a run where the race simply did not trigger — and because a passing verdict is what
-makes a file *settled*, that broken implementation is then promoted: it becomes readable, attributable,
-and citable as verified work. This is the most dangerous output the control can emit, and it is silent.
+makes a file *settled*, that broken implementation was then promoted: readable, attributable, and citable
+as verified work. The most dangerous output the control can emit, and silent.
 
-The fix is a fourth state, and it is a property of the oracle rather than of the code:
+**`UNIT_FLAKY` now exists**, and it is a property of the oracle rather than of the code:
 
-- run a non-deterministic oracle a declared number of times;
-- agree → `UNIT_PASSED` / `UNIT_FAILED` as today;
-- disagree → **`UNIT_FLAKY`**, which is *not* a pass, does *not* settle the file, and names the oracle
-  rather than the implementation as the thing that needs attention.
+- the caller declares `verificationRepeats` (default `1`, the pre-existing behaviour) when the contract
+  is a non-deterministic oracle;
+- the contract runs that many times, and **disagreement in either direction** produces `UNIT_FLAKY`;
+- it is checked *before* the unit's own result, because reporting either `UNIT_PASSED` or `UNIT_FAILED`
+  would pick one arbitrary run and present it as the verdict;
+- it is **not** a pass, it does **not** settle the file, and the reason names the oracle rather than
+  claiming the code failed.
 
-`plugin/tests/oracles/failure-kind.test.cjs` already carries a failure taxonomy; this extends it. Until
-it exists, any property or concurrency oracle is a candidate for promoting broken code through a verdict
-the control presents as checked.
+Pinned by [`plugin/tests/oracles/flaky-verdict.test.cjs`](../plugin/tests/oracles/flaky-verdict.test.cjs)
+against an oracle that alternates by run count — genuinely non-deterministic from the plugin's point of
+view, while the test stays reliable. The cap on repeats is not cosmetic: each repeat is a real subprocess
+with the host process's authority, so an unbounded count would be a denial-of-service lever through a tool
+argument.
 
 ## The escape hatch that reads better than redaction
 

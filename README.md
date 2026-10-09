@@ -100,10 +100,16 @@ What a reviewer can check after a delegation, all of it local:
 | `SOURCE_READ` trace | what source the architect read, with path, range and hash |
 | `CONTEXT_QUALITY` trace | per-call prompt size, peak, compactions, tokens reclaimed, and the route those figures belong to |
 
-**A verdict is one of three, not two.** `UNIT_PASSED`, `UNIT_FAILED`, `UNIT_UNVERIFIED` — an edit
-delegated without a verification command is the common case and is neither a pass nor a failure, so
-counting it as a failure would corrupt the very number it exists to produce. A file a *passing* unit left
-unchanged reads back silently; failed, unverified and since-edited ones ask.
+**A verdict is one of four, not two.** `UNIT_PASSED`, `UNIT_FAILED`, `UNIT_UNVERIFIED`,
+`UNIT_FLAKY` — an edit delegated without a verification command is the common case and is neither a pass
+nor a failure, so counting it as a failure would corrupt the very number it exists to produce. A file a
+*passing* unit left unchanged reads back silently; failed, unverified, flaky and since-edited ones ask.
+
+`UNIT_FLAKY` exists because a **non-deterministic oracle** — a property test, a concurrency harness —
+could otherwise pass a broken implementation on the run where the defect did not trigger, and a passing
+verdict is what *settles* a file. Declare `verificationRepeats` and repeated runs that disagree are
+recorded as flaky: not a pass, not settled, and naming the oracle rather than the code. That is the one
+false green this control could previously emit, and it was silent.
 
 ## How it works: a contract out, a verdict back
 

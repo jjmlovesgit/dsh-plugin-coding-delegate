@@ -34,7 +34,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.runSandboxVerification = exports.runInProcessFallback = exports.resolveVerificationTimeoutMs = exports.redactVerificationOutput = exports.parseTestOutput = exports.evaluateVerificationPolicy = exports.describeFailures = exports.commandProgram = exports.DEFAULT_VERIFICATION_TIMEOUT_MS = exports.DEFAULT_VERIFICATION_POLICY = exports.sha256File = exports.saveDelegatedRegistry = exports.resolveDelegatedRegistryPath = exports.resolveContractFiles = exports.rememberDelegated = exports.pruneDelegatedRecords = exports.parseDelegatedRegistry = exports.mergeDelegatedRecords = exports.loadDelegatedRegistry = exports.contractViolations = exports.contractFileHashes = exports.resolveContextFiles = exports.DEFAULT_CONTEXT_MAX_BYTES = exports.roleFromLineage = exports.roleForAgent = exports.resolveLeadProviders = exports.resolveAgentRole = exports.resetAgentRoles = exports.rememberAgentRole = exports.evaluateSourceEgress = exports.detectSourceEgress = exports.describeSourceRead = exports.applyArchitectConfig = exports.applyAgentRole = exports.agentLineageRole = exports.DEFAULT_SOURCE_EGRESS_MIN_LINES = exports.AGENT_ROLE_LIMIT = exports.hasCommandWriteSignal = exports.hasCommandDeleteSignal = exports.evaluateDelegatedReadPolicy = exports.evaluateCodeWriteGuard = exports.DELETE_PRIMITIVES = exports.extractAndEmitFiles = exports.evaluateUnitScope = exports.evaluateEmissionPath = exports.isPathWithin = exports.trace = exports.resolveDataDir = exports.SavingsTracker = exports.PROFILES = void 0;
-exports.LocalRouter = exports.name = exports.using = exports.inject = exports.retryContextRequests = exports.parseFailureLocations = exports.RETRY_CONTEXT_WINDOW_LINES = exports.resolveDelegateStatus = exports.resolveChatCompletionsUrl = exports.parseSearchReplaceBlocks = exports.extractPromptText = exports.estimateTokenCount = exports.delegateWorker = exports.applySearchReplaceBlocks = exports.MIN_SEARCH_CHARS = exports.DEFAULT_LOCAL_ENDPOINT = exports.DELEGATE_WORKER_SCHEMA = exports.DELEGATE_WORKER_OPENAI_SCHEMA = exports.foldContextQuality = exports.describeContextQuality = exports.EMPTY_CONTEXT_QUALITY = void 0;
+exports.LocalRouter = exports.name = exports.using = exports.inject = exports.retryContextRequests = exports.parseFailureLocations = exports.RETRY_CONTEXT_WINDOW_LINES = exports.resolveVerificationRepeats = exports.resolveDelegateStatus = exports.resolveChatCompletionsUrl = exports.parseSearchReplaceBlocks = exports.extractPromptText = exports.estimateTokenCount = exports.delegateWorker = exports.applySearchReplaceBlocks = exports.MIN_SEARCH_CHARS = exports.DEFAULT_LOCAL_ENDPOINT = exports.DELEGATE_WORKER_SCHEMA = exports.DELEGATE_WORKER_OPENAI_SCHEMA = exports.foldContextQuality = exports.describeContextQuality = exports.EMPTY_CONTEXT_QUALITY = void 0;
 exports.scanDLP = scanDLP;
 exports.requestApprovalForWrite = requestApprovalForWrite;
 exports.resolveVerificationPolicy = resolveVerificationPolicy;
@@ -130,6 +130,7 @@ Object.defineProperty(exports, "extractPromptText", { enumerable: true, get: fun
 Object.defineProperty(exports, "parseSearchReplaceBlocks", { enumerable: true, get: function () { return delegation_2.parseSearchReplaceBlocks; } });
 Object.defineProperty(exports, "resolveChatCompletionsUrl", { enumerable: true, get: function () { return delegation_2.resolveChatCompletionsUrl; } });
 Object.defineProperty(exports, "resolveDelegateStatus", { enumerable: true, get: function () { return delegation_2.resolveDelegateStatus; } });
+Object.defineProperty(exports, "resolveVerificationRepeats", { enumerable: true, get: function () { return delegation_2.resolveVerificationRepeats; } });
 var retry_context_1 = require("./retry-context");
 Object.defineProperty(exports, "RETRY_CONTEXT_WINDOW_LINES", { enumerable: true, get: function () { return retry_context_1.RETRY_CONTEXT_WINDOW_LINES; } });
 Object.defineProperty(exports, "parseFailureLocations", { enumerable: true, get: function () { return retry_context_1.parseFailureLocations; } });
@@ -1039,6 +1040,8 @@ const pluginExport = {
     contractFileHashes: contracts_1.contractFileHashes,
     contractViolations: contracts_1.contractViolations,
     resolveDelegateStatus: delegation_1.resolveDelegateStatus,
+    resolveVerificationRepeats: delegation_1.resolveVerificationRepeats,
+    MAX_VERIFICATION_REPEATS: delegation_1.MAX_VERIFICATION_REPEATS,
     resolveLeadProviders: roles_1.resolveLeadProviders,
     evaluateDelegatedReadPolicy: guard_1.evaluateDelegatedReadPolicy,
     rememberAgentRole: roles_1.rememberAgentRole,

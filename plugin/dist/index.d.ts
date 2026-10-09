@@ -6,7 +6,7 @@ import { VerificationPolicy, parseTestOutput, runSandboxVerification } from './v
 import { resolveContextFiles } from './context';
 import { DelegateReadPolicy, GuardVerdict, evaluateDelegatedReadPolicy } from './guard';
 import { SourceEgressPolicy, applyAgentRole, applyArchitectConfig, describeSourceRead, detectSourceEgress, evaluateSourceEgress, rememberAgentRole, resetAgentRoles, resolveAgentRole, resolveLeadProviders, roleForAgent } from './roles';
-import { applySearchReplaceBlocks, delegateWorker, parseSearchReplaceBlocks, resolveDelegateStatus } from './delegation';
+import { applySearchReplaceBlocks, delegateWorker, parseSearchReplaceBlocks, resolveDelegateStatus, resolveVerificationRepeats } from './delegation';
 import { contractFileHashes, contractViolations, loadDelegatedRegistry, mergeDelegatedRecords, parseDelegatedRegistry, pruneDelegatedRecords, rememberDelegated, resolveContractFiles, resolveDelegatedRegistryPath, saveDelegatedRegistry, sha256File } from './contracts';
 export { PROFILES, ProfileConfig, SavingsTracker, RouteType, StepUsage };
 export { resolveDataDir, trace } from './logging';
@@ -18,7 +18,7 @@ export { ContextInjection, ContextRequest, ContextResolution, DEFAULT_CONTEXT_MA
 export { contractFileHashes, contractViolations, loadDelegatedRegistry, mergeDelegatedRecords, parseDelegatedRegistry, pruneDelegatedRecords, rememberDelegated, resolveContractFiles, resolveDelegatedRegistryPath, saveDelegatedRegistry, sha256File, } from './contracts';
 export { DEFAULT_VERIFICATION_POLICY, DEFAULT_VERIFICATION_TIMEOUT_MS, commandProgram, describeFailures, evaluateVerificationPolicy, parseTestOutput, redactVerificationOutput, resolveVerificationTimeoutMs, runInProcessFallback, runSandboxVerification, } from './verification';
 export { ContextQuality, EMPTY_CONTEXT_QUALITY, describeContextQuality, foldContextQuality, } from './context-quality';
-export { DELEGATE_WORKER_OPENAI_SCHEMA, DELEGATE_WORKER_SCHEMA, DEFAULT_LOCAL_ENDPOINT, MIN_SEARCH_CHARS, applySearchReplaceBlocks, delegateWorker, estimateTokenCount, extractPromptText, parseSearchReplaceBlocks, resolveChatCompletionsUrl, resolveDelegateStatus, } from './delegation';
+export { DELEGATE_WORKER_OPENAI_SCHEMA, DELEGATE_WORKER_SCHEMA, DEFAULT_LOCAL_ENDPOINT, MIN_SEARCH_CHARS, applySearchReplaceBlocks, delegateWorker, estimateTokenCount, extractPromptText, parseSearchReplaceBlocks, resolveChatCompletionsUrl, resolveDelegateStatus, resolveVerificationRepeats, } from './delegation';
 export { FailureLocation, RETRY_CONTEXT_WINDOW_LINES, parseFailureLocations, retryContextRequests, } from './retry-context';
 export declare const inject: string[];
 export declare const using: readonly ["tools"];
@@ -321,6 +321,8 @@ declare const pluginExport: {
     contractFileHashes: typeof contractFileHashes;
     contractViolations: typeof contractViolations;
     resolveDelegateStatus: typeof resolveDelegateStatus;
+    resolveVerificationRepeats: typeof resolveVerificationRepeats;
+    MAX_VERIFICATION_REPEATS: number;
     resolveLeadProviders: typeof resolveLeadProviders;
     evaluateDelegatedReadPolicy: typeof evaluateDelegatedReadPolicy;
     rememberAgentRole: typeof rememberAgentRole;

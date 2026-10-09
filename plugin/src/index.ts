@@ -61,6 +61,7 @@ import {
 import {
   DELEGATE_WORKER_OPENAI_SCHEMA,
   DELEGATE_WORKER_SCHEMA,
+  MAX_VERIFICATION_REPEATS,
   MIN_SEARCH_CHARS,
   applySearchReplaceBlocks,
   delegateWorker,
@@ -68,6 +69,7 @@ import {
   extractPromptText,
   parseSearchReplaceBlocks,
   resolveDelegateStatus,
+  resolveVerificationRepeats,
 } from './delegation'
 import {
   DELEGATED_PATH_LIMIT,
@@ -171,6 +173,7 @@ export {
   parseSearchReplaceBlocks,
   resolveChatCompletionsUrl,
   resolveDelegateStatus,
+  resolveVerificationRepeats,
 } from './delegation'
 export {
   FailureLocation,
@@ -1487,6 +1490,8 @@ const pluginExport = {
   contractFileHashes,
   contractViolations,
   resolveDelegateStatus,
+  resolveVerificationRepeats,
+  MAX_VERIFICATION_REPEATS,
   resolveLeadProviders,
   evaluateDelegatedReadPolicy,
   rememberAgentRole,

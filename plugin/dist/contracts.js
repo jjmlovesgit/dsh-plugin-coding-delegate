@@ -161,7 +161,12 @@ function lookupDelegatedRecord(canonicalPath) {
         indexDelegated(loadDelegatedRegistry());
     return delegatedRecordIndex.get(canonicalPath);
 }
-const DELEGATED_OUTCOMES = new Set(['UNIT_PASSED', 'UNIT_FAILED', 'UNIT_UNVERIFIED']);
+const DELEGATED_OUTCOMES = new Set([
+    'UNIT_PASSED',
+    'UNIT_FAILED',
+    'UNIT_UNVERIFIED',
+    'UNIT_FLAKY',
+]);
 function resolveDelegatedRegistryPath() {
     return path.join((0, logging_1.resolveDataDir)(), 'delegated-registry.json');
 }

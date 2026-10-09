@@ -464,6 +464,16 @@ export function evaluateSettledFile(
   currentHash: string | null
 ): SettledVerdict {
   if (!record) return { allowed: false, reason: 'the registry holds no verdict for it.' }
+  if (record.outcome === 'UNIT_FLAKY') {
+    // Named against the ORACLE rather than the code, because that is what disagreed. A contract that
+    // passed on one run and failed on another has not established anything about the content, and the
+    // run it passed is exactly the run that could have promoted a race condition.
+    return {
+      allowed: false,
+      reason:
+        'the contract that judged it disagreed with itself across repeated runs, so nothing has been established about its content.',
+    }
+  }
   if (record.outcome === 'UNIT_FAILED') {
     return { allowed: false, reason: 'the unit that wrote it failed verification.' }
   }
