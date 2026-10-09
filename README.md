@@ -107,9 +107,15 @@ nor a failure, so counting it as a failure would corrupt the very number it exis
 
 `UNIT_FLAKY` exists because a **non-deterministic oracle** — a property test, a concurrency harness —
 could otherwise pass a broken implementation on the run where the defect did not trigger, and a passing
-verdict is what *settles* a file. Declare `verificationRepeats` and repeated runs that disagree are
-recorded as flaky: not a pass, not settled, and naming the oracle rather than the code. That is the one
-false green this control could previously emit, and it was silent.
+verdict is what *settles* a file. **`runVerification` runs three times by default**: three agreeing runs
+prove the contract stable, and any disagreement is recorded as flaky — not a pass, not settled, and naming
+the oracle rather than the code. That is the one false green this control could previously emit, and it was
+silent.
+
+The three-fold cost is deliberate and worth knowing before you measure anything. A suite you have measured
+as deterministic can pass `verificationRepeats: 1` to get the time back; the fast path is the one that
+requires a decision. The loop short-circuits only on *disagreement*, because that is the one result running
+more cannot change — so a flaky unit costs two runs, and a clean pass or a clean failure costs all three.
 
 ## How it works: a contract out, a verdict back
 
