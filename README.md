@@ -1,8 +1,5 @@
 # DSH Coding Delegation Technical Control for the Separation of Duties
 
-> **A preventive control: the metered cloud model (architiect) cannot author code - only specifications, and
-> every delegation to a local coding model leaves a hashable verdict.**
-
 A [DeepSeek Harness](https://github.com/deepseek-ai) (DSH) plugin that separates **who specifies** work
 from **who implements** it, and refuses to let the first party write the second party's code. It is a
 technical control, not a policy: enforcement happens in a tool-call hook before a write lands, so it does
