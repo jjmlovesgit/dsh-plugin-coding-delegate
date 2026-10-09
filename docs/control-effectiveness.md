@@ -116,10 +116,25 @@ rather than falling back.
 **One operational limit, found by testing it rather than reasoning about it: this option is read at plugin
 REGISTRATION, so it needs a server restart.** A live test with `sourceReadEgress` added to the running
 plugin's config served raw source and registered no hook, because `apply()` had already run and the config
-object it captured did not contain the key. An earlier measurement in this repository concluded that DSH
-"reloads plugin options without a restart" — that is true for options consulted **per dispatch**, like
-`verificationAllowlist`, and false for options that gate **registration**, which is what this one is. The
-distinction was not written down at the time and cost a wasted live test; it is here now.
+object it captured did not contain the key.
+
+**And it must go in the PROFILE PATCH, not `~/.dsh/config.json`.** The first attempt put it in `config.json`
+and the hook did not register at all — no registration line **and** no warning, which is only possible if
+the whole block was skipped because `options.sourceReadEgress` was undefined. Plugin options come from
+`~/.dsh/profiles/<profile>/cordis.patch.yml`, under the `id: local-router` entry, which is where
+`localProvider`, `guardAskPaths` and `coherenceVerification` already live.
+
+**That error invalidates a conclusion recorded earlier in this file.** An experiment here concluded that
+"DSH reloads plugin options without a restart", citing `verificationAllowlist` taking effect live as the
+evidence. But `verificationAllowlist` was written to `config.json` too, so it was **never in effect either**
+— the profile patch does not set it, and the ledger records **63 `UNIT_PASSED` units that ran without it**.
+What actually made those verifications run was the **approval seam in a top-level session**: the option never
+applied, and the prompt was approved in the one context that had an approver.
+
+So the corrected statement is narrower than both earlier versions: **options are read once at registration,
+from the profile patch, and a change needs a restart.** Two wrong conclusions came from testing in the wrong
+file and reading the result as confirmation — which is the same failure as the false greens, one layer out:
+a plausible result accepted because it was consistent with the belief being tested.
 
 **And it is opt-in rather than default**, because changing what every read returns is not a decision to make
 for the operator.
