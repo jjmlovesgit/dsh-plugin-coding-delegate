@@ -42,6 +42,18 @@ jobs:
         # the built artefact.
         run: npm run test:oracles
 
+      - name: Promotion socket oracle
+        # Separate from the suite above because the file is `.mjs`, not `.test.cjs`. It tests
+        # scripts/check-promotion.cjs, which the write guard refuses to a cloud context for ending in
+        # `.cjs` -- so the oracle exists under an extension the guard does not classify as source. The
+        # glob in `test:oracles` therefore does not reach it, and running it here is what stops that
+        # from meaning it never runs at all.
+        #
+        # It is also the only test that would CATCH a silent socket bug: a missing verdict branch falls
+        # through to a generic refusal and exits 1, which is indistinguishable from correct strictness.
+        working-directory: .
+        run: node --test plugin/tests/oracles/promotion-socket.oracle.mjs
+
       - name: README consistency
         # The repository-root scripts never ran in CI: this job's default working-directory is `plugin`,
         # so everything under `scripts/` was local-only. That is how the two READMEs drifted to seven
