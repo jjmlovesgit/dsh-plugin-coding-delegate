@@ -140,13 +140,34 @@ function main() {
   const argv = process.argv.slice(2)
   const registryPath = argValue('registry', argv) || path.join(dataDir(), 'delegated-registry.json')
   const repoRoot = path.resolve(argValue('repo', argv) || process.cwd())
-  const onePath = argValue('path', argv)
   const all = argv.includes('--all')
   const changed = argv.includes('--changed')
   const asJson = argv.includes('--json')
 
-  if (!onePath && !all && !changed) {
-    console.error('usage: node scripts/check-promotion.cjs --changed | --path <file> | --all [--json]')
+  // MULTI-TARGET. Both `--path a --path b` and bare positionals are accepted, so a changeset can be gated
+  // in one invocation. The value-taking flags are excluded explicitly rather than by testing for a leading
+  // dash: `--registry <file>` would otherwise push the registry PATH into the target list, and the gate
+  // would try to judge its own registry as a source file.
+  const valueFlags = new Set(['--registry', '--repo', '--path'])
+  const explicitTargets = []
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i]
+    if (arg === '--path') {
+      if (argv[i + 1]) explicitTargets.push(argv[i + 1])
+      i++
+      continue
+    }
+    if (valueFlags.has(arg)) {
+      i++
+      continue
+    }
+    if (!arg.startsWith('--')) explicitTargets.push(arg)
+  }
+
+  if (explicitTargets.length === 0 && !all && !changed) {
+    console.error(
+      'usage: node scripts/check-promotion.cjs <file> [file ...] | --path <file> | --all | --changed [--json]'
+    )
     process.exit(2)
   }
 
@@ -158,8 +179,10 @@ function main() {
   }
 
   let targets = []
-  if (onePath) {
-    targets = [path.resolve(repoRoot, onePath)]
+  if (explicitTargets.length > 0) {
+    // Resolved against the repo root, because a bare filename resolves against the cwd and silently finds
+    // no record -- a false negative that reads exactly like a real failure.
+    targets = explicitTargets.map((t) => path.resolve(repoRoot, t))
   } else if (all) {
     targets = records.map((r) => path.resolve(String(r.path)))
   } else {
@@ -180,13 +203,35 @@ function main() {
   const failures = results.filter((r) => !r.ok)
 
   if (asJson) {
-    console.log(JSON.stringify({ registry: registryPath, checked: results.length, failures: failures.length, results }, null, 2))
+    // The shape is UNCHANGED deliberately. The oracle reads `results[0]`, so emitting a bare array here
+    // would break every one of its twelve fixture cases -- a telemetry change silently invalidating the
+    // test that guards the socket.
+    console.log(
+      JSON.stringify({ registry: registryPath, checked: results.length, failures: failures.length, results }, null, 2)
+    )
   } else {
+    // Telemetry on the DEFAULT path, so a gate can tell a machine pass from a human attestation without a
+    // flag. Requiring --json to learn which kind of claim a promotion rests on had it backwards.
+    let attested = 0
+    let passed = 0
     for (const result of results) {
-      if (!result.ok) console.log('NOT SETTLED  ' + result.path + '\n             ' + result.reason)
+      if (result.ok) {
+        if (result.attested) attested++
+        else passed++
+        console.log('SETTLED      ' + result.path + '\n             ' + result.reason)
+      } else {
+        console.log('NOT SETTLED  ' + result.path + '\n             ' + result.reason)
+      }
     }
     console.log(
-      results.length + ' file(s) checked, ' + failures.length + ' not settled' +
+      results.length +
+        ' target(s): ' +
+        attested +
+        ' operator-attested, ' +
+        passed +
+        ' unit-passed, ' +
+        failures.length +
+        ' unsettled' +
         (changed ? ' (changed against HEAD)' : '')
     )
   }

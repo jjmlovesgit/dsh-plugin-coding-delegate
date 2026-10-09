@@ -245,24 +245,31 @@ makes that gap easy to underestimate.
 
 355 oracle checks and 39 unit tests back the enforced rows.
 
-## Open items on the promotion socket
+## Open items on the promotion socket — BOTH CLOSED
 
-Both found by using it, neither yet built. Recorded here rather than only in a commit message, because a
-commit message is not a backlog.
+Kept as a record of what was wrong rather than deleted, because the two items were found by *using* the
+socket and both are the kind of thing a summary would have described as working.
 
-**Multi-target ingestion.** `scripts/check-promotion.cjs` takes one `--path` per invocation, so gating a
-changeset is N shell calls, which is not how a pre-commit hook wants to work. It should accept several
-paths, or read a git change-list. Worth noting the trap found while writing this: a bare positional
-filename is resolved against the current directory, so `--path aggregation-window.js` silently finds no
-record and exits 1 — a false negative that reads exactly like a real failure.
+**Multi-target ingestion — closed.** It took one `--path` per invocation, so gating a changeset was N shell
+calls. It now accepts both `--path a --path b` and bare positionals, resolved against the repo root. The
+trap that motivated resolving against the root rather than the cwd: a bare filename silently finds no record
+and exits 1 — a false negative that reads exactly like a real failure. The value-taking flags (`--registry`,
+`--repo`, `--path`) are excluded from positional collection explicitly, because `--registry <file>` would
+otherwise push the registry path into the target list and the gate would try to judge its own registry.
 
-**Explicit verification telemetry in the default output.** On success the verifier prints only
-`1 file(s) checked, 0 not settled`, and reason strings appear **only on failure**. So a gate cannot
-distinguish a machine pass from a human attestation in its output, which is the precise distinction this
-verdict exists to draw. `--json` does expose it — `"attested by jim and unchanged since"` versus
-`"a unit passed it and its content is unchanged"` — but requiring a flag for the audit-relevant fact is
-backwards. A one-line summary naming the counts by verdict would fix it, and silence-on-success (Unix-style)
-can stay the default for hook use.
+**Explicit telemetry in the default output — closed.** On success the verifier printed only
+`1 file(s) checked, 0 not settled`, with reasons appearing **only on failure**. A gate therefore could not
+distinguish a machine pass from a human attestation — the precise distinction this verdict exists to draw —
+without `--json`. It now prints per-target `SETTLED` / `NOT SETTLED` lines with their reasons and a summary
+naming the counts by verdict:
+
+```
+4 target(s): 3 operator-attested, 1 unit-passed, 0 unsettled
+```
+
+The `--json` structure was **deliberately left unchanged** while doing this. The oracle reads
+`results[0]`, so emitting a bare array — as the initial sketch for this change did — would have broken all
+twelve fixture cases: a telemetry change silently invalidating the test that guards the socket.
 
 ## The distinction these two controls illustrate
 
