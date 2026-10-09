@@ -251,6 +251,57 @@ const READ_ONLY_INSPECTORS = new Set([
     'out-string', 'measure-object',
 ]);
 /**
+ * The subset of inspectors that return file CONTENT, as opposed to names, sizes or existence.
+ *
+ * `READ_ONLY_INSPECTORS` answers "is this token read as data rather than invoked", which is a different
+ * question from "does this command read bytes", and conflating the two made the read guard fire on
+ * `Get-ChildItem` and `Test-Path`. That is fail-closed and therefore safe, but it costs the operator
+ * every ordinary command in a workspace where anything has been delegated -- and a guard that cannot be
+ * lived with is a guard that gets switched off, which loses the whole rule rather than the false positive.
+ *
+ * The line this draws is the one the containment inference actually needs: `delegatedUnder` exists
+ * because a command scoped to a DIRECTORY can read every delegated file beneath it, and that is only
+ * true of a command that returns contents. `Get-ChildItem src` lists names; `Get-Content src/*.ts`
+ * returns bytes. Only the second may infer containment.
+ *
+ * What is deliberately NOT here: `stat`, `wc`, `file`, `diff`, `test-path`, `get-childitem`, `ls`,
+ * `dir`. Those report metadata or compare handles, and treating them as readers would put the false
+ * positive back.
+ */
+const CONTENT_READERS = new Set([
+    'select-string', 'get-content', 'gc', 'cat', 'type', 'head', 'tail', 'less', 'more',
+    'grep', 'rg', 'findstr', 'strings', 'od', 'xxd',
+]);
+/** Does this command read file CONTENT, rather than list, test or compare? */
+function commandReadsContent(command) {
+    return command
+        .split(/[\s'"|;&()]+/)
+        .filter(Boolean)
+        .some((token) => CONTENT_READERS.has(token.toLowerCase().replace(/\.(?:exe|cmd|bat|ps1)$/, '')));
+}
+/**
+ * Delegated files that sit under the directory an ABSOLUTE token names.
+ *
+ * `delegatedUnder` covers a token that names the delegated file's own parent, and `matchDelegatedPaths`
+ * covers a token that names the file. Neither covers a token that names a GLOB inside a delegated
+ * directory, which is the shape a reader most often uses: `Get-Content 'C:\ws\src\*.ts'` is neither the
+ * directory nor any single file, so with containment restricted to content readers it slipped past both
+ * and read delegated bytes without a grant. Found by this suite, and the reason the containment has an
+ * explicit absolute form rather than relying on the two inferences above to happen to meet.
+ */
+function delegatedUnderDirectory(token, paths) {
+    if (!path.isAbsolute(token))
+        return [];
+    const root = path.dirname(token);
+    const matches = [];
+    for (const p of paths ?? []) {
+        const delegated = String(p);
+        if ((0, paths_1.isPathWithin)(root, delegated) && !matches.includes(delegated))
+            matches.push(delegated);
+    }
+    return matches;
+}
+/**
  * Is this token read as data by a read-only inspector, rather than invoked?
  *
  * Scans positionally instead of by token: the tokenizer splits on `;`, `|` and `&`, which
@@ -509,6 +560,10 @@ function evaluateCodeWriteGuard(exec, config = {}) {
             if (!hasReadSignal)
                 return null;
             const matched = [];
+            // Containment is only inferred for a command that returns CONTENT. A command that merely lists or
+            // tests a directory reads no delegated bytes, so matching it would gate ordinary housekeeping --
+            // and the fail-closed argument does not apply, because there is nothing to fail closed about.
+            const infersContainment = commandReadsContent(command);
             for (const token of command.split(/[\s'"]+/)) {
                 if (!token || token.length < 2 || token.startsWith('-'))
                     continue;
@@ -516,7 +571,13 @@ function evaluateCodeWriteGuard(exec, config = {}) {
                     if (!matched.includes(hit))
                         matched.push(hit);
                 }
+                if (!infersContainment)
+                    continue;
                 for (const hit of delegatedUnder(token, config.delegatedPaths)) {
+                    if (!matched.includes(hit))
+                        matched.push(hit);
+                }
+                for (const hit of delegatedUnderDirectory(token, config.delegatedPaths)) {
                     if (!matched.includes(hit))
                         matched.push(hit);
                 }

@@ -166,6 +166,82 @@ test("control/rule 2: every spelling of one source path is caught", async () => 
   assert.deepEqual(missed, [], "these spellings were authored without a grant:\n  " + missed.join("\n  "));
 });
 
+// ---------------------------------------------------------------------------
+// Rule 3 precision: a shell command that only NAMES things must not be gated,
+// and one that READS CONTENT under a delegated directory still must be.
+//
+// This pair is the whole reason the vocabulary is split. Treating any directory
+// mention as a content read is fail-closed and safe, but it kills `Get-ChildItem`
+// and `Test-Path` once a delegation has landed -- and an operator who cannot run
+// ordinary commands turns the guard off, which loses the routes above as well.
+// Treating none of them as a content read would reopen the bypass rule 3 was
+// closed for: reading delegated bytes through a directory scope.
+// ---------------------------------------------------------------------------
+
+const fs = require("node:fs");
+const os = require("node:os");
+
+/** A workspace with two delegated files, registered, so a directory scope matches them. */
+function withDelegated() {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "dsh-bypass-ws-"));
+  const src = path.join(workspace, "src");
+  fs.mkdirSync(src, { recursive: true });
+  const one = path.join(src, "payments.ts");
+  const two = path.join(src, "refunds.ts");
+  fs.writeFileSync(one, "export const a = 1\n");
+  fs.writeFileSync(two, "export const b = 2\n");
+  const { rememberDelegated } = require(PLUGIN + "/dist/contracts.js");
+  rememberDelegated([one, two], "UNIT_UNVERIFIED", false);
+  return { workspace, src, one };
+}
+
+test("control/rule 3: commands that only list or test a path are not gated", async () => {
+  const { workspace, src } = withDelegated();
+  const listing = [
+    "Get-ChildItem '" + workspace + "'",
+    "Get-ChildItem -Force '" + src + "'",
+    "Get-ChildItem -Recurse '" + workspace + "' | Select-Object Name, Length",
+    "Test-Path '" + src + "'",
+    "Resolve-Path '" + src + "'",
+    "ls '" + src + "'",
+  ];
+  const gated = [];
+  for (const command of listing) {
+    const refusing = await run({ tool: "pwsh", args: { command } }, "refusing");
+    const kind = refusing.kind;
+    if (kind && kind !== "allow") gated.push(command + "  -> " + kind);
+  }
+  assert.deepEqual(
+    gated,
+    [],
+    "listing a directory that CONTAINS delegated files was refused; nothing was read:\n  " + gated.join("\n  ")
+  );
+});
+
+test("control/rule 3: reading CONTENT under a delegated directory is still gated", async () => {
+  const { workspace, src } = withDelegated();
+  const readers = [
+    "Get-Content '" + src + "\\*.ts'",
+    "Get-Content -Path '" + workspace + "\\src' -Filter *.ts",
+    "Select-String -Path '" + src + "' -Pattern export",
+    "grep -r export '" + src + "'",
+    "cmd /c type \"" + src + "\\payments.ts\"",
+    "cat '" + src + "/payments.ts'",
+  ];
+  const missed = [];
+  for (const command of readers) {
+    const refusing = await run({ tool: "pwsh", args: { command } }, "refusing");
+    if (refusing.kind === "allow" || refusing.kind === undefined || refusing.kind === null) {
+      missed.push(command);
+    }
+  }
+  assert.deepEqual(
+    missed,
+    [],
+    "these read delegated content through a directory scope without a grant:\n  " + missed.join("\n  ")
+  );
+});
+
 test("control/rule 2: each route is either denied outright or genuinely gated, and the split is stable", async () => {
   // The distribution is the effectiveness statement: which routes are refused and which are only held
   // for approval. It has to be read from the APPROVING regime, because under a refusing one an `ask`
