@@ -69,6 +69,60 @@ Three of those are qualified and the qualifications matter more than the rows:
   operator did the reviewing. That is **tamper-evidence, not cryptographic non-repudiation** — there is no
   key, no signature, and no third party.
 
+## For an enterprise review
+
+Enterprise evaluation of hybrid frameworks usually stalls on **structure**, not on hardware efficiency or
+token cost. The recurring objection is that a cloud agent with host tool access relies on prompt
+instructions ("do not modify out-of-scope files") or reactive approval popups — permission that is a pause
+rather than a boundary, and an author that grades and commits its own work.
+
+Three things here address that directly, each with its limit stated beside it, because a control whose
+limits are hidden is the thing enterprise review exists to catch.
+
+**1. Separation of duties is mechanical, not instructed.** The cloud model is an architectural oracle. It
+is blocked from file mutation and shell execution at `tools/pre-execute` — across the fifteen routes in
+[`control-bypass.test.cjs`](plugin/tests/oracles/control-bypass.test.cjs), four refused outright and eleven
+held for approval, none reaching source without a grant. Mutation authority sits with a local worker inside
+a bounded workspace.
+*The limit:* the workspace root is an unconditional boundary, but **the per-file `targetFiles` restriction
+is conditional on declaration** — a unit that declares nothing is unrestricted across the workspace. A
+policy that forces declaration is a reasonable ask and is not built.
+
+**2. Promotion is tamper-evident rather than a vibe check.** Git shows commits; it does not show whether a
+remote model or a certified local unit produced the bytes. The promotion socket binds a file to a SHA-256
+registered during on-box consensus (three runs, with non-deterministic drift recorded as `UNIT_FLAKY`) or
+explicit human review (`OPERATOR_ATTESTED`). Any post-verdict edit invalidates it and the socket exits 1.
+[`promotion-socket.oracle.mjs`](plugin/tests/oracles/promotion-socket.oracle.mjs) covers all twelve
+judgement cases and **runs in CI** — a missing verdict branch is the bug it exists to catch, because a
+fall-through to a generic refusal is indistinguishable from correct strictness.
+*The limits:* the registry is **per-machine and not in the repository**, so the socket is a local pre-commit
+gate rather than a CI gate; and `operator` is **a self-reported string with no key and no signature**. That
+is tamper-evidence, not cryptographic non-repudiation.
+
+**3. Egress is bounded by build provenance.** With `sourceReadEgress: 'declarations'`, reads of `.ts` files
+are answered with compiler-emitted `.d.ts` stubs, so the architect gets types and signatures without
+ingesting implementation bodies. Measured on this repository: **zero** `for`/`while`, `if`/`switch` and
+`fs.` calls in the served declarations, against 16, 80 and 2 in the sources.
+*The limits:* the build is **trusted, not verified** — staleness is checked by `mtime`, which a `touch`, a
+checkout or clock skew defeats; and the option is **off by default** and needs a plugin restart.
+
+### What an enterprise review will find missing
+
+Stated here rather than discovered in a procurement conversation:
+
+- **The registry is local, unsigned and per-machine.** Audit records cannot live only on laptops; they need
+  signing with a real identity and shipping to a central manifest or attestation store.
+- **An attestation is not durable.** A later delegation touching the same file supersedes the record —
+  correct semantics, since a verdict describes content, but it means a human attestation must be
+  re-established and is not a permanent certificate.
+- **Task scoping is opt-in**, as above: nothing forces an architect to declare `targetFiles`.
+- **A personal project at 0.1.0.** The API is not frozen. The honest limits are documented rather than
+  glossed, which is the trait an evaluation should weigh in its favour given how rare it is.
+
+The proposition is not that this shaves a metered bill — measured, that is worth about **fifteen cents**. It
+is that local hardware becomes a boundary with a record behind it, and that the model which specifies the
+work is provably not the one that writes it.
+
 ## What this control does not cover
 
 An effectiveness statement is part of a control, not an appendix to it. These are the limits, and they are
