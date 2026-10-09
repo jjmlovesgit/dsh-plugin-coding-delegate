@@ -13,7 +13,7 @@ tests and the code and then grading both. This plugin makes the specification an
 before implementation and re-hashed after, so a passing verdict means *the specification, unmodified,
 passed against the implementation* — and that is checkable after the fact from a local record.
 
-> **Status: 0.2.0, a personal project.** The mechanisms work and are tested. Its **limits are documented
+> **Status: 0.2.0,** The mechanisms work and are tested. Its **limits are documented
 > rather than glossed**, including two that cannot be closed from inside the process — see
 > [What this control does not cover](#what-this-control-does-not-cover). Read that section before deciding
 > whether it fits your situation.
@@ -41,6 +41,30 @@ Five things, in the order they act:
    that writes files without verifying reports `UNVERIFIED`. A whole-file emission may **create** a file and
    may not **modify** one. Then `coherenceVerification` runs the project's own command, with the power to
    void a unit whose own tests passed while the tree did not.
+
+## The Workings
+
+**The architect may reason but not author. The worker may author but not stray. Neither may execute
+without consent. And source does not leave the machine.**
+
+Every rule here is an instance of that sentence — except rule 8, which is about where source may travel
+— and every one fails closed: if a rule cannot be evaluated, or the approval service cannot be reached,
+the answer is no.
+
+| # | Rule | Enforced by |
+| --- | --- | --- |
+| 1 | A credential may not reach the cloud | DLP gate: refused, or pinned local |
+| 2 | The architect may not author or delete source | code guard: denied, or approval-gated |
+| 3 | The architect may not read back what it delegated | the **settled rule**: a file a passing unit left unchanged reads silently, and failed, unverified and since-edited ones ask; `delegateReadPolicy: 'allow'` relaxes all of it, for every agent, and says so |
+| 4 | The worker may not write outside the workspace | containment on every emitted path |
+| 5 | The worker's code may not run inside the server | subprocess only; in-process fallback off |
+| 6 | A command the architect proposes may not run unchecked | approval seam |
+| 7 | A delegated result is a verdict, not a claim | files written without verification report `UNVERIFIED` |
+| 8 | Source may not reach the cloud | cloud-bound requests carrying fenced source are refused by default; `sourceEgress` decides |
+
+Rule 8 is a heuristic and it has a hole: it looks for fenced blocks with a source language tag of at least
+three lines, so source pasted without a tag, described in prose, or split across short blocks is not
+detected. It is also the one rule that can refuse a request you typed yourself.
 
 ## The enforced invariants
 
@@ -217,30 +241,6 @@ needs — nothing else — writes the code, and is discarded. A fresh context pe
 
 The verification command runs as an ordinary subprocess, with the operator's approval. Its raw output
 stays on the local machine; what travels back is the failure *structure*, with source stripped out.
-
-## The policy
-
-**The architect may reason but not author. The worker may author but not stray. Neither may execute
-without consent. And source does not leave the machine.**
-
-Every rule here is an instance of that sentence — except rule 8, which is about where source may travel
-— and every one fails closed: if a rule cannot be evaluated, or the approval service cannot be reached,
-the answer is no.
-
-| # | Rule | Enforced by |
-| --- | --- | --- |
-| 1 | A credential may not reach the cloud | DLP gate: refused, or pinned local |
-| 2 | The architect may not author or delete source | code guard: denied, or approval-gated |
-| 3 | The architect may not read back what it delegated | the **settled rule**: a file a passing unit left unchanged reads silently, and failed, unverified and since-edited ones ask; `delegateReadPolicy: 'allow'` relaxes all of it, for every agent, and says so |
-| 4 | The worker may not write outside the workspace | containment on every emitted path |
-| 5 | The worker's code may not run inside the server | subprocess only; in-process fallback off |
-| 6 | A command the architect proposes may not run unchecked | approval seam |
-| 7 | A delegated result is a verdict, not a claim | files written without verification report `UNVERIFIED` |
-| 8 | Source may not reach the cloud | cloud-bound requests carrying fenced source are refused by default; `sourceEgress` decides |
-
-Rule 8 is a heuristic and it has a hole: it looks for fenced blocks with a source language tag of at least
-three lines, so source pasted without a tag, described in prose, or split across short blocks is not
-detected. It is also the one rule that can refuse a request you typed yourself.
 
 ## Requirements
 
