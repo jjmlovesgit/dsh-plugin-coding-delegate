@@ -437,7 +437,26 @@ export function recordOperatorAttestation(
   record.attestation = { operator: who, evidence: why, at }
   if (!existing) records.push(record)
 
-  saveDelegatedRegistry(records)
+  // A persist that did not happen must not be reported as one. `saveDelegatedRegistry` returns a boolean
+  // rather than throwing so its other callers can decide, and the first version of this function ignored
+  // that return -- so the very first attestation attempt printed a hash and an operator while the registry
+  // was untouched, the write having failed with EPERM inside the persist path. That is the defect this
+  // repository has now caught repeatedly: a green result over an operation that did not occur.
+  //
+  // Throwing is the right response here and not for `recordDelegatedOutcome`, because the two callers face
+  // opposite risks. A delegation that fails to record a verdict leaves the file UNSETTLED, which is the
+  // fail-closed direction -- an absent verdict reads as "nothing is proven". An attestation that fails to
+  // record leaves the operator believing a human-verified claim is on file when nothing is, and the whole
+  // point of the verdict is that somebody can be named for it.
+  if (!saveDelegatedRegistry(records)) {
+    throw new Error(
+      'Could not persist the operator attestation for ' +
+        canonical +
+        '. The registry at ' +
+        resolveDelegatedRegistryPath() +
+        ' was not written, so nothing was attested.'
+    )
+  }
   indexDelegated(records)
   return record
 }
