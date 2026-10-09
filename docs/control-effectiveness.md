@@ -235,3 +235,34 @@ model of cross-module behaviour is research-grade static analysis, and the inges
 makes that gap easy to underestimate.
 
 355 oracle checks and 39 unit tests back the enforced rows.
+
+## Open items on the promotion socket
+
+Both found by using it, neither yet built. Recorded here rather than only in a commit message, because a
+commit message is not a backlog.
+
+**Multi-target ingestion.** `scripts/check-promotion.cjs` takes one `--path` per invocation, so gating a
+changeset is N shell calls, which is not how a pre-commit hook wants to work. It should accept several
+paths, or read a git change-list. Worth noting the trap found while writing this: a bare positional
+filename is resolved against the current directory, so `--path aggregation-window.js` silently finds no
+record and exits 1 — a false negative that reads exactly like a real failure.
+
+**Explicit verification telemetry in the default output.** On success the verifier prints only
+`1 file(s) checked, 0 not settled`, and reason strings appear **only on failure**. So a gate cannot
+distinguish a machine pass from a human attestation in its output, which is the precise distinction this
+verdict exists to draw. `--json` does expose it — `"attested by jim and unchanged since"` versus
+`"a unit passed it and its content is unchanged"` — but requiring a flag for the audit-relevant fact is
+backwards. A one-line summary naming the counts by verdict would fix it, and silence-on-success (Unix-style)
+can stay the default for hook use.
+
+## The distinction these two controls illustrate
+
+`CODE_EXTENSIONS` refused a write to `scripts/check-promotion.cjs` because the filename ends in `.cjs`. It
+had no idea the file was an audit artifact, and it would have refused a `.ps1` or a `.sql` identically. The
+egress control above decides by whether the bytes contain executable bodies rather than declaration stubs,
+which is a statement about the content and can be explained to the person it refuses.
+
+**One rule can say why it fired and the other cannot, and that is the whole difference between a boundary
+and a lookup table.** The practical consequence is that a heuristic's correct outcome is not evidence that
+the heuristic is correct — the verifier was protected for a reason that had nothing to do with protecting
+it.
