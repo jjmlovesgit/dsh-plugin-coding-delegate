@@ -1,7 +1,7 @@
 {
   "name": "dsh-plugin-coding-delegate",
   "version": "0.2.0",
-  "description": "Your plan is for thinking, your GPU does the typing: a DeepSeek Harness plugin that keeps code out of the metered context, so credentials stay local, the cloud model cannot write or read back source, and code work is delegated and returns a verdict",
+  "description": "A preventive control for DeepSeek Harness: the metered model cannot author code and every delegation leaves a hashable verdict. The architect specifies and is denied write and shell access; a local worker implements inside a bounded workspace; promotion accepts only a SHA-256 match against a machine-checked or operator-attested record.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [
