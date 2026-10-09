@@ -913,8 +913,16 @@ function apply(ctx, options = {}) {
                                         target +
                                         "' was refused: sourceEgress is 'declarations' and no type skeleton exists at '" +
                                         skeleton +
-                                        "'. Build the declarations (tsc --declaration --emitDeclarationOnly), or read the " +
-                                        'declaration path directly. Implementation bodies are not served to this context.',
+                                        ". " +
+                                        // A TEST FILE HAS NO DECLARATION BY CONSTRUCTION. tsconfig.json sets rootDir ./src and
+                                        // include [src/**/*], so a file under tests/ is outside the emit root and NO build will ever
+                                        // produce its .d.ts. The original message told the reader to rebuild and retry, which is
+                                        // unachievable for exactly the files most likely to be refused -- a remediation loop with no
+                                        // exit. Separators are doubled below because this is a regex literal.
+                                        (/(?:^|[\\/])tests?(?:[\\/]|$)/i.test(target)
+                                            ? 'Test files live outside the declaration root and emit no skeleton, so no build will produce one. Inspect it in a local editor, or turn sourceReadEgress off in the profile patch (which needs a DSH restart).'
+                                            : 'Build the declarations with npm run build, or read the declaration path directly.') +
+                                        ' Implementation bodies are not served to this context.',
                                 },
                             ],
                         };
