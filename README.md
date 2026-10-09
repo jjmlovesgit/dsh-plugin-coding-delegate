@@ -1,17 +1,12 @@
-# DSH Coding Delegate
+# DSH Coding Delegation Control
 
-> **A preventive control: the metered model cannot author code, and every delegation leaves a hashable
+> **A preventive control: the metered cloud model cannot author code, and every delegation leaves a hashable
 > verdict.**
 
 A [DeepSeek Harness](https://github.com/deepseek-ai) (DSH) plugin that separates **who specifies** work
 from **who implements** it, and refuses to let the first party write the second party's code. It is a
 technical control, not a policy: enforcement happens in a tool-call hook before a write lands, so it does
 not depend on the model choosing to comply.
-
-Value Statement: the usual arrangement is one model writing the tests and the code and then grading both. 
-This plugin makes the specification an artifact that is hashed before implementation and re-hashed after, 
-so a passing verdict means *the specification, unmodified, passed against the implementation* — and that 
-is checkable after the fact from a local record.
 
 > **Status: 0.2.0,** The mechanisms work and are tested. Its **limits are documented
 > rather than glossed**, including two that cannot be closed from inside the process — see
