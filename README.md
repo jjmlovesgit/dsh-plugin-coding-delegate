@@ -62,7 +62,7 @@ the answer is no.
 | 7 | A delegated result is a verdict, not a claim | files written without verification report `UNVERIFIED` |
 | 8 | Source may not reach the cloud | cloud-bound requests carrying fenced source are refused by default; `sourceEgress` decides |
 
-Rule 8 is a heuristic and it has a hole: it looks for fenced blocks with a source language tag of at least
+Rule 8 is a heuristic: it looks for fenced blocks with a source language tag of at least
 three lines, so source pasted without a tag, described in prose, or split across short blocks is not
 detected. It is also the one rule that can refuse a request you typed yourself.
 
