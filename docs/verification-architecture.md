@@ -105,13 +105,25 @@ and what depends on the boundary — which is what designing a contract requires
 ingestion**, and it converts "the architect must read the repo" from a cost and privacy problem into a
 static-analysis problem that runs entirely on-box.
 
-**On the size of the saving — an earlier draft claimed "$O(10^3)$ rather than $O(10^6)$ tokens", and that
-is retracted.** Those are not the same quantity: the skeleton scales with the number of *declarations*
-while the repository scales with the number of *lines*, so the ratio is not a constant and cannot be
-quoted as an order of magnitude without measuring a corpus. On a module with few exports and long bodies
-the reduction is very large; a file of five hundred tiny exported functions has a skeleton close to its own
-size. The *shape* of the claim — far fewer tokens, no bodies — is right. The numbers are unmeasured, and
-the experiment that would measure them is below.
+**On the size of the saving — the earlier claim of "$O(10^3)$ rather than $O(10^6)$ tokens" was retracted
+unmeasured, and is now replaced by a reading.** `scripts/measure-skeleton-ratio.cjs` runs
+`tsc --declaration --emitDeclarationOnly` over `plugin/src` and compares:
+
+| | bytes | ~tokens | ratio |
+| --- | --- | --- | --- |
+| source (17 files) | 272,647 | 68,162 | — |
+| declarations | 82,028 | 20,507 | **0.301** — 3.3× smaller |
+| declarations, comments stripped | **34,942** | **8,736** | **0.128** — 7.8× smaller |
+
+**The retracted claim overstated the effect by two orders of magnitude.** The honest figure is **3–8×**,
+not 1000×, and which end you quote depends on whether doc comments are kept — which matters here more than
+usual, because this repository documents heavily and a declaration emit preserves comments, so the
+unstripped skeleton carries much of the prose while removing none of the bodies' readers.
+
+Two things make the measurement less bleak than the ratio suggests. The 167,074 distinct architect-read
+tokens measured from telemetry cover **40 files including `node_modules`**, while the skeleton covers the 17
+the architect owns — so the constraint effect is roughly **19×** against what was actually read, not 7.8×.
+And the ratio is not why the technique matters; the next section is.
 
 **This repository already has evidence for the stronger version of the claim.** In the run where the loop
 closed, the architect authored a correct, satisfiable specification with **no code in view at all** — no
@@ -216,7 +228,33 @@ implementation.
 - Fail → measure *how* it fails, and whether a protocol model of the affected modules closes the gap.
 
 The token side is already instrumented: `experiments/delegation-ab/measure-session.cjs` reads the
-architect's real cumulative input out of the session transcript.
+architect's real cumulative input out of the session transcript, and
+[`scripts/measure-reading-cost.cjs`](../scripts/measure-reading-cost.cjs) reads the read events.
+
+#### Run to completion (Run 2), with its two preconditions
+
+**The hypothesis is not about size. It is about eviction.** Measured on this repository, the architect's
+**124 source reads covered 40 distinct files — a 3.1× re-read multiplier** — and counting every read gave
+~1.1M tokens against ~167k distinct. The multiplier exists because the window is filled and churned, so the
+claim is that a skeleton small enough to stop the churn **suppresses the re-reads rather than shrinking
+them**. Both effects point the same way; only one of them is the real mechanism.
+
+Two preconditions, and the protocol cannot run without both:
+
+1. **A fresh top-level session.** A subagent's `approvalPolicy` is pinned to `'never'`, so verification is
+   refused and the architect silently falls back to running the judge itself — which is a different
+   experiment and a more expensive one.
+2. **An allowlisted program**, so a self-verifying unit can actually verify.
+
+| run | what the architect may read | measure |
+| --- | --- | --- |
+| **A — control** | `plugin/src/**/*.ts` directly | requests, cumulative input tokens, distinct vs repeat reads, re-read amplification |
+| **B — treatment** | declarations only | the same four, plus: did amplification fall toward 1.0, and was the contract **satisfiable** by a correct implementation |
+
+Satisfiability is the pass/fail that matters. A cheap contract nobody can satisfy is a failed experiment,
+not a saving — which is the lesson `experiments/contract-first/` preserves.
+
+**And the protocol needs a capability that does not exist**, which is the next section.
 
 ### 2. Convergence cycles — is the local worker the diagnostic engine?
 

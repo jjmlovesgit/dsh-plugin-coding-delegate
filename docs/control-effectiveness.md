@@ -53,6 +53,46 @@ does not fix that. Three reads of a skeleton still cost three reads; only readin
 inverted ingestion attacks the smaller term, and reading hygiene — read late, read once, let the window die
 between units — attacks the larger one.
 
+**Measured reduction, so the ratio is a reading rather than a hope**
+(`scripts/measure-skeleton-ratio.cjs`, over `plugin/src`):
+
+| | bytes | ~tokens | ratio |
+| --- | --- | --- | --- |
+| source (17 files) | 272,647 | 68,162 | — |
+| declarations | 82,028 | 20,507 | **0.301** |
+| declarations, comments stripped | 34,942 | 8,736 | **0.128** |
+
+**3–8× smaller, not the 1000× an earlier draft implied.** The spread between 3.3× and 7.8× is doc comments:
+a declaration emit preserves them, and this repository documents heavily.
+
+### Row 1 is missing an egress-side control, not just a generator
+
+These are two separate gaps and only one of them is usually noticed.
+
+**Generation** is absent: nothing produces the skeleton. That is the gap the ratio above addresses, and it
+is ordinary tooling work.
+
+**Enforcement is also absent, and this is the more important half.** The code guard inspects **write** paths
+— `tools/pre-execute` on writes and shell commands. It does not constrain **read** paths at all: the
+architect may name any file it likes, and `SOURCE_READ` records the choice without limiting it. So even with
+a generator built, nothing would route a read of `src/foo.ts` to `types/foo.d.ts`. Inverted ingestion would
+be a **convention the architect is asked to follow**, which is precisely the policy-versus-control
+distinction this whole file is about.
+
+A mechanical version is available and is the stronger design: a **read-redirect filter** at the same
+`tools/pre-execute` seam that already refuses writes — a read of a source path is served the declaration
+instead, or refused with the declaration offered in its place. Two properties follow, and they are the ones
+a governance reviewer asks for:
+
+- **Source cannot leave because of the shape of the egress, not because the model chose not to ask for it.**
+  What crosses is whatever the extractor emits, and nothing else.
+- **It is auditable.** "The architect read 124 files" becomes "the architect read these declarations", which
+  is checkable against the emitted tree rather than inferred from good behaviour.
+
+Until that exists, row 1 stays **not enforced**, and the privacy perimeter for the implementation remains a
+boundary of the *delegation loop* only — the delegated unit's code never comes back, which is real and
+measured, while the rest of the repository remains readable at will.
+
 **This is the largest gap in the design and the one with the most upside.** It is also not a plugin
 problem: the plugin cannot strip what has already entered the window. Closing it means a preprocessor that
 runs before the architect sees anything, and a measurement of the skeleton-to-source ratio on a real
