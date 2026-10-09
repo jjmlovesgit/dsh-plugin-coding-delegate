@@ -1,10 +1,19 @@
 // Oracle for the promotion socket: every verdict, both hash states, and the unanswerable case.
 //
-// WHY THIS FILE IS `.mjs`. It tests `scripts/check-promotion.cjs`, which the write guard refuses to a cloud
-// context because `.cjs` appears in `CODE_EXTENSIONS` -- a filename heuristic that cannot tell an audit
-// artifact from ordinary source. `.mjs` is not in that set, so the oracle can exist without touching the
-// guard's policy. That is the first live instance of the extension-heuristic problem this repository
-// documents: the rule refused the file for sounding like source rather than for being wrong.
+// WHY THIS FILE IS `.mjs`. It tests `scripts/check-promotion.cjs`. An earlier version of this header claimed
+// the write guard refuses a `.cjs` oracle to a cloud context because `.cjs` appears in `CODE_EXTENSIONS`, and
+// that `.mjs` was therefore the only way the oracle could exist. That claim was wrong, and it is left here
+// corrected rather than deleted because of what it cost: it was repeated in `docs/control-effectiveness.md`
+// as the reason this test did not exist, and it read as a precise mechanical explanation.
+//
+// What actually governs a test file here is the contract carve-out, not the extension: the write guard
+// short-circuits on `contractPaths` (default `['tests/']`) BEFORE the extension gate is reached, so
+// `tests/thing.test.cjs` with `contractWriteMode: 'allow'` is PERMITTED -- `contract-write.test.cjs` asserts
+// exactly that, and a `.cjs` oracle would have been permitted too. `.mjs` is a fine choice and it is what
+// shipped, but it is a choice rather than a requirement, and it is not why this file is allowed to exist.
+//
+// What the extension rule really refuses is `scripts/check-promotion.cjs` itself, which sits outside every
+// contract path. That is the rule working: the socket is source, and source is the local worker's to write.
 //
 // WHY IT MATTERS MORE THAN A NORMAL TEST. This socket is the enforcement point for every promotion, and it
 // is the one component whose bugs are SILENT: a missing verdict branch falls through to "the registry holds

@@ -441,13 +441,47 @@ artifact rather than the summary of it.
   committing or publishing the registry, which turns a local evidence record into a shared one, and is a
   design decision nobody has made.
 
-**`scripts/check-promotion.cjs` has no oracle.** It is the enforcement point for every promotion and the
-only piece of the control whose bugs would be *silent* — a missing verdict branch reads as "no verdict" and
-exits 1, which looks exactly like correct strictness. The `OPERATOR_ATTESTED` gap is precisely that shape:
-three files attested correctly, and the socket refusing them for a reason indistinguishable from caution.
-It should have a test with a real registry fixture covering every verdict and both hash states. It does not,
-because the file is `.cjs` and the write guard refuses it as source — which is itself the first live
-instance of the extension-heuristic problem described above.
+**`scripts/check-promotion.cjs` now has an oracle — and the reason given for its absence was wrong.** This
+paragraph used to read "has no oracle", explained by a tidy story: the socket is `.cjs`, `CODE_EXTENSIONS`
+contains `.cjs`, the write guard refuses source writes to a cloud context, therefore nobody could author the
+test it needed. An earlier revision recorded that as unavoidable.
+
+Two things about it were false, and checking cost one read.
+
+1. **The oracle exists.** `plugin/tests/oracles/promotion-socket.oracle.mjs` tests `check-promotion.cjs` end to
+   end, calling the real script through a child process with its own registry fixtures. It covers every
+   verdict and both hash states — exactly what "it should have a test" asked for.
+2. **A `.cjs` test under `tests/` was never refused.** The write guard short-circuits on the contract carve-out
+   *before* the extension gate is reached, and `tests/` is the default `contractPaths` entry. Writing
+   `tests/thing.test.cjs` with `contractWriteMode: 'allow'` returns `null` — permitted —
+   `contract-write.test.cjs` asserts precisely that, and a direct probe of the built guard confirms it, along
+   with the two states either side: the **default** mode returns `ask` rather than a refusal, and
+   `contractWriteMode: 'deny'` returns `deny`. All three are the carve-out, not the extension. The extension
+   in the story had nothing to do with it.
+
+What the extension heuristic really refuses is `scripts/check-promotion.cjs` itself, because it sits outside
+every contract path — the probe returns `deny` for it, identically to `lib/util.cjs`. That is arguably the
+rule working: the production socket is source, and source is the worker's to write. **The rule did not block
+the test; the explanation of why the test was absent was the thing that was wrong** — which is the same
+failure as the four at the end of this document, arriving one more time. A plausible causal story was accepted
+because it was consistent with the belief being tested, and it survived in two files at once: here, and in the
+oracle header that repeats it.
+
+**My first attempt to verify this reproduced the bug it was checking for.** The probe returned `PERMITTED` for
+every case including `contractWriteMode: 'deny'`, which is impossible — a deny that permits means the probe
+was measuring nothing. It had used the wrong argument field and the wrong module, so target extraction failed
+and the guard returned `null` for all seven inputs. The tell was a result that could not be true, not a result
+that looked wrong. Corrected, it discriminates across all three verdicts. That is the whole method: an
+assertion and a probe that agree because both are inert is the failure mode this document is about, and it
+recurred while the paragraph describing it was being written.
+
+So the durable lesson is not "the heuristic blocked the audit artifact". It is that **a rule described in
+prose is not evidence about what the rule does**, and this one had been described in two places without either
+description being executed. `contract-write.test.cjs` is the evidence; the prose was not.
+
+**What remains true is narrower, and it is the distinction above.** The oracle runs in CI; the socket does
+not, because it needs the per-machine registry. The *judgement* is covered by fixtures — the operator's
+registry still cannot be checked on a fresh runner, and that is the honest limit rather than a missing oracle.
 
 ## The question that found every defect here
 
