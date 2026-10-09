@@ -1,12 +1,32 @@
 # DSH Coding Delegation Control
 
-> **A preventive control: the metered cloud model cannot author code, and every delegation leaves a hashable
-> verdict.**
+> **A preventive control: the metered cloud model (architiect) cannot author code - only specifications, and
+> every delegation to a local coding model leaves a hashable verdict.**
 
 A [DeepSeek Harness](https://github.com/deepseek-ai) (DSH) plugin that separates **who specifies** work
 from **who implements** it, and refuses to let the first party write the second party's code. It is a
 technical control, not a policy: enforcement happens in a tool-call hook before a write lands, so it does
 not depend on the model choosing to comply.
+
+## How it works: a contract out, a verdict back
+
+Coding needs two different jobs done, and they want two different contexts. The plugin gives each one its
+own window and lets exactly two things cross between them.
+
+**The architect** is the metered thinking model. It holds the design conversation, decides how the work
+decomposes, and writes a **contract** for each unit: what to build, where the worker may write, and the
+command that decides whether the unit passed. It does not write source, and it does not read source back.
+
+**The worker** is whatever your GPU is already running. It receives one unit and everything that unit
+needs — nothing else — writes the code, and is discarded. A fresh context per unit costs nothing.
+
+| Direction | What crosses | What never crosses |
+| --- | --- | --- |
+| architect → worker | the contract: instruction, permitted paths, the verification command | the design conversation, the other units |
+| worker → architect | the verdict: pass/fail counts, a redacted failure structure, the names of files written | the code |
+
+The verification command runs as an ordinary subprocess, with the operator's approval. Its raw output
+stays on the local machine; what travels back is the failure *structure*, with source stripped out.
 
 > **Status: 0.2.0,** The mechanisms work and are tested. Its **limits are documented
 > rather than glossed**, including two that cannot be closed from inside the process — see
@@ -217,25 +237,6 @@ as deterministic can pass `verificationRepeats: 1` to get the time back; the fas
 requires a decision. The loop short-circuits only on *disagreement*, because that is the one result running
 more cannot change — so a flaky unit costs two runs, and a clean pass or a clean failure costs all three.
 
-## How it works: a contract out, a verdict back
-
-Coding needs two different jobs done, and they want two different contexts. The plugin gives each one its
-own window and lets exactly two things cross between them.
-
-**The architect** is the metered thinking model. It holds the design conversation, decides how the work
-decomposes, and writes a **contract** for each unit: what to build, where the worker may write, and the
-command that decides whether the unit passed. It does not write source, and it does not read source back.
-
-**The worker** is whatever your GPU is already running. It receives one unit and everything that unit
-needs — nothing else — writes the code, and is discarded. A fresh context per unit costs nothing.
-
-| Direction | What crosses | What never crosses |
-| --- | --- | --- |
-| architect → worker | the contract: instruction, permitted paths, the verification command | the design conversation, the other units |
-| worker → architect | the verdict: pass/fail counts, a redacted failure structure, the names of files written | the code |
-
-The verification command runs as an ordinary subprocess, with the operator's approval. Its raw output
-stays on the local machine; what travels back is the failure *structure*, with source stripped out.
 
 ## Requirements
 
