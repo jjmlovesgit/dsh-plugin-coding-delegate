@@ -156,6 +156,66 @@ file stays refused until the declaration is deleted and re-emitted, or the sourc
 is correct and the remedy is unintuitive, which is exactly what should be written down rather than
 rediscovered during an incident.
 
+### The policy is session-scoped, so turning it off is not a setting — it is a restart
+
+`sourceReadEgress` is read once, at registration, from the profile patch
+(`~/.dsh/profiles/<profile>/cordis.patch.yml`). It is not re-read per call, and `~/.dsh/config.json` is not
+the file it comes from. An operator who wants to read implementation bodies for one sitting has to stop the
+process, edit the patch, and restart it; there is no way to widen egress only for the turn in front of them,
+and no way to narrow it again without another restart.
+
+**As shipped, the patch does not set `sourceReadEgress` at all.** The option, the declaration-serving hook and
+its oracle are all present, but the live profile leaves the key unset, so the control is currently **off** and
+raw source is served. Turning it on is an edit to that file plus a restart — which is the first item below.
+
+That is a deliberate consequence of registration-time wiring rather than a missing feature, but it has an
+operational shape worth stating plainly, because the failure it produces is quiet and lands on the operator:
+
+- **The setting appears not to work.** Editing the patch in a running session changes nothing, and the plugin
+  emits no warning that it is ignoring a file it never watched. The evidence is an unchanged behaviour, which
+  is indistinguishable from a bug in the control. This is the exact false-green shape described at the end of
+  this document — a result accepted because it matched the belief being tested.
+- **"Just this once" is not an option.** The natural remedy for a refused read is to relax the control for the
+  duration of one problem. Here the remedy costs a restart, so the realistic operator response is to leave the
+  control off and stop noticing it — which is the failure mode that makes opt-in controls decay.
+- **The correct habit is to decide the setting per session, not per read** — turn it on for architecture and
+  delegation work, off for incident work — and to record which mode a session ran in if the run's egress
+  behaviour is later disputed.
+
+### The contracts the architect may write are the ones it cannot read back
+
+Two rules are each defensible and combine into an asymmetry:
+
+| rule | behaviour |
+| --- | --- |
+| rule 2, with the declared carve-out | a contract test under `tests/` is the one source-like file the architect may author — `contractWriteMode: 'allow'` returns `null` from the guard and the write proceeds |
+| `sourceReadEgress: 'declarations'` | a read of that same file is refused, because no build will ever produce its `.d.ts` |
+
+The second row is not a defect to fix but a consequence of the emit configuration: `tsconfig.json` sets
+`rootDir: "./src"` and `include: ["src/**/*"]`, so a file under `tests/` is outside the emit root and
+**the type skeleton does not exist by construction**. The read is refused for the ordinary reason — no
+declaration — and the refusal message says so instead of repeating the old instruction to rebuild and retry,
+which was a remediation loop with no exit for exactly the files most likely to be refused (see `1057885`).
+
+So under `declarations` mode the architect can write its own specification and then cannot re-read it — and
+even that only once the mode is switched on, since the shipped patch leaves egress off. Three
+honest consequences:
+
+1. **Read-back is not available as a check.** An architect that intends to verify its own contract by reading
+   it afterwards has no path to do so: not through `read`, and not by re-reading after a rebuild. This is
+   consistent with the architecture — the worker types the contract and the verification verdict, not the
+   architect's review, is what settles the unit — but it removes a habit that a reviewer working from a local
+   checkout would expect to have.
+2. **It is a plan-time obligation, not a fix-up.** Contract content has to be right when written, because the
+   only feedback loop is the worker's verdict on the next delegation rather than an immediate glance. Design
+   the contract before authoring it, not after.
+3. **The asymmetry is real but narrow.** Reading `src/` is unaffected — declarations exist there and are
+   served, body-free. The gap applies only to files that are write-permitted *and* outside the emit root, and
+   in this repository that intersection is precisely `tests/`. If test files ever move into `src/` (as
+   `*.test.ts`), they would emit and become readable, so the predicate that distinguishes them — a path
+   match on `tests?/` at `index.ts:1365` — is a convenience for message wording, not the thing enforcing
+   containment.
+
 **This is the largest gap in the design and the one with the most upside.** It is also not a plugin
 problem: the plugin cannot strip what has already entered the window. Closing it means a preprocessor that
 runs before the architect sees anything, and a measurement of the skeleton-to-source ratio on a real
