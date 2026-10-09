@@ -1,0 +1,31 @@
+{
+  "name": "dsh-plugin-coding-delegate",
+  "version": "0.2.0",
+  "private": true,
+  "description": "A preventive governance plugin for DeepSeek Harness: the cloud model plans and is denied write and shell access, a local worker implements inside a workspace-bounded directory, and promotion is hash-bound against a machine-checked or operator-attested record.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jjmlovesgit/dsh-plugin-coding-delegate.git"
+  },
+  "homepage": "https://github.com/jjmlovesgit/dsh-plugin-coding-delegate#readme",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "cordis",
+    "delegation",
+    "governance"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "plugin/cordis.patch.yml"
+    }
+  },
+  "comment": "This root manifest exists so DSH plugin DIRECTORY discovery can find the plugin: registries read dsh.bundle from the repository ROOT package.json, and the real manifest lives at plugin/package.json and is unchanged. The path is relative with no '..' and no leading slash, per the discovery contract. Nothing installs from here: the published artefact is plugin/, and DSH loads it via a profile bundle.",
+  "scripts": {
+    "build": "npm --prefix plugin run build",
+    "test": "npm --prefix plugin test",
+    "test:oracles": "npm --prefix plugin run test:oracles"
+  }
+}
