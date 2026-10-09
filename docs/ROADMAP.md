@@ -120,9 +120,18 @@ and 3 were re-measured after the refactor and both weakened. Ground 1 in particu
 written — the refactor met the one precondition this section said would change the arithmetic — so the
 retirement should be read as resting on **2 and 4**, not on the file being unreadable.
 
-So the two-tier loop stands, and its honest claim is **"your GPU does the typing"**, not "the architect's
-window stays clean". The architect reads code to engineer. The discipline that replaces the lead tier is:
-**read narrowly, read late, and prefer the verdict you already have.**
+So the two-tier loop stands, and its honest claim is that the architect's window is spent on **design
+rather than typing** — not "the architect's window stays clean". The architect reads code to engineer, and
+that reading is the dominant cost; the loop moves the writing and the iteration off the metered model and
+leaves the reading where it is. The discipline that replaces the lead tier is: **read narrowly, read late,
+and prefer the verdict you already have.**
+
+> **Superseded.** The line above originally read *"its honest claim is 'your GPU does the typing'"*. That
+> tagline was retired on measurement later in this project: across 329 delegations the architect carried
+> **666,756,560** input tokens against the worker's **548,106**, so the typing was **0.08%** of what was
+> billed. The claim was true as a mechanism and near-worthless as a saving, and the honest replacement is
+> the design-over-typing phrasing above. Kept visible rather than overwritten because this section's whole
+> subject is a claim that was revised once already on a re-measurement.
 
 What stays built and load-bearing from this work: `leadTier`/`leadProviders` and `PROFILES.LEAD` (an
 operator may still run a local thinking agent alongside), `delegateReadPolicy`, rule 8, and the durable

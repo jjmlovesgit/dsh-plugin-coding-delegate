@@ -7,6 +7,14 @@ The premise, from `README.md`: *your plan is for thinking, your GPU does the typ
 specifies, the local worker implements, the tree is judged by a contract the architect authored, and no
 implementation code enters the metered context.
 
+> **That premise was later retired, and this document is its record rather than its endorsement.** The
+> README no longer opens with that line. Measured across 329 delegations, the architect carried
+> **666,756,560** input tokens against the worker's **548,106** — the typing was **0.08%** of what was
+> billed, so moving it off the metered tier could not have been the saving it was sold as. What survives is
+> narrower, and is what this experiment actually tests: the architect's window is spent on design rather
+> than typing, and reading — not writing — is the dominant cost. The premise is left as written so the
+> experiment can be read against the belief it was built on.
+
 Artifacts live in [`experiments/contract-first/`](../experiments/contract-first/). They are an experiment,
 not shipped code. Two contracts sit there side by side, and the pair is the point. `tests/ttl-cache.test.js`
 — sha256 `561cf664…`, the same in every run above, which is Finding 2 stated as a hash — is the transcribed
