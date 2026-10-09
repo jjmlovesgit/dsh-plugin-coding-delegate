@@ -8,10 +8,10 @@ from **who implements** it, and refuses to let the first party write the second 
 technical control, not a policy: enforcement happens in a tool-call hook before a write lands, so it does
 not depend on the model choosing to comply.
 
-Why that is worth anything, stated without a benefit claim: the usual arrangement is one model writing the
-tests and the code and then grading both. This plugin makes the specification an artifact that is hashed
-before implementation and re-hashed after, so a passing verdict means *the specification, unmodified,
-passed against the implementation* — and that is checkable after the fact from a local record.
+Value Statement: the usual arrangement is one model writing the tests and the code and then grading both. 
+This plugin makes the specification an artifact that is hashed before implementation and re-hashed after, 
+so a passing verdict means *the specification, unmodified, passed against the implementation* — and that 
+is checkable after the fact from a local record.
 
 > **Status: 0.2.0,** The mechanisms work and are tested. Its **limits are documented
 > rather than glossed**, including two that cannot be closed from inside the process — see
