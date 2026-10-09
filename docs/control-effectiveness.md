@@ -276,22 +276,36 @@ and a lookup table.** The practical consequence is that a heuristic's correct ou
 the heuristic is correct — the verifier was protected for a reason that had nothing to do with protecting
 it.
 
-## Current socket status: one patch from settled, NOT all-green
+## Current socket status: SETTLED
 
-Stated here because a status summary that reads "done" would send a maintainer to run the verifier, get
-four non-zero exits, and have no way to tell which layer was wrong.
+All four targets verified on the machine of record, exit 0 each, with the output distinguishing the two
+kinds of claim:
 
-| target | registry | verifier today | why |
-| --- | --- | --- | --- |
-| `experiments/delegation-ab/src/aggregation-window.js` | `UNIT_PASSED` | **exit 0** | the branch it needs exists |
-| `plugin/src/contracts.ts` | `OPERATOR_ATTESTED`, hash matches | **exit 1** | no `OPERATOR_ATTESTED` branch in `judge()` |
-| `plugin/src/guard.ts` | `OPERATOR_ATTESTED`, hash matches | **exit 1** | same |
-| `scripts/check-promotion.cjs` | `UNIT_UNVERIFIED` | **exit 1** | needs the patch, then re-attestation |
+| target | registry | verifier |
+| --- | --- | --- |
+| `plugin/src/guard.ts` | `OPERATOR_ATTESTED`, hash matches | **exit 0** — *attested by jim and unchanged since* |
+| `plugin/src/contracts.ts` | `OPERATOR_ATTESTED`, hash matches | **exit 0** — *attested by jim and unchanged since* |
+| `scripts/check-promotion.cjs` | `OPERATOR_ATTESTED`, hash matches | **exit 0** — *attested by jim and unchanged since* |
+| `experiments/delegation-ab/src/aggregation-window.js` | `UNIT_PASSED`, hash matches | **exit 0** — *a unit passed it and its content is unchanged* |
 
-The attestations are correct and persisted. `scripts/check-promotion.cjs` **lags the registry model by three
-lines**, and it falls through to *"the registry holds no verdict for it"* rather than disagreeing with the
-attestation. That file cannot be patched from a cloud context: `.cjs` is in `CODE_EXTENSIONS`, so the write
-guard refuses it as source.
+The `OPERATOR_ATTESTED` branch in `judge()` exists, and
+[`promotion-socket.oracle.mjs`](../plugin/tests/oracles/promotion-socket.oracle.mjs) covers all twelve
+judgement cases — both promotable verdicts, both mutation cases, all four refusals, a record with no verdict
+field, an absent registry, an unparseable registry, and newest-record-wins in both file orders.
+
+### An attestation is not durable, and that is by design
+
+Found while settling the socket, and worth knowing before anyone treats an attestation as permanent:
+**`guard.ts` had its attestation silently replaced by later delegation activity.** A delegation writes a
+fresh record for every file it touches, and newest-record-wins means the human verdict is superseded — the
+record survived with its hash and mode but with **no `outcome` field at all**, which the socket then refused
+as "no verdict".
+
+That is the correct semantics rather than a defect: a verdict describes *content*, so a record that
+outlives the bytes it described would be worse. But it means an attestation must be **re-established after
+any delegation that touches the file**, and anyone treating one as a permanent certificate has the wrong
+model. The alternative — letting a stale human claim outlive its content — is the failure this verdict
+exists to prevent.
 
 ## Two containment layers, and only one of them is unconditional
 
@@ -315,15 +329,18 @@ artifact rather than the summary of it.
 
 ## Two gaps in the socket itself
 
-**It cannot be wired into CI as a gate, and this is structural rather than a bug.** The verifier reads the
-registry at `~/.dsh/local-router/delegated-registry.json`, which is **per-machine and not in the
-repository** — so on a fresh CI runner there is no registry, it exits 2 (unanswerable, correctly), and it
-would fail every build. The verdicts are local state by design: they describe what a specific machine's
-worker did. The consequence is worth stating plainly rather than discovering at release time: **this is a
-local promotion gate, not a CI gate.** A pipeline can gate on its own tests; it cannot gate on a registry
-that exists only on the machine that ran the delegation. Closing that would mean committing or publishing
-the registry, which turns a local evidence record into a shared one and is a design decision nobody has
-made.
+**It cannot be wired into CI as a LIVE gate, and this is structural rather than a bug** — though its
+*oracle* can be and is. The distinction is worth keeping straight, because the two are easy to conflate:
+
+- **The oracle runs in CI.** `promotion-socket.oracle.mjs` builds its own registry fixtures, so it tests the
+  judgement with no machine state at all, and `.github/workflows/ci.yml` runs it as its own step. That is
+  what catches a verdict branch going missing.
+- **The socket itself cannot.** It reads the registry at `~/.dsh/local-router/delegated-registry.json`,
+  which is **per-machine and not in the repository** — so on a fresh CI runner there is no registry, it exits
+  2 (unanswerable, correctly), and it would fail every build. The verdicts describe what one machine's worker
+  did. The honest consequence: **this is a local promotion gate, not a CI gate.** Closing that would mean
+  committing or publishing the registry, which turns a local evidence record into a shared one, and is a
+  design decision nobody has made.
 
 **`scripts/check-promotion.cjs` has no oracle.** It is the enforcement point for every promotion and the
 only piece of the control whose bugs would be *silent* — a missing verdict branch reads as "no verdict" and
