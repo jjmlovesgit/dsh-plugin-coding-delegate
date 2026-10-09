@@ -1,4 +1,4 @@
-# DSH Coding Delegation Control
+# DSH Coding Delegation Technical Control for the Separation of Duties
 
 > **A preventive control: the metered cloud model (architiect) cannot author code - only specifications, and
 > every delegation to a local coding model leaves a hashable verdict.**
