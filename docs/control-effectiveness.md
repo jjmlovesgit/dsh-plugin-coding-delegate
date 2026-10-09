@@ -266,3 +266,47 @@ which is a statement about the content and can be explained to the person it ref
 and a lookup table.** The practical consequence is that a heuristic's correct outcome is not evidence that
 the heuristic is correct — the verifier was protected for a reason that had nothing to do with protecting
 it.
+
+## Current socket status: one patch from settled, NOT all-green
+
+Stated here because a status summary that reads "done" would send a maintainer to run the verifier, get
+four non-zero exits, and have no way to tell which layer was wrong.
+
+| target | registry | verifier today | why |
+| --- | --- | --- | --- |
+| `experiments/delegation-ab/src/aggregation-window.js` | `UNIT_PASSED` | **exit 0** | the branch it needs exists |
+| `plugin/src/contracts.ts` | `OPERATOR_ATTESTED`, hash matches | **exit 1** | no `OPERATOR_ATTESTED` branch in `judge()` |
+| `plugin/src/guard.ts` | `OPERATOR_ATTESTED`, hash matches | **exit 1** | same |
+| `scripts/check-promotion.cjs` | `UNIT_UNVERIFIED` | **exit 1** | needs the patch, then re-attestation |
+
+The attestations are correct and persisted. `scripts/check-promotion.cjs` **lags the registry model by three
+lines**, and it falls through to *"the registry holds no verdict for it"* rather than disagreeing with the
+attestation. That file cannot be patched from a cloud context: `.cjs` is in `CODE_EXTENSIONS`, so the write
+guard refuses it as source.
+
+## The question that found every defect here
+
+**"What would this look like if it were checking nothing?"**
+
+Asked of each result that came back green, it exposed four false greens in one session, none of which any
+test suite caught on its own:
+
+1. **A mutation harness that never mutated.** The verification script listed a `boundary-inclusive` mutation
+   and the reference implementation was written without it, so that row ran the *correct* code and reported,
+   accurately, that nothing was caught.
+2. **A test whose setup threw before reaching an assertion.** The rule-3 checks registered delegated files
+   with `rememberDelegated` and assumed that was enough — but the plugin seeds its path set from the
+   persisted registry inside `apply()`, so the predicate was driven with an empty set and returned "not
+   gated" for everything, including vectors the real listener blocks.
+3. **A short-circuit that hid non-determinism.** `FAIL FAIL FAIL` exited after two agreeing failures, so a
+   race that lost twice in a row was reported as a deterministic regression — masking the exact thing
+   `UNIT_FLAKY` exists to expose.
+4. **An attestation that returned a success record while the disk write threw.** `saveDelegatedRegistry`
+   returns a boolean rather than throwing; the caller ignored it, and the first attestation printed a hash
+   and an operator while the registry was untouched.
+
+The common shape: **each harness checked for the absence of a crash rather than the presence of a
+cryptographic invariant.** A green result is evidence about the code only in proportion to what the check
+would have done had the code been wrong — and in all four cases the answer was "nothing different."
+
+The four are fixed and pinned. The question is the durable part.
