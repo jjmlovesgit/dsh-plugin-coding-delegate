@@ -139,6 +139,23 @@ a plausible result accepted because it was consistent with the belief being test
 **And it is opt-in rather than default**, because changing what every read returns is not a decision to make
 for the operator.
 
+**Verified live, in a real session, on both paths.** The oracle tests the mechanism against fixtures; this
+tests the hook inside a running DSH process — the distinction that had been missing for every boundary here.
+
+| probe | what was asked | what happened |
+| --- | --- | --- |
+| **interception** | `read plugin/src/paths.ts` | received the declaration: `export declare function canonicalisePath(p: string): string` and the other two exports, **`declare`-only with zero bodies**, against a 44-line source containing a symlink-walking loop. The reply carried the banner naming the declaration file. |
+| **staleness refusal** | `guard.ts` touched past its `.d.ts`, then read | **refused** — *"its type skeleton … is OLDER than the source, so it may describe a signature that has since changed. Rebuild the declarations … and read again."* No fallback to raw source, no obsolete types served. |
+
+Each substitution is traced as `SOURCE_DECLARATION_SERVED` with `requested`, `served` and `bytes` (626 for
+`paths.d.ts`), so the claim is checkable afterwards rather than inferred from the reply.
+
+**One operational caveat from running it: `tsc` will not refresh a declaration whose source CONTENT is
+unchanged.** Touching a source advances its mtime, and the next build leaves the stale `.d.ts` alone — so the
+file stays refused until the declaration is deleted and re-emitted, or the source mtime restored. The check
+is correct and the remedy is unintuitive, which is exactly what should be written down rather than
+rediscovered during an incident.
+
 **This is the largest gap in the design and the one with the most upside.** It is also not a plugin
 problem: the plugin cannot strip what has already entered the window. Closing it means a preprocessor that
 runs before the architect sees anything, and a measurement of the skeleton-to-source ratio on a real
@@ -242,7 +259,7 @@ Until it is, this row describes what a human should do when a deadlock occurs, n
 
 | # | control | state | test |
 | --- | --- | --- | --- |
-| 1 | inverted ingestion | **enforced, opt-in, needs a restart**; generator is the existing `tsc` build | `egress-guard.test.cjs` |
+| 1 | inverted ingestion | **enforced, opt-in, verified live on both paths**; generator is the existing `tsc` build | `egress-guard.test.cjs` + live probes |
 | 2 | downward delegation | enforced | `control-bypass.test.cjs` + 3 others |
 | 3 | on-box verification, sanitized receipts | enforced, with limits | `redaction` / `coherence` / `registry-verdict` |
 | 4 | flakiness containment | enforced, with limits | `flaky-verdict.test.cjs` |
