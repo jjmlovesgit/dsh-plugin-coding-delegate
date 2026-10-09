@@ -313,6 +313,26 @@ is only meaningful if each item is the kind of boundary it claims to be. This ro
 project found stronger than its mechanism, and the pattern that caught it is unchanged — reading the
 artifact rather than the summary of it.
 
+## Two gaps in the socket itself
+
+**It cannot be wired into CI as a gate, and this is structural rather than a bug.** The verifier reads the
+registry at `~/.dsh/local-router/delegated-registry.json`, which is **per-machine and not in the
+repository** — so on a fresh CI runner there is no registry, it exits 2 (unanswerable, correctly), and it
+would fail every build. The verdicts are local state by design: they describe what a specific machine's
+worker did. The consequence is worth stating plainly rather than discovering at release time: **this is a
+local promotion gate, not a CI gate.** A pipeline can gate on its own tests; it cannot gate on a registry
+that exists only on the machine that ran the delegation. Closing that would mean committing or publishing
+the registry, which turns a local evidence record into a shared one and is a design decision nobody has
+made.
+
+**`scripts/check-promotion.cjs` has no oracle.** It is the enforcement point for every promotion and the
+only piece of the control whose bugs would be *silent* — a missing verdict branch reads as "no verdict" and
+exits 1, which looks exactly like correct strictness. The `OPERATOR_ATTESTED` gap is precisely that shape:
+three files attested correctly, and the socket refusing them for a reason indistinguishable from caution.
+It should have a test with a real registry fixture covering every verdict and both hash states. It does not,
+because the file is `.cjs` and the write guard refuses it as source — which is itself the first live
+instance of the extension-heuristic problem described above.
+
 ## The question that found every defect here
 
 

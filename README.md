@@ -42,6 +42,33 @@ Five things, in the order they act:
    may not **modify** one. Then `coherenceVerification` runs the project's own command, with the power to
    void a unit whose own tests passed while the tree did not.
 
+## The enforced invariants
+
+Five boundaries, and each says what it does *not* cover, because a boundary count is only meaningful if
+every item is the kind of boundary it claims to be.
+
+| # | boundary | enforced by | fails closed how |
+| --- | --- | --- | --- |
+| 1 | **Mutation integrity** | `tools/pre-execute` blocks cloud writes and shell execution | the planning tier physically cannot write or run on the host |
+| 2 | **Egress privacy** | `tools/post-execute` serves `.d.ts` stubs via `sourceReadEgress: 'declarations'` | a read is refused if the declaration is **absent or older than its source** |
+| 3a | **Workspace root** | `workspaceDir` + `emitAllowlist` | **unconditional** — the worker cannot escape the sandbox directory |
+| 3b | **Task unit scope** | `targetFiles`, `unitScope: 'enforce'` | **conditional** — refused for undeclared paths, but **a unit that declares nothing is unrestricted across the workspace** |
+| 4 | **Flakiness containment** | `runVerification` runs 3 passes by default | non-deterministic drift records `UNIT_FLAKY` and halts promotion |
+| 5 | **Promotion socket** | `scripts/check-promotion.cjs` | any post-verdict edit flips the exit code to 1 |
+
+Three of those are qualified and the qualifications matter more than the rows:
+
+- **Row 3b is opt-in.** The workspace root is a hard perimeter; the *unit* boundary exists only when the
+  architect declared one, and nothing forces it to. Confusing the two is how a table reads as five
+  unconditional boundaries when one is a contract property.
+- **Row 2 is provenance, not verification.** The read is redirected to a declaration the build emitted, and
+  staleness is checked by **mtime** — evidence that a rebuild happened, defeated by a `touch`, a checkout, or
+  clock skew. `tsc` is trusted, not proven.
+- **Row 5 binds content; it does not authenticate a person.** An `OPERATOR_ATTESTED` record holds a SHA-256
+  and two self-reported strings. Editing the file flips the socket to 1, but nothing verifies that the named
+  operator did the reviewing. That is **tamper-evidence, not cryptographic non-repudiation** — there is no
+  key, no signature, and no third party.
+
 ## What this control does not cover
 
 An effectiveness statement is part of a control, not an appendix to it. These are the limits, and they are
