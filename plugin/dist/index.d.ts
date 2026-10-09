@@ -74,6 +74,19 @@ export interface PluginConfig {
      * path's tree below `src/` is preserved, so `src/guard.ts` resolves under this root as `guard.d.ts`.
      */
     declarationRoot?: string;
+    /**
+     * Who to name as the operator when an attestation is recorded through `delegate_worker`.
+     *
+     * An attestation is a HUMAN claim about content, so it needs a human to name. There is deliberately no
+     * fallback to the calling agent's id: an autonomous session identifier cannot stand in for a person, and
+     * stamping one into the registry would produce a record LESS attributable than a typed name while looking
+     * like more. A delegation that asks for an attestation with no identity available is refused, with the
+     * unit's own verdict left intact -- the delegation succeeded, and only the attestation did not.
+     *
+     * Set once per environment or developer seat. A call may override it with `attestOperator`, which is the
+     * explicit-over-ambient precedence.
+     */
+    operatorIdentity?: string;
     localCodeGuard?: boolean;
     /** Force every guard hit to an approval prompt instead of a hard deny. */
     guardMode?: 'deny' | 'ask';
@@ -415,6 +428,10 @@ declare const pluginExport: {
                         type: string;
                         description: string;
                     };
+                    attestOperator: {
+                        type: string;
+                        description: string;
+                    };
                     contractFiles: {
                         type: string;
                         items: {
@@ -489,6 +506,10 @@ declare const pluginExport: {
                         description: string;
                     };
                     attestEvidence: {
+                        type: string;
+                        description: string;
+                    };
+                    attestOperator: {
                         type: string;
                         description: string;
                     };

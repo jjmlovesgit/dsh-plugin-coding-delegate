@@ -84,6 +84,11 @@ export const DELEGATE_WORKER_OPENAI_SCHEMA = {
           description:
             'What was actually checked, recorded verbatim against the attestation. An attestation that does not say what it covers is an anonymous stamp, so this is worth supplying even though the field is optional.',
         },
+        attestOperator: {
+          type: 'string',
+          description:
+            'The human to name for the attestation, overriding the plugin operatorIdentity. Required in practice: there is NO fallback to the calling agent id, because an autonomous session identifier cannot attest human review, and recording one would produce a LESS attributable audit entry while looking like more. If neither this nor operatorIdentity is set, the attestation is refused and the unit verdict is left intact.',
+        },
         contractFiles: {
           type: 'array',
           items: { type: 'string' },

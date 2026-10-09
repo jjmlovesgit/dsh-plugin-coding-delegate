@@ -615,6 +615,10 @@ function apply(ctx, options = {}) {
                             type: 'string',
                             description: 'What was actually checked, recorded verbatim against the attestation. An attestation that does not say what it covers is an anonymous stamp, so this is required for the record to be worth anything even though the field is optional.',
                         },
+                        attestOperator: {
+                            type: 'string',
+                            description: 'The human to name for the attestation, overriding the plugin operatorIdentity. Required in practice: there is NO fallback to the calling agent id, because an autonomous session identifier cannot attest human review. If neither this nor operatorIdentity is set, the attestation is refused and the unit verdict is left intact.',
+                        },
                         targetFiles: {
                             type: 'array',
                             items: { type: 'string' },
@@ -671,7 +675,7 @@ function apply(ctx, options = {}) {
                     // name paths to attest here so the operator's own review can be recorded through a tool call
                     // rather than a shell one-liner -- the manual route was the only one available, which is exactly
                     // why the promotion socket sat patched-but-unattested for so long.
-                    const { attestTargets, attestEvidence, ...delegationArgs } = callerArgs;
+                    const { attestTargets, attestEvidence, attestOperator, ...delegationArgs } = callerArgs;
                     const policy = resolveVerificationPolicy(options);
                     const verdict = await (0, delegation_1.delegateWorker)({
                         ...delegationArgs,
@@ -705,25 +709,45 @@ function apply(ctx, options = {}) {
                         // project coherence check to have passed as well, and attesting a unit whose tree is broken
                         // would certify content in a state nothing verified.
                         if (verdict && verdict.status === 'SUCCESS') {
-                            const who = String(exec?.agent?.id || 'architect').slice(0, 24);
-                            const evidence = String(attestEvidence || '').trim() ||
-                                'operator reviewed the passing unit from delegation ' + String(verdict.taskName || '');
-                            const attested = [];
-                            for (const target of attestTargets) {
-                                try {
-                                    const record = (0, contracts_1.recordOperatorAttestation)(String(target), who, evidence);
-                                    if (record)
-                                        attested.push(record.path);
-                                }
-                                catch (err) {
-                                    // The recorder throws when the registry cannot be written, deliberately: an unpersisted
-                                    // attestation must not be reported as one. Surfacing it here keeps that contract.
-                                    console.warn('[LOCAL_EGRESS] attestation failed for', target, err?.message || err);
-                                }
+                            // OPERATOR IDENTITY, and the first version of this got it exactly wrong. It fell back to
+                            // `exec.agent.id`, which stamped an ephemeral session UUID into the audit ledger as though a
+                            // human had signed off -- inverting the separation of duties the verdict exists to record,
+                            // and producing a record LESS attributable than a typed name rather than more.
+                            //
+                            // There is deliberately NO fallback to the agent. An autonomous agent id cannot attest human
+                            // review, so the absence of an identity is a refusal, not a value to invent. Precedence is
+                            // the call's `attestOperator`, then the plugin's `operatorIdentity` -- explicit over ambient.
+                            const operator = String(attestOperator || options?.operatorIdentity || '').trim();
+                            if (!operator) {
+                                // Refused, and the unit's own verdict is left INTACT. Throwing here would destroy a passing
+                                // unit's result over a bookkeeping failure, which is not what failing closed means at this
+                                // seam: the delegation succeeded, and only the attestation did not.
+                                verdict.attestationSkipped =
+                                    'attestTargets was provided but no operator identity is available, so nothing was attested. ' +
+                                        "Pass attestOperator on the call, or set 'operatorIdentity' in the plugin configuration. " +
+                                        'An autonomous agent id cannot attest human review, so it is never used as a fallback.';
+                                console.warn('[LOCAL_EGRESS] attestation refused: no operator identity (attestOperator or operatorIdentity)');
                             }
-                            verdict.attested = attested;
-                            if (attested.length > 0) {
-                                verdict.summary = String(verdict.summary || '') + '\nAttested: ' + attested.join(', ') + '.';
+                            else {
+                                const evidence = String(attestEvidence || '').trim() ||
+                                    'operator reviewed the passing unit from delegation ' + String(verdict.taskName || '');
+                                const attested = [];
+                                for (const target of attestTargets) {
+                                    try {
+                                        const record = (0, contracts_1.recordOperatorAttestation)(String(target), operator, evidence);
+                                        if (record)
+                                            attested.push(record.path);
+                                    }
+                                    catch (err) {
+                                        // The recorder throws when the registry cannot be written, deliberately: an unpersisted
+                                        // attestation must not be reported as one. Surfacing it here keeps that contract.
+                                        console.warn('[LOCAL_EGRESS] attestation failed for', target, err?.message || err);
+                                    }
+                                }
+                                verdict.attested = attested;
+                                if (attested.length > 0) {
+                                    verdict.summary = String(verdict.summary || '') + '\nAttested: ' + attested.join(', ') + '.';
+                                }
                             }
                         }
                         else {

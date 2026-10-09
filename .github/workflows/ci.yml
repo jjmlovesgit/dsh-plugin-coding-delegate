@@ -54,6 +54,14 @@ jobs:
         working-directory: .
         run: node --test plugin/tests/oracles/promotion-socket.oracle.mjs
 
+      - name: Attestation identity oracle
+        # Also `.mjs`, and also outside the `test:oracles` glob. It asserts the one property no end-to-end
+        # check could: a live probe recorded a session UUID as the operator, and every command in the chain
+        # passed, because the record LOOKED like human sign-off. Only asking "who does this actually name"
+        # catches that, which is why the assertion is on the recorded value rather than on whether it worked.
+        working-directory: .
+        run: node --test plugin/tests/oracles/attestation-identity.oracle.mjs
+
       - name: README consistency
         # The repository-root scripts never ran in CI: this job's default working-directory is `plugin`,
         # so everything under `scripts/` was local-only. That is how the two READMEs drifted to seven

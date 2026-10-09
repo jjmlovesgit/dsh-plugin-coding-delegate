@@ -44,6 +44,10 @@ export declare const DELEGATE_WORKER_OPENAI_SCHEMA: {
                     type: string;
                     description: string;
                 };
+                attestOperator: {
+                    type: string;
+                    description: string;
+                };
                 contractFiles: {
                     type: string;
                     items: {
@@ -118,6 +122,10 @@ export declare const DELEGATE_WORKER_SCHEMA: {
                     description: string;
                 };
                 attestEvidence: {
+                    type: string;
+                    description: string;
+                };
+                attestOperator: {
                     type: string;
                     description: string;
                 };

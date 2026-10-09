@@ -241,6 +241,19 @@ export interface PluginConfig {
    * path's tree below `src/` is preserved, so `src/guard.ts` resolves under this root as `guard.d.ts`.
    */
   declarationRoot?: string
+  /**
+   * Who to name as the operator when an attestation is recorded through `delegate_worker`.
+   *
+   * An attestation is a HUMAN claim about content, so it needs a human to name. There is deliberately no
+   * fallback to the calling agent's id: an autonomous session identifier cannot stand in for a person, and
+   * stamping one into the registry would produce a record LESS attributable than a typed name while looking
+   * like more. A delegation that asks for an attestation with no identity available is refused, with the
+   * unit's own verdict left intact -- the delegation succeeded, and only the attestation did not.
+   *
+   * Set once per environment or developer seat. A call may override it with `attestOperator`, which is the
+   * explicit-over-ambient precedence.
+   */
+  operatorIdentity?: string
   localCodeGuard?: boolean
   /** Force every guard hit to an approval prompt instead of a hard deny. */
   guardMode?: 'deny' | 'ask'
@@ -1041,6 +1054,11 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
               description:
                 'What was actually checked, recorded verbatim against the attestation. An attestation that does not say what it covers is an anonymous stamp, so this is required for the record to be worth anything even though the field is optional.',
             },
+            attestOperator: {
+              type: 'string',
+              description:
+                'The human to name for the attestation, overriding the plugin operatorIdentity. Required in practice: there is NO fallback to the calling agent id, because an autonomous session identifier cannot attest human review. If neither this nor operatorIdentity is set, the attestation is refused and the unit verdict is left intact.',
+            },
             targetFiles: {
               type: 'array',
               items: { type: 'string' },
@@ -1102,7 +1120,7 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
           // name paths to attest here so the operator's own review can be recorded through a tool call
           // rather than a shell one-liner -- the manual route was the only one available, which is exactly
           // why the promotion socket sat patched-but-unattested for so long.
-          const { attestTargets, attestEvidence, ...delegationArgs } = callerArgs as any
+          const { attestTargets, attestEvidence, attestOperator, ...delegationArgs } = callerArgs as any
           const policy = resolveVerificationPolicy(options)
           const verdict = await delegateWorker(
             {
@@ -1140,14 +1158,32 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
             // project coherence check to have passed as well, and attesting a unit whose tree is broken
             // would certify content in a state nothing verified.
             if (verdict && verdict.status === 'SUCCESS') {
-              const who = String(exec?.agent?.id || 'architect').slice(0, 24)
+              // OPERATOR IDENTITY, and the first version of this got it exactly wrong. It fell back to
+              // `exec.agent.id`, which stamped an ephemeral session UUID into the audit ledger as though a
+              // human had signed off -- inverting the separation of duties the verdict exists to record,
+              // and producing a record LESS attributable than a typed name rather than more.
+              //
+              // There is deliberately NO fallback to the agent. An autonomous agent id cannot attest human
+              // review, so the absence of an identity is a refusal, not a value to invent. Precedence is
+              // the call's `attestOperator`, then the plugin's `operatorIdentity` -- explicit over ambient.
+              const operator = String(attestOperator || options?.operatorIdentity || '').trim()
+              if (!operator) {
+                // Refused, and the unit's own verdict is left INTACT. Throwing here would destroy a passing
+                // unit's result over a bookkeeping failure, which is not what failing closed means at this
+                // seam: the delegation succeeded, and only the attestation did not.
+                verdict.attestationSkipped =
+                  'attestTargets was provided but no operator identity is available, so nothing was attested. ' +
+                  "Pass attestOperator on the call, or set 'operatorIdentity' in the plugin configuration. " +
+                  'An autonomous agent id cannot attest human review, so it is never used as a fallback.'
+                console.warn('[LOCAL_EGRESS] attestation refused: no operator identity (attestOperator or operatorIdentity)')
+              } else {
               const evidence =
                 String(attestEvidence || '').trim() ||
                 'operator reviewed the passing unit from delegation ' + String(verdict.taskName || '')
               const attested: string[] = []
               for (const target of attestTargets) {
                 try {
-                  const record = recordOperatorAttestation(String(target), who, evidence)
+                  const record = recordOperatorAttestation(String(target), operator, evidence)
                   if (record) attested.push(record.path)
                 } catch (err: any) {
                   // The recorder throws when the registry cannot be written, deliberately: an unpersisted
@@ -1158,6 +1194,7 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
               verdict.attested = attested
               if (attested.length > 0) {
                 verdict.summary = String(verdict.summary || '') + '\nAttested: ' + attested.join(', ') + '.'
+              }
               }
             } else {
               verdict.attestationSkipped =
