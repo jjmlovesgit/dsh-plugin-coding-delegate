@@ -40,6 +40,7 @@ exports.hasCommandDeleteSignal = hasCommandDeleteSignal;
 exports.evaluateDelegatedReadPolicy = evaluateDelegatedReadPolicy;
 exports.evaluateSettledFile = evaluateSettledFile;
 exports.declarationPathFor = declarationPathFor;
+exports.staleDeclarationReason = staleDeclarationReason;
 exports.evaluateCodeWriteGuard = evaluateCodeWriteGuard;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
@@ -559,6 +560,41 @@ function declarationPathFor(sourcePath, declarationRoot) {
     const at = normalised.toLowerCase().lastIndexOf(marker.toLowerCase());
     const relative = at >= 0 ? normalised.slice(at + marker.length) : path.basename(normalised);
     return path.join(declarationRoot, relative + '.d.ts');
+}
+/**
+ * Is a declaration STALE relative to the source it is supposed to describe?
+ *
+ * The egress control redirects a source read to `<root>/x.d.ts`. Until this existed it verified only that
+ * the file EXISTED, never that it still described the source — so editing an interface and skipping the
+ * build served the architect yesterday's signature, and nothing anywhere would have said so. That is the
+ * same shape as every false green this repository has caught: healthy under test, because a test suite
+ * always runs against a freshly built tree, and wrong exactly when a human is working.
+ *
+ * Returns a reason when stale, or null when the declaration is fresh OR when either timestamp cannot be
+ * read. An unreadable stat deliberately returns null rather than a reason: the caller's next step is to read
+ * the declaration, which has its own fail-closed path when that file is missing, and inventing a staleness
+ * verdict from a failed stat would report a cause it has not established.
+ *
+ * WHAT THIS IS NOT: a content digest. mtime is evidence that a rebuild happened after an edit, and a
+ * checkout, a `touch`, or clock skew can defeat it. It closes the common case -- an operator planning
+ * without running the build -- and it does not prove the declaration corresponds to the source. Binding
+ * those two cryptographically is a larger change than this gap warrants, and claiming it here would be the
+ * overstatement this file exists to avoid.
+ */
+function staleDeclarationReason(sourcePath, declarationPath) {
+    try {
+        const sourceStat = fs.statSync(sourcePath);
+        const declarationStat = fs.statSync(declarationPath);
+        if (declarationStat.mtimeMs < sourceStat.mtimeMs) {
+            return ("its type skeleton at '" +
+                declarationPath +
+                "' is OLDER than the source, so it may describe a signature that has since changed");
+        }
+        return null;
+    }
+    catch {
+        return null;
+    }
 }
 /**
  * The verdict for every delegated file a target could name: settled only when all of them are. Shared by

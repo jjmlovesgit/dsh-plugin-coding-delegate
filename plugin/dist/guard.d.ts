@@ -82,6 +82,27 @@ export declare function evaluateSettledFile(record: DelegatedRecord | undefined,
  */
 export declare function declarationPathFor(sourcePath: string, declarationRoot: string): string | null;
 /**
+ * Is a declaration STALE relative to the source it is supposed to describe?
+ *
+ * The egress control redirects a source read to `<root>/x.d.ts`. Until this existed it verified only that
+ * the file EXISTED, never that it still described the source — so editing an interface and skipping the
+ * build served the architect yesterday's signature, and nothing anywhere would have said so. That is the
+ * same shape as every false green this repository has caught: healthy under test, because a test suite
+ * always runs against a freshly built tree, and wrong exactly when a human is working.
+ *
+ * Returns a reason when stale, or null when the declaration is fresh OR when either timestamp cannot be
+ * read. An unreadable stat deliberately returns null rather than a reason: the caller's next step is to read
+ * the declaration, which has its own fail-closed path when that file is missing, and inventing a staleness
+ * verdict from a failed stat would report a cause it has not established.
+ *
+ * WHAT THIS IS NOT: a content digest. mtime is evidence that a rebuild happened after an edit, and a
+ * checkout, a `touch`, or clock skew can defeat it. It closes the common case -- an operator planning
+ * without running the build -- and it does not prove the declaration corresponds to the source. Binding
+ * those two cryptographically is a larger change than this gap warrants, and claiming it here would be the
+ * overstatement this file exists to avoid.
+ */
+export declare function staleDeclarationReason(sourcePath: string, declarationPath: string): string | null;
+/**
  * Decide whether a tool call would author source code from the cloud context.
  * Pure and exported so it can be unit-tested without a running server.
  * Returns null when the call has nothing to do with code authoring.

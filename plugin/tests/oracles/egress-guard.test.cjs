@@ -20,6 +20,7 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 
 const PLUGIN = path.resolve(__dirname, "..", "..");
@@ -56,6 +57,49 @@ test("egress/row 1: reads that are not implementation source are left alone", ()
     declarationPathFor("already.d.ts", "C:/decl"),
     null,
     "a declaration is already a skeleton; mapping it again would look for x.d.d.ts"
+  );
+});
+
+test("egress/row 1: a STALE declaration is refused, because the build is trusted not verified", () => {
+  // The gap this closes, stated as the failure it prevents: editing an interface and planning without
+  // running the build used to serve the architect yesterday's signature, and nothing would have said so.
+  // That is the repository's recurring false-green shape -- healthy under test, because a test suite always
+  // runs against a freshly built tree, and wrong exactly when a human is working.
+  const { staleDeclarationReason } = require(PLUGIN + "/dist/guard.js");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dsh-stale-"));
+  const source = path.join(dir, "thing.ts");
+  const declaration = path.join(dir, "thing.d.ts");
+  fs.writeFileSync(source, "export function f(): void\n");
+  fs.writeFileSync(declaration, "export declare function f(): void;\n");
+
+  // Fresh: the declaration is newer, so it may describe the current source.
+  const now = Date.now() / 1000;
+  fs.utimesSync(declaration, now, now);
+  fs.utimesSync(source, now - 60, now - 60);
+  assert.equal(
+    staleDeclarationReason(source, declaration),
+    null,
+    "a declaration newer than its source is served"
+  );
+
+  // Stale: the source was edited after the last build.
+  fs.utimesSync(source, now + 60, now + 60);
+  const reason = staleDeclarationReason(source, declaration);
+  assert.ok(reason, "a declaration older than its source must be refused");
+  assert.match(reason, /OLDER than the source/, "and the reason names the actual cause");
+
+  // A stat that cannot be read is NOT reported as staleness. The caller's next step has its own fail-closed
+  // path for a missing declaration, and inventing a staleness verdict here would name a cause nothing
+  // established -- the same overstatement this file exists to prevent.
+  assert.equal(
+    staleDeclarationReason(path.join(dir, "does-not-exist.ts"), declaration),
+    null,
+    "an unreadable source yields no staleness claim"
+  );
+  assert.equal(
+    staleDeclarationReason(source, path.join(dir, "does-not-exist.d.ts")),
+    null,
+    "an unreadable declaration yields no staleness claim"
   );
 });
 

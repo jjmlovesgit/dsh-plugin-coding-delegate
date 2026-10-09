@@ -37,6 +37,7 @@ import {
   GuardVerdict,
   READ_TOOLS,
   declarationPathFor,
+  staleDeclarationReason,
   evaluateCodeWriteGuard,
   evaluateDelegatedReadPolicy,
   extractWriteTarget,
@@ -1234,6 +1235,34 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
           const skeleton = declarationPathFor(target, String(declarationRoot))
           // Not a source file: nothing to strip, so the read stands.
           if (!skeleton) return decision
+
+          // STALENESS. Until this check existed, the egress control trusted the build: it verified that a
+          // declaration EXISTED at the derived path, never that the declaration described the source being
+          // read. Edit an interface, skip the rebuild, and the architect would be served yesterday's
+          // signature while believing it was current -- green for the same reason every false green here has
+          // been green, because nothing checked the thing that mattered.
+          //
+          // Read the predicate rather than the summary: mtime is evidence of a rebuild, not proof of a
+          // match, and `staleDeclarationReason` says so at length.
+          const stale = staleDeclarationReason(target, skeleton)
+          if (stale) {
+            return {
+              kind: 'block',
+              feedback: [
+                {
+                  type: 'text',
+                  text:
+                    "Reading '" +
+                    target +
+                    "' was refused: " +
+                    stale +
+                    '. Rebuild the declarations (tsc --declaration --emitDeclarationOnly) and read again. ' +
+                    'Serving a stale declaration would let this context plan against a contract the code no ' +
+                    'longer implements.',
+                },
+              ],
+            }
+          }
 
           let content: string
           try {
