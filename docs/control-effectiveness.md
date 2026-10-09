@@ -81,18 +81,27 @@ are already logged and presented"* — so "serve the declaration instead" is not
 `tools/post-execute` accepts `{ kind: 'accept', content }`, which **replaces** the model-facing result, and
 that is the only seam where the substitution is possible.
 
-With the option on, a read of a source file is answered with its emitted `.d.ts` instead, and a source file
-with **no** declaration is **refused** rather than served — an unimplemented mapping must not silently
-become the hole it was built to close. The served content is labelled, and each substitution is traced as
-`SOURCE_DECLARATION_SERVED` with the requested path, the served path and the byte count, so the claim is
-checkable against the emitted tree rather than inferred from good behaviour.
+With the option on, a read of a source file is answered with its emitted `.d.ts` instead. It fails closed in
+**two** ways, and the second one was added later because the first was not enough: a source file with **no**
+declaration is refused, and a declaration **older than its source** is also refused
+(`staleDeclarationReason`). Without the second, editing an interface and skipping the build served the
+architect yesterday's signature — green for the same reason every false green in this repository has been
+green, because nothing checked the thing that mattered, and no oracle could catch it since a test suite
+always runs against a freshly built tree.
+
+**mtime is evidence of a rebuild, not proof of a match.** A checkout, a `touch` or clock skew defeats it.
+The honest label is *"the build is trusted, not verified"* — now with one mechanical assertion standing
+between an operator and a stale contract, and not a content digest.
+
+Each substitution is traced as `SOURCE_DECLARATION_SERVED` with the requested path, the served path and the
+byte count, so the claim is checkable against the emitted tree rather than inferred from good behaviour.
 
 | | |
 | --- | --- |
-| mechanism | `declarationPathFor` in `guard.ts`; a `tools/post-execute` hook in `index.ts` |
+| mechanism | `declarationPathFor` and `staleDeclarationReason` in `guard.ts`; a `tools/post-execute` hook in `index.ts` |
 | option | `sourceReadEgress: 'declarations'` plus `declarationRoot`, both operator config |
 | default | `'source'` — off, because it changes what the architect sees for every read |
-| demonstrating test | [`egress-guard.test.cjs`](../plugin/tests/oracles/egress-guard.test.cjs) — mapping, pass-through of non-source reads, and **no implementation statements in the served artifact** |
+| demonstrating test | [`egress-guard.test.cjs`](../plugin/tests/oracles/egress-guard.test.cjs) — mapping, pass-through of non-source reads, **staleness refusal**, and **no implementation statements in the served artifact** |
 
 **Measured, not asserted:** the served declarations for `guard.ts`, `delegation.ts` and `emission.ts`
 contain **zero** `for`/`while`, `if`/`switch`, and `fs.` calls, against 16, 80 and 2 in the sources. That is
