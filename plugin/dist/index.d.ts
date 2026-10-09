@@ -1,4 +1,4 @@
-import { Context } from 'cordis';
+import type { Context } from '@deepseek-ai/cordis';
 import { SavingsTracker, RouteType, StepUsage } from './savings-tracker';
 import { PROFILES, ProfileConfig } from './profiles';
 import { extractAndEmitFiles } from './emission';
