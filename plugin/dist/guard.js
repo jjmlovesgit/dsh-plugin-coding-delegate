@@ -39,6 +39,7 @@ exports.hasCommandWriteSignal = hasCommandWriteSignal;
 exports.hasCommandDeleteSignal = hasCommandDeleteSignal;
 exports.evaluateDelegatedReadPolicy = evaluateDelegatedReadPolicy;
 exports.evaluateSettledFile = evaluateSettledFile;
+exports.declarationPathFor = declarationPathFor;
 exports.evaluateCodeWriteGuard = evaluateCodeWriteGuard;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
@@ -502,6 +503,40 @@ function evaluateSettledFile(record, currentHash) {
         };
     }
     return { allowed: true, reason: 'a unit passed it and its content is unchanged since that verdict.' };
+}
+/**
+ * Where the TYPE SKELETON for a source file lives, relative to a declarations root.
+ *
+ * This is the mapping that lets a read be served as declarations instead of implementation. It is a pure
+ * string transform on purpose: the caller decides whether the result exists, because a mapping function
+ * that silently invents a path is worse than one that returns the path it computed and lets the caller
+ * refuse.
+ *
+ * Returns null for anything that is not a TypeScript or JavaScript source file, so a caller can treat null
+ * as "this read is out of scope" rather than as a failure.
+ *
+ * The transform mirrors what `tsc --declaration --emitDeclarationOnly` emits for a `rootDir` of the source
+ * directory: the tree below the root is preserved and only the extension changes.
+ */
+function declarationPathFor(sourcePath, declarationRoot) {
+    if (typeof sourcePath !== 'string' || !sourcePath.trim())
+        return null;
+    const extension = path.extname(sourcePath).toLowerCase();
+    if (extension !== '.ts' && extension !== '.tsx' && extension !== '.js' && extension !== '.jsx') {
+        return null;
+    }
+    // A declaration file is already a skeleton; mapping it again would look for `x.d.d.ts`.
+    if (sourcePath.toLowerCase().endsWith('.d.ts'))
+        return null;
+    const withoutExtension = sourcePath.slice(0, sourcePath.length - extension.length);
+    // The segment after the source root is what the declaration tree preserves. `src` is the root this
+    // repository builds with, and a path that does not contain it maps from its own basename so that a
+    // caller passing a bare filename still gets a sensible answer.
+    const marker = 'src' + path.sep;
+    const normalised = withoutExtension.split('/').join(path.sep);
+    const at = normalised.toLowerCase().lastIndexOf(marker.toLowerCase());
+    const relative = at >= 0 ? normalised.slice(at + marker.length) : path.basename(normalised);
+    return path.join(declarationRoot, relative + '.d.ts');
 }
 /**
  * The verdict for every delegated file a target could name: settled only when all of them are. Shared by

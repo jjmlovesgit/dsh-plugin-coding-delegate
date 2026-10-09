@@ -771,6 +771,95 @@ function apply(ctx, options = {}) {
         });
         console.log('[LOCAL_ROUTER_INIT] Local-code guard registered on tools/pre-execute.');
     }
+    // Egress control for READS: serve the type skeleton instead of the implementation.
+    //
+    // The write guard answers "may source be authored". This answers "may implementation BODIES leave the
+    // machine", which is a different question and was previously unanswered -- the architect could read any
+    // file it liked and nothing constrained it. It cannot be done at `tools/pre-execute`, because that
+    // decision type is only allow/deny/ask and rewriting arguments is excluded by the host's own comment on
+    // `PreToolDecision`. `tools/post-execute` can replace the model-facing content, which is exactly "serve
+    // the declaration instead", so that is where it lives.
+    if (options?.sourceReadEgress === 'declarations') {
+        const declarationRoot = options?.declarationRoot;
+        if (!declarationRoot || !String(declarationRoot).trim()) {
+            console.warn('[LOCAL_EGRESS] sourceReadEgress is "declarations" but no declarationRoot was configured, so reads are ' +
+                'being SERVED AS SOURCE. Set declarationRoot, or this setting does nothing.');
+        }
+        else {
+            (0, host_events_1.onHost)(ctx, 'tools/post-execute', async (exec, result, next) => {
+                const decision = typeof next === 'function' ? await next() : { kind: 'accept' };
+                if (!decision || decision.kind !== 'accept')
+                    return decision;
+                try {
+                    const name = String(exec?.name || '');
+                    if (!guard_1.READ_TOOLS.has(name))
+                        return decision;
+                    if (result?.isError)
+                        return decision;
+                    const target = (0, guard_1.extractWriteTarget)(exec?.arguments);
+                    if (!target)
+                        return decision;
+                    const skeleton = (0, guard_1.declarationPathFor)(target, String(declarationRoot));
+                    // Not a source file: nothing to strip, so the read stands.
+                    if (!skeleton)
+                        return decision;
+                    let content;
+                    try {
+                        content = fs.readFileSync(skeleton, 'utf8');
+                    }
+                    catch {
+                        // Fail closed. A file with no emitted declaration is refused rather than served as source,
+                        // because serving it would be the exact leak this control exists to prevent.
+                        return {
+                            kind: 'block',
+                            feedback: [
+                                {
+                                    type: 'text',
+                                    text: "Reading '" +
+                                        target +
+                                        "' was refused: sourceEgress is 'declarations' and no type skeleton exists at '" +
+                                        skeleton +
+                                        "'. Build the declarations (tsc --declaration --emitDeclarationOnly), or read the " +
+                                        'declaration path directly. Implementation bodies are not served to this context.',
+                                },
+                            ],
+                        };
+                    }
+                    (0, logging_1.trace)('SOURCE_DECLARATION_SERVED', {
+                        tool: name,
+                        requested: String(exec?.arguments?.file_path || exec?.arguments?.path || target),
+                        served: skeleton,
+                        bytes: Buffer.byteLength(content, 'utf8'),
+                    });
+                    return {
+                        kind: 'accept',
+                        content: [
+                            {
+                                type: 'text',
+                                text: '// SERVED AS TYPE DECLARATIONS, NOT SOURCE. Implementation bodies are withheld by policy ' +
+                                    '(sourceEgress: declarations).\n// Declaration file: ' +
+                                    skeleton +
+                                    '\n\n' +
+                                    content,
+                            },
+                        ],
+                    };
+                }
+                catch (err) {
+                    // Fail closed for the same reason the write guard does: an egress filter that cannot evaluate
+                    // must not wave the read through.
+                    console.warn('[LOCAL_EGRESS] evaluation failed; refusing the read:', err);
+                    return {
+                        kind: 'block',
+                        feedback: [
+                            { type: 'text', text: 'Read refused: the source-egress filter could not evaluate this call.' },
+                        ],
+                    };
+                }
+            });
+            console.log('[LOCAL_ROUTER_INIT] Source egress control registered on tools/post-execute.');
+        }
+    }
     // 1. Lightweight agent/pre-step prompt capture & DLP scanner ONLY
     (0, host_events_1.onHost)(ctx, 'agent/pre-step', async (payload, next) => {
         const turn = payload?.turn;

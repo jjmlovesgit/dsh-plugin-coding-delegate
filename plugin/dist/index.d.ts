@@ -44,6 +44,36 @@ export interface PluginConfig {
     /** Minimum token length before entropy is scored (default 20). */
     entropyMinLength?: number;
     /** Refuse cloud-authored writes to source files (default: true). */
+    /**
+     * What a read of source code returns to the architect.
+     *
+     * `'source'` (the default) is the historical behaviour: the file's contents are served unchanged.
+     *
+     * `'declarations'` serves the compiled TYPE SKELETON instead -- declarations, signatures and doc
+     * comments, with every function body stripped -- computed by the same `tsc` build that produces `dist/`.
+     * This is the mechanical form of "inverted ingestion": what crosses to the model is whatever the
+     * declaration emitter produced, so implementation bodies cannot leave the machine because of the shape of
+     * the egress rather than because the model chose not to ask for them. Measured on this repository, the
+     * skeleton is 3.3x smaller than the source with doc comments and 7.8x smaller without.
+     *
+     * A source file with no corresponding declaration is REFUSED rather than served as source. Failing closed
+     * is the point: an unimplemented mapping must not silently become the hole it was built to close.
+     * Requires `declarationRoot`.
+     *
+     * The limit worth knowing before turning this on: doc comments and signatures are preserved, not
+     * summarised, so an implementation whose behaviour lives in its body is still invisible. This removes
+     * bodies, not the need to read them when a defect has no structural signature.
+     *
+     * NOT the same option as `sourceEgress`, which is rule 8 and governs source inside a prompt payload.
+     * This one governs file reads by a tool call. They are different leaks and they fail differently, so
+     * they are named differently on purpose.
+     */
+    sourceReadEgress?: 'source' | 'declarations';
+    /**
+     * Directory holding emitted `.d.ts` files, used when `sourceReadEgress` is `'declarations'`. A source
+     * path's tree below `src/` is preserved, so `src/guard.ts` resolves under this root as `guard.d.ts`.
+     */
+    declarationRoot?: string;
     localCodeGuard?: boolean;
     /** Force every guard hit to an approval prompt instead of a hard deny. */
     guardMode?: 'deny' | 'ask';

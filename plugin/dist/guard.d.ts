@@ -67,6 +67,21 @@ export interface SettledVerdict {
  */
 export declare function evaluateSettledFile(record: DelegatedRecord | undefined, currentHash: string | null): SettledVerdict;
 /**
+ * Where the TYPE SKELETON for a source file lives, relative to a declarations root.
+ *
+ * This is the mapping that lets a read be served as declarations instead of implementation. It is a pure
+ * string transform on purpose: the caller decides whether the result exists, because a mapping function
+ * that silently invents a path is worse than one that returns the path it computed and lets the caller
+ * refuse.
+ *
+ * Returns null for anything that is not a TypeScript or JavaScript source file, so a caller can treat null
+ * as "this read is out of scope" rather than as a failure.
+ *
+ * The transform mirrors what `tsc --declaration --emitDeclarationOnly` emits for a `rootDir` of the source
+ * directory: the tree below the root is preserved and only the extension changes.
+ */
+export declare function declarationPathFor(sourcePath: string, declarationRoot: string): string | null;
+/**
  * Decide whether a tool call would author source code from the cloud context.
  * Pure and exported so it can be unit-tested without a running server.
  * Returns null when the call has nothing to do with code authoring.

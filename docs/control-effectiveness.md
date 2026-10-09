@@ -72,26 +72,38 @@ These are two separate gaps and only one of them is usually noticed.
 **Generation** is absent: nothing produces the skeleton. That is the gap the ratio above addresses, and it
 is ordinary tooling work.
 
-**Enforcement is also absent, and this is the more important half.** The code guard inspects **write** paths
-— `tools/pre-execute` on writes and shell commands. It does not constrain **read** paths at all: the
-architect may name any file it likes, and `SOURCE_READ` records the choice without limiting it. So even with
-a generator built, nothing would route a read of `src/foo.ts` to `types/foo.d.ts`. Inverted ingestion would
-be a **convention the architect is asked to follow**, which is precisely the policy-versus-control
-distinction this whole file is about.
+**Enforcement now exists, opt-in, as `sourceReadEgress: 'declarations'`.** The guard inspects **write**
+paths and previously constrained **read** paths not at all — the architect could name any file and
+`SOURCE_READ` recorded the choice without limiting it. That is now closable at the same plugin, with one
+correction to the obvious design: **it cannot be done at `tools/pre-execute`.** `PreToolDecision` is only
+`allow | deny | ask`, and the host's own type comment says input rewriting *"is excluded because arguments
+are already logged and presented"* — so "serve the declaration instead" is not representable there.
+`tools/post-execute` accepts `{ kind: 'accept', content }`, which **replaces** the model-facing result, and
+that is the only seam where the substitution is possible.
 
-A mechanical version is available and is the stronger design: a **read-redirect filter** at the same
-`tools/pre-execute` seam that already refuses writes — a read of a source path is served the declaration
-instead, or refused with the declaration offered in its place. Two properties follow, and they are the ones
-a governance reviewer asks for:
+With the option on, a read of a source file is answered with its emitted `.d.ts` instead, and a source file
+with **no** declaration is **refused** rather than served — an unimplemented mapping must not silently
+become the hole it was built to close. The served content is labelled, and each substitution is traced as
+`SOURCE_DECLARATION_SERVED` with the requested path, the served path and the byte count, so the claim is
+checkable against the emitted tree rather than inferred from good behaviour.
 
-- **Source cannot leave because of the shape of the egress, not because the model chose not to ask for it.**
-  What crosses is whatever the extractor emits, and nothing else.
-- **It is auditable.** "The architect read 124 files" becomes "the architect read these declarations", which
-  is checkable against the emitted tree rather than inferred from good behaviour.
+| | |
+| --- | --- |
+| mechanism | `declarationPathFor` in `guard.ts`; a `tools/post-execute` hook in `index.ts` |
+| option | `sourceReadEgress: 'declarations'` plus `declarationRoot`, both operator config |
+| default | `'source'` — off, because it changes what the architect sees for every read |
+| demonstrating test | [`egress-guard.test.cjs`](../plugin/tests/oracles/egress-guard.test.cjs) — mapping, pass-through of non-source reads, and **no implementation statements in the served artifact** |
 
-Until that exists, row 1 stays **not enforced**, and the privacy perimeter for the implementation remains a
-boundary of the *delegation loop* only — the delegated unit's code never comes back, which is real and
-measured, while the rest of the repository remains readable at will.
+**Measured, not asserted:** the served declarations for `guard.ts`, `delegation.ts` and `emission.ts`
+contain **zero** `for`/`while`, `if`/`switch`, and `fs.` calls, against 16, 80 and 2 in the sources. That is
+the control's actual claim — not that a path resolves, but that bodies do not cross.
+
+**What is still not enforced: generation.** `sourceReadEgress` serves declarations that already exist; it
+does not produce them, and it is not wired into the build. A repository enabling it must emit declarations
+first (`tsc --declaration --emitDeclarationOnly`), and the option fails closed when a mapping misses rather
+than falling back. Two consequences worth stating: turning it on **refuses reads of files with no
+declaration**, which is correct and will be felt; and it is opt-in rather than default, because changing
+what every read returns is not a decision to make for the operator.
 
 **This is the largest gap in the design and the one with the most upside.** It is also not a plugin
 problem: the plugin cannot strip what has already entered the window. Closing it means a preprocessor that
@@ -196,15 +208,19 @@ Until it is, this row describes what a human should do when a deadlock occurs, n
 
 | # | control | state | test |
 | --- | --- | --- | --- |
-| 1 | inverted ingestion | **not enforced** | none |
+| 1 | inverted ingestion | **enforced for egress, opt-in**; no generator | `egress-guard.test.cjs` |
 | 2 | downward delegation | enforced | `control-bypass.test.cjs` + 3 others |
 | 3 | on-box verification, sanitized receipts | enforced, with limits | `redaction` / `coherence` / `registry-verdict` |
 | 4 | flakiness containment | enforced, with limits | `flaky-verdict.test.cjs` |
 | 5 | protocol models | design only | none |
 
-**Two of five are unenforced, and both are the ones that address the architect's reading.** That is not a
-coincidence: the reading is where the design's cost and exposure actually live, and it is the part no code
-here touches. Rows 2–4 govern what happens *after* the architect has already read whatever it read.
+**Row 1 moved.** It was two gaps, and only one was usually noticed: no generator, and no egress control. The
+egress half is now enforced — the mechanical read filter that makes "the architect reads declarations" a
+property of the path rather than a promise — while **generation is still absent**, so the option requires
+declarations to exist already.
 
-352 oracle checks and 39 unit tests back the enforced rows. Neither unenforced row has a test, which is the
-point of writing this file rather than a feature list.
+**One row of five is unenforced: protocol models**, and the reason is unchanged — generating a finite-state
+model of cross-module behaviour is research-grade static analysis, and the ingest side being easy is what
+makes that gap easy to underestimate.
+
+355 oracle checks and 39 unit tests back the enforced rows.
