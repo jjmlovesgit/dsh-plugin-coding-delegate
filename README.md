@@ -8,6 +8,8 @@ from **who implements** it, and refuses to let the first party write the second 
 technical control, not a policy: enforcement happens in a tool-call hook before a write lands, so it does
 not depend on the model choosing to comply.
 
+The metered model cannot modify your host. Not "is told not to" — has no tool to do it. Blocked at tools/pre-execute across fifteen tested routes. This is the strongest form of the claim because it requires zero cooperation from the model. A prompt-injected architect with completely hostile instructions still cannot write a byte or run a command. That is genuinely different from every "the system prompt forbids it" scheme.
+
 ## How it works: a contract out, a verdict back
 
 Coding needs two different jobs done, and they want two different contexts. The plugin gives each one its
