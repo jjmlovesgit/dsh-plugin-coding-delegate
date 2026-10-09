@@ -693,7 +693,18 @@ function apply(ctx, options = {}) {
                         // Only a PASSING unit may be attested from here. An attestation is a human claim about content;
                         // attaching one to a unit that failed or was never verified would launder a machine outcome
                         // into a human statement, which is the one thing this verdict must not become.
-                        if (verdict && verdict.status === 'UNIT_PASSED') {
+                        //
+                        // The gate is `status === 'SUCCESS'`, NOT 'UNIT_PASSED'. The first version of this compared
+                        // against 'UNIT_PASSED' and refused every attestation, because `resolveDelegateStatus` returns
+                        // 'SUCCESS' / 'INCOHERENT' / 'VERIFICATION_FAILED' / 'UNVERIFIED' / 'FLAKY' and never emits the
+                        // registry's outcome vocabulary at all. The two vocabularies are genuinely different, and the
+                        // mistake was silent in the worst way: the tool reported success while quietly skipping the
+                        // attestation, and the skip message blamed the unit rather than the comparison.
+                        //
+                        // `SUCCESS` is also the stricter of the two candidate gates, and correctly so: it requires the
+                        // project coherence check to have passed as well, and attesting a unit whose tree is broken
+                        // would certify content in a state nothing verified.
+                        if (verdict && verdict.status === 'SUCCESS') {
                             const who = String(exec?.agent?.id || 'architect').slice(0, 24);
                             const evidence = String(attestEvidence || '').trim() ||
                                 'operator reviewed the passing unit from delegation ' + String(verdict.taskName || '');
@@ -717,7 +728,9 @@ function apply(ctx, options = {}) {
                         }
                         else {
                             verdict.attestationSkipped =
-                                'attestTargets was provided but the unit did not pass, so nothing was attested';
+                                'attestTargets was provided but the unit status was ' +
+                                    String(verdict && verdict.status) +
+                                    ', not SUCCESS, so nothing was attested';
                         }
                     }
                     return verdict;
