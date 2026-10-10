@@ -6,6 +6,24 @@ Do not commit anything.
 
 ---
 
+## Part 0 - preserve the profile baseline FIRST (plain PowerShell, not in a DSH session)
+
+Both `.bak-egressbench` files predate this step, but neither is a clean baseline: they were written by the
+script's first run, when the profiles were *already* pinned to arm B. So `-Revert` restores arm B, not the
+pre-benchmark state. And re-arming overwrites those backups with the commented arm-A file.
+
+Take a copy before touching anything, so the original state is recoverable:
+
+```
+copy "$env:USERPROFILE\.dsh\profiles\tauri\cordis.patch.yml" "$env:USERPROFILE\.dsh\profiles\tauri\cordis.patch.yml.pre-benchmark"
+copy "$env:USERPROFILE\.dsh\profiles\web\cordis.patch.yml"   "$env:USERPROFILE\.dsh\profiles\web\cordis.patch.yml.pre-benchmark"
+```
+
+These write outside the workspace, so a confined shell will deny them once; retry the same command with
+wider permission. Confirm both `.pre-benchmark` files exist before continuing.
+
+---
+
 ## Part 1 - re-arm the profiles (run in a PLAIN PowerShell terminal, not in a DSH session)
 
 Both profiles currently have the egress keys **commented out** (the arm-A shape). The switch script
