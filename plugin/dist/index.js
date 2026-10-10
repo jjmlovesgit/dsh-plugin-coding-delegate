@@ -49,6 +49,7 @@ Object.defineProperty(exports, "PROFILES", { enumerable: true, get: function () 
 const local_classifier_1 = require("./local-classifier");
 const logging_1 = require("./logging");
 const paths_1 = require("./paths");
+const declaration_egress_hook_1 = require("./declaration-egress-hook");
 const containment_1 = require("./containment");
 const routing_1 = require("./routing");
 const attestation_1 = require("./attestation");
@@ -945,6 +946,9 @@ function apply(ctx, options = {}) {
                     return decision;
                 try {
                     const name = String(exec?.name || '');
+                    const egressDecision = (0, declaration_egress_hook_1.handleDeclarationPostExecute)(exec, options);
+                    if (egressDecision)
+                        return egressDecision;
                     if (!guard_1.READ_TOOLS.has(name))
                         return decision;
                     if (result?.isError)

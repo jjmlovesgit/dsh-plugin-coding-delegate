@@ -9,6 +9,7 @@ import { PROFILES, ProfileConfig, WORKER_BENCHMARKS, WORKER_BENCHMARK_SOURCE } f
 import { classifyLocally, SECRET_PATTERN_RULES, findHighEntropyTokens } from './local-classifier'
 import { resolveDataDir, trace } from './logging'
 import { canonicalisePath, isPathWithin, CODE_EXTENSIONS } from './paths'
+import { handleDeclarationPostExecute } from './declaration-egress-hook'
 import { resolveWorkspaceContainment } from './containment'
 import { classifyDestination } from './routing'
 import { selectAttestableTargets } from './attestation'
@@ -1404,6 +1405,8 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
         if (!decision || decision.kind !== 'accept') return decision
         try {
           const name = String(exec?.name || '')
+          const egressDecision = handleDeclarationPostExecute(exec, options)
+          if (egressDecision) return egressDecision
           if (!READ_TOOLS.has(name)) return decision
           if (result?.isError) return decision
           const target = extractWriteTarget(exec?.arguments)
