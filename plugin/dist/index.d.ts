@@ -341,6 +341,12 @@ export declare function resolveVerificationPolicy(options?: PluginConfig): Verif
  * Fails closed on every error path.
  */
 export declare function requestApprovalForVerification(ctx: any, exec: any, command: string): Promise<boolean>;
+/**
+ * Ask the operator before a delegation writes into a directory that is neither the session workspace
+ * nor an allowlisted root. Same seam as the verification prompt above, and the same fail-closed rule:
+ * no approval service, no agent, or a thrown request all resolve to refusal rather than to consent.
+ */
+export declare function requestApprovalForWorkspace(ctx: any, exec: any, dir: string, reason: string): Promise<boolean>;
 export declare function apply(ctx: Context, options?: PluginConfig): void;
 declare const pluginExport: {
     name: string;

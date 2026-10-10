@@ -9,6 +9,7 @@ import { PROFILES, ProfileConfig, WORKER_BENCHMARKS, WORKER_BENCHMARK_SOURCE } f
 import { classifyLocally, SECRET_PATTERN_RULES, findHighEntropyTokens } from './local-classifier'
 import { resolveDataDir, trace } from './logging'
 import { canonicalisePath, isPathWithin, CODE_EXTENSIONS } from './paths'
+import { resolveWorkspaceContainment } from './containment'
 import { selectAttestableTargets } from './attestation'
 import {
   FileEmissionResult,
@@ -996,6 +997,45 @@ export async function requestApprovalForVerification(
   }
 }
 
+/**
+ * Ask the operator before a delegation writes into a directory that is neither the session workspace
+ * nor an allowlisted root. Same seam as the verification prompt above, and the same fail-closed rule:
+ * no approval service, no agent, or a thrown request all resolve to refusal rather than to consent.
+ */
+export async function requestApprovalForWorkspace(
+  ctx: any,
+  exec: any,
+  dir: string,
+  reason: string
+): Promise<boolean> {
+  try {
+    const service = typeof ctx?.get === 'function' ? ctx.get('approval') : undefined
+    if (!service || typeof service.request !== 'function') return false
+    if (!exec?.agent) return false
+
+    const outcome = await service.request({
+      agent: exec.agent,
+      toolName: 'delegate_worker',
+      ...(exec?.callId ? { callId: exec.callId } : {}),
+      reason:
+        'delegate_worker wants to write into a directory outside the session workspace:\n  ' +
+        dir +
+        '\n' +
+        reason +
+        '\nApprove only if you intend this delegation to write there.',
+      ...(exec?.signal ? { signal: exec.signal } : {}),
+    })
+
+    return outcome === 'allowed-once'
+  } catch (err) {
+    console.warn(
+      '[LOCAL_GUARD] workspace approval request failed; failing closed:',
+      (err as any)?.message || err
+    )
+    return false
+  }
+}
+
 // Role resolution, the architect config and the lead tier moved to ./roles.ts and are imported
 // above. They are re-exported beside the other module re-exports because callers depend on them.
 
@@ -1065,6 +1105,50 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
           // why the promotion socket sat patched-but-unattested for so long.
           const { attestTargets, attestEvidence, attestOperator, ...delegationArgs } = callerArgs as any
           const policy = resolveVerificationPolicy(options)
+          // The workspaceDir ARGUMENT chooses the base directory for every containment check, and it is
+          // model-visible. Containment of the emitted files was always sound; what was missing is that
+          // the base itself was supplied by the caller being contained, so naming a directory outside
+          // the session workspace made every later boundary true by construction.
+          const containment = resolveWorkspaceContainment({
+            requested: explicitDir,
+            sessionRoot: resolved.dir,
+            allowedRoots: options?.emitAllowlist,
+            canPrompt: typeof ctx?.get === 'function' && Boolean(ctx.get('approval')),
+          })
+          if (!containment.trusted && !containment.needsApproval) {
+            return {
+              success: false,
+              status: 'CONTEXT_REFUSED',
+              taskName: String(args?.taskName || ''),
+              message: String(containment.reason),
+              error: 'workspaceDir refused',
+              resolvedWorkspace: resolved.dir,
+              filesWritten: [],
+              testResults: { passed: 0, failed: 0, output: 'The worker was not called.' },
+              tokens: { prompt: 0, completion: 0 },
+            }
+          }
+          if (!containment.trusted && containment.needsApproval) {
+            const approved = await requestApprovalForWorkspace(
+              ctx,
+              exec,
+              String(containment.dir),
+              String(containment.reason)
+            )
+            if (!approved) {
+              return {
+                success: false,
+                status: 'CONTEXT_REFUSED',
+                taskName: String(args?.taskName || ''),
+                message: String(containment.reason),
+                error: 'workspaceDir refused: operator approval was not granted',
+                resolvedWorkspace: resolved.dir,
+                filesWritten: [],
+                testResults: { passed: 0, failed: 0, output: 'The worker was not called.' },
+                tokens: { prompt: 0, completion: 0 },
+              }
+            }
+          }
           const verdict = await delegateWorker(
             {
               ...delegationArgs,
