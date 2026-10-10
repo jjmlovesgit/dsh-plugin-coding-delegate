@@ -23,7 +23,16 @@ default path is `'source'`. Arm A should be run first, so the second arm is the 
 
 ### Switching arms
 
-Add to the `local-router` entry in the profile patch (the entry begins at line 11):
+**More than one profile carries a `local-router` entry, and only the loaded one takes effect.** On this
+machine both `~/.dsh/profiles/tauri/cordis.patch.yml` (entry starts at line 11) and
+`~/.dsh/profiles/web/cordis.patch.yml` (entry starts at line 1) declare it. Patching the profile the
+running process did not load leaves the previous arm live and produces a run that is silently arm A.
+
+Determine which profile is loaded **before** editing, and confirm it afterwards with the liveness check
+below. `DSH_WEB_URL` being set indicates the web profile served the session, but that is an inference
+from the environment rather than a reading of the loaded config.
+
+Add to the `local-router` entry in the loaded profile:
 
 ```yaml
     sourceReadEgress: 'declarations'
