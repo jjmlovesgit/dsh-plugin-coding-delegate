@@ -79,7 +79,7 @@ Five things, in the order they act:
    may not **modify** one. Then `coherenceVerification` runs the project's own command, with the power to
    void a unit whose own tests passed while the tree did not.
 
-## The Workings
+## The policy
 
 **The architect may reason but not author. The worker may author but not stray. Neither may execute
 without consent. And source does not leave the machine.**
