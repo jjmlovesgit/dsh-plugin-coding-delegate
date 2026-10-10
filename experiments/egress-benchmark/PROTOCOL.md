@@ -337,6 +337,48 @@ nothing.
   than merely asserted. `arm-a-overlay.yml` is retained so an operator on the host can take that baseline
   in one command once the profile is flipped.
 
+### Measured directly, without sessions: what the skeleton actually contains
+
+The results table above is marked single-run and unconfirmed by its own in-window criterion. The question
+it was built to answer — *does withholding bodies cost anything* — can be measured without any running
+host, by comparing the source file against the declaration the control actually serves. Both are on disk.
+
+`plugin/src/declaration-egress.ts` (172 lines, 8170 B) vs `plugin/dist/declaration-egress.d.ts`
+(37 lines, 1923 B):
+
+| measure | source | skeleton served |
+| --- | --- | --- |
+| size | 8170 B / 172 lines | 1923 B / **37 lines** (4.3x smaller) |
+| refusal message strings (`"was refused"`) | **6** | **0** |
+| doc-comment lines | 60 | 21 (35% survive) |
+| exported interfaces | 2 | 2 |
+| exported function signature | 1 | 1 |
+
+**This explains the tier-2 result mechanically, and does not depend on turn counting.** A `.d.ts` carries
+signatures and types; it carries no string literals except *type unions*
+(`'allow' | 'serve-declaration' | 'block'`). The tier-2 task changes a refusal-message literal. Under
+declarations mode that literal is **absent from what the architect can see** — not hidden, not
+summarised, absent. So the retry loop the table records (+7 turns, +21.8s) is not a cost that better
+prompting would remove; it is the consequence of asking for bytes that the served artefact does not
+contain.
+
+**Tier 1 is unaffected, and for a checkable reason.** Both interfaces and the full signature survive, so
+surface work has everything it needs. The measured 0-turn delta there is what the composition predicts.
+
+**An asymmetry worth knowing before trusting a skeleton.** `mappableSourceFile` (a function) survives as
+an exported declaration; `MAPPABLE_SOURCE_EXTENSIONS` (a module-private constant) does not. The skeleton
+therefore exposes the *shape* of a policy but not its *data* — a signature that invites the assumption
+its extension set is knowable from here, when it is not.
+
+**Tier 3 never exercised the read path at all.** The task as specified is satisfied by a search, which
+returns matching lines without reading a file: **0 `SOURCE_READ` events in both arms**. However that tier
+is scored, it is not measuring egress.
+
+**Scope.** This establishes composition and coverage by direct measurement. It does **not** replace the
+turn-count table, which remains the only record of a live arm-B session. It does mean that anyone
+re-running the A/B should expect tiers 1 and 2 to differ *in kind* — content present versus content
+absent — rather than by a modest margin.
+
 ### Arm B — first attempt, voided, superseded by the run tabulated above
 
 **One attempt, voided.** Recorded rather than discarded, because the failure mode is the one the protocol
