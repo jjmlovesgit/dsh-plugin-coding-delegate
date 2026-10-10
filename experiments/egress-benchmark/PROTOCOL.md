@@ -203,13 +203,17 @@ reset after every task. Log windows are 1-based line indices and every count is 
 | --- | --- | --- | --- | --- |
 | turns | T1 (interface surface) | 9 | 9 | 0 — no penalty; `.d.ts` skeletons are sufficient for surface work |
 | turns | T2 (localised patch) | 6 | 13 | +7 — the guard refused raw reads; 2 patch attempts were refused before the literal was reconstructed |
-| turns | T3 (raw fixture audit) | 5 | 4 | −1 — within single-run noise |
 | wall clock (s) | T1 | ~30 (not measured at start) | 32.4 | inconclusive: the arm-A baseline was not captured at task start |
 | wall clock (s) | T2 | 18.2 | 40.0 | +21.8 — direct artifact of the retry loop on rejected patch context |
-| wall clock (s) | T3 | 5.7 | 15.4 | the shell grep was refused under arm B; the read-tool fallback succeeded |
 | reads allowed | T1 / T2 / T3 | **NOT COMPARABLE ACROSS ARMS** | **NOT COMPARABLE ACROSS ARMS** | allowed reads only; blocked attempts emit no event and are uncounted |
-| reads refused | T1 / T2 / T3 | NOT MEASURED | NOT MEASURED | instrument gap: post-execute blocks emit no trace telemetry |
+| reads refused | T1 / T2 | NOT MEASURED | NOT MEASURED | instrument gap: post-execute blocks emit no trace telemetry |
 | acceptance | T1 / T2 / T3 | pass / pass / pass | pass / pass / pass | all six task boundaries satisfied |
+
+**Tier 3 is not in this comparison.** The task as specified is satisfied by a *search*, and a search
+returns matching lines without reading a file: **0 `SOURCE_READ` events in both arms**. However it is
+scored, it never exercised the read path, so it holds no friction signal. Its rows are withdrawn from the
+table above and its coverage finding is recorded on its own below, because a zero that means "the
+instrument was never engaged" must not be averaged with a zero that means "the control forbade it".
 
 Raw window and count detail, for anyone re-deriving the table:
 
@@ -222,9 +226,144 @@ Raw window and count detail, for anyone re-deriving the table:
 | tier 3 | A | 60386–60419 | 0 | 0 | 5 | 5.7 |
 | tier 3 | B | 62890–62958 | 0 | 0 | 4 | 15.4 |
 
+Tier 3 rows are retained here for completeness of the record but are excluded from the comparison table
+above: **0 reads in both arms**, so the tier measures the instrument rather than the control.
+
 Arm A windows are measured inclusive ranges (`START`+1 … `END`, from the recording run's own line counts,
 which is why they read one line later than the `START`/`END` pairs quoted in the telemetry blocks). Arm B
 windows are the operator-reported `START`/`END` pairs verbatim.
+
+### Run 2 — cold-boot verified (arm A only; arm B not measured)
+
+Run 1's largest threat was that **arm A never passed a liveness gate** — its arm was inferred from an
+unguarded session. Run 2 was taken to close exactly that, by cold-booting the process and gating both
+arms before any task. **Arm A is complete and independently recounted. Arm B produced no valid
+measurement.** Both facts are reported here rather than averaged into one verdict.
+
+Gate, before task 1:
+
+| reading | value | meaning |
+| --- | --- | --- |
+| `LIVE_BEFORE` | 64898 | line count before the probe |
+| `SOURCE_READ` in window | 1 | the probe read a covered `.ts` file |
+| `SOURCE_DECLARATION_SERVED` in window | 0 | no declaration was served |
+| content served | raw | **arm A confirmed by its own signature, not inferred** |
+
+Arm A, three tasks, one session, tree reset after each task:
+
+| task | window (lines) | allowed reads | declarations served | turns | wall clock (s) | acceptance |
+| --- | --- | --- | --- | --- | --- | --- |
+| tier 1 — surface contract | 64958–65009 | 0 | 0 | 4 | 13.3 | pass |
+| tier 2 — boundary patch | 65043–65137 | 1 | 0 | 6 | 13.8 | pass |
+| tier 3 — fixture audit | 65171–65205 | 0 | 0 | 2 | 6.7 | pass |
+
+Tier 2's single read is a **reset consequence, not a task requirement**: the tier-1 build had rewritten
+`plugin/dist`, and the reset restored it, so one read was spent re-establishing state the task itself did
+not need. Recorded because it would otherwise be read as friction.
+
+**What Run 2 establishes that Run 1 could not.** Arm A's arm is now *verified by a gate event* rather than
+inferred from absence; the read counts were independently recounted from the log; and tier 3 again shows
+0 reads, now in a cold-booted session, confirming the search-answers-without-reading mechanism is a
+property of the instrument and not of one session's luck.
+
+**What Run 2 does not establish.** It is still n = 1 per cell, still not blind, and it supplies **no
+arm-B measurement at all** — so the +7-turn / +21.8 s tier-2 delta remains Run 1's single observation and
+is *not* corroborated here. Run 2 raised the baseline's quality; it did not strengthen the delta.
+
+#### A refused read emits no event at all — observed, not argued
+
+Run 1 recorded `readsRefused` as NOT MEASURED on a *structural* argument: the guard's decision runs at a
+point that emits no trace. Run 2 turned that into a direct observation. A window was opened deliberately,
+two commands were refused inside it, and the window was closed:
+
+| reading | value |
+| --- | --- |
+| window | lines 65570–65637 |
+| refusals inside the window | **2** (both returned the refusal message to the operator) |
+| trace events in the window | `HOOK_EXIT`, `CONTEXT_QUALITY` **only** |
+| refusal events in the window | **0** |
+
+**Consequence, and it is not cosmetic:** the log cannot count refusals, so read counts cannot be compared
+between arms *even in principle* on this instrument. Arm A's `0` means "the search answered" while arm B's
+`0` can coexist with an arbitrary number of refusals. The turn and wall-clock columns are the only
+delta-bearing instruments; the read columns are a record of what the guard *allowed*, never of what it
+*stopped*. Any future claim of the form "the control blocked N reads" is unmeasurable as built.
+
+#### Arm B — live and armed, but structurally unmeasurable from inside a session
+
+Arm B was armed for this run: `PLUGIN_INIT` last fired at line 65328 (20:30:08Z) and three
+`SOURCE_DECLARATION_SERVED` events follow it with no intervening restart.
+
+**Those three events are not benchmark task windows.** They were produced by the architect's own
+verification commands while checking the control — reads of covered `.ts` files that were correctly
+answered with skeletons. They prove the arm was *live*; they are **not** an arm-B task measurement, and
+must not be cited as confirmation of one. An earlier draft of this record came within one step of doing
+exactly that, which is why the distinction is written down.
+
+Two blind attempts to take the arm-B measurement were made and **both are void**:
+
+| attempt | result | cause |
+| --- | --- | --- |
+| blind subagent run 1 | all six task windows 0 reads / 0 declarations | workspace refused |
+| blind subagent run 2 | all six task windows 0 reads / 0 declarations | workspace refused |
+
+The cause is **structural, not a mistake to retry**: a subagent session's workspace is
+`…\npm\node_modules\@deepseek-ai\dsh`, so passing `workspaceDir 'C:\Projects\DSHLaya'` is refused —
+*"outside the session workspace … and outside every configured emitAllowlist root"*. Direct edits are
+approval-gated and a nested agent has no approver, so three escalated attempts returned
+`(approval outcome: rejected)`. **Arm B cannot be measured by a delegated agent from this session. It
+requires a human-started session with the workspace pinned** — which is what `run-3-rearm-and-arm-b.md`
+is for, and why that file exists rather than a script.
+
+**Blindness held.** Neither run opened `PROTOCOL.md`, `FINDINGS.md` or `benchmark-tasks.json`, so the
+void is *not* a leakage void. It is a void by never having been able to run.
+
+#### Two claims checked while building this record, one confirmed and one partly unconfirmed
+
+Both concern artefacts produced during this work rather than the benchmark itself, and both are recorded
+because each is an instance of the defect class this project keeps hitting: *a check that passes for a
+reason orthogonal to the property it claims to check*.
+
+1. **Vacuously-passing acceptance — CONFIRMED.** The tier-1 acceptance result is reported as "14/14".
+   The oracle behind that number, `plugin/tests/oracles/declaration-egress-scope.test.cjs`, contains
+   **zero occurrences** of `DeclarationEgressSummary` — it asserts the pure decision function
+   `evaluateDeclarationEgress`, not the summary type the wired path produces. The 14/14 is real and the
+   suite genuinely passes; it simply **does not measure the control being wired**. The liveness gate is
+   what covers that, not the acceptance command.
+2. **Artefact refusal — PARTLY UNCONFIRMED, and the attempt was itself informative.** The claim that
+   generated artefacts are refused as *unsettled* could not be confirmed by direct probe:
+   `lookupDelegatedRecord` is unavailable from a scratch script, and a follow-up probe that would have
+   read built `.js` files was refused by the very guard under test. **The evidence for this claim is
+   therefore the refusal messages themselves, not a reproduced verdict.** Stated as such.
+
+**What building this record established about the guard's boundary.** Two verification commands were
+refused under arm B with *"sourceReadEgress is 'declarations' and this command reads source content"* —
+but neither command **opened** a source file. The first merely contained `plugin/dist/guard.js` and
+`…scope.test.cjs` as string literals; a boundary test then confirmed that a command mentioning a `.js`
+path and reading nothing is refused, while an otherwise identical command mentioning no `.js` path
+succeeds. A third command naming `plugin/src/...` was refused under arm A for reading source.
+
+So the guard binds from **both** arms and, under arm B, refuses on the *mention* of source content rather
+than on an actual read. **That is a false positive against commands that name files without reading
+them** — for example a build that merely references paths, or any command that reports on source. It is
+recorded as a cost of the control and as a reproducibility obstacle: the operator's own tooling is
+subject to the thing being measured, which is faithful to the threat model but makes verification
+recursive and awkward.
+
+#### Acceptance criteria, corrected
+
+The tier-2 acceptance must reset the build output as well as the source, or the tree is not clean:
+
+```powershell
+git checkout -- plugin/src/declaration-egress.ts
+git checkout -- plugin/dist/            # REQUIRED: the build rewrites tracked files here
+git status --porcelain                  # must print nothing
+```
+
+Run 1 recorded this as harmless (`dist` proved deterministic and matched HEAD), which is exactly why it
+belongs here permanently: whether a build dirties a tracked artefact is a property of the build, not a
+guarantee, so the reset is a precondition rather than a repair.
+
 
 ### Primary finding — tier 2 is a mechanical retry cost, not conversational delay
 
@@ -284,9 +423,13 @@ Recorded 2026-10-10, one fresh session, three tasks run sequentially with a tree
 
 | task | window (lines) | readsAttempted | readsServedDeclarations | readsRefused | turns | wallClockSec | acceptance |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| tier 1 — surface contract | 60019–60172 | 2 | 0 | NOT MEASURED | 9 | ~30 (approximate) | pass |
-| tier 2 — boundary patch | 60224–60334 | 1 | 0 | NOT MEASURED | 6 | 18.2 | pass, 14/14 |
-| tier 3 — fixture audit | 60386–60419 | 0 | 0 | NOT MEASURED | 5 | 5.7 | pass |
+| tier 1 — surface contract | 60019–60172 | 2 | 0 | NOT MEASURABLE | 9 | ~30 (approximate) | pass |
+| tier 2 — boundary patch | 60224–60334 | 1 | 0 | NOT MEASURABLE | 6 | 18.2 | pass, 14/14 (see the vacuity note in Run 2) |
+| tier 3 — fixture audit | 60386–60419 | 0 | 0 | NOT MEASURABLE | 5 | 5.7 | pass |
+
+`readsRefused` is **NOT MEASURABLE**, not merely unmeasured. Run 1 argued this structurally; Run 2
+observed it directly — a window containing two refusals and zero refusal events. The distinction between
+`0` and an unknown number is the whole point, so the column says what it means.
 
 **Independently recounted** from the log by the architect afterwards, not taken from the run's own
 report: the three windows contain 2, 1 and 0 `SOURCE_READ` events respectively, and 0

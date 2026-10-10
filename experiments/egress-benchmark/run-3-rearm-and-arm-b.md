@@ -6,28 +6,52 @@ Do not commit anything.
 
 ---
 
-## Part 0 - preserve the profile baseline FIRST (plain PowerShell, not in a DSH session)
+## Part 0 - check the profile baseline, and do NOT re-copy it
 
-Both `.bak-egressbench` files predate this step, but neither is a clean baseline: they were written by the
-script's first run, when the profiles were *already* pinned to arm B. So `-Revert` restores arm B, not the
-pre-benchmark state. And re-arming overwrites those backups with the commented arm-A file.
+**Corrected.** An earlier version of this file told you to copy `cordis.patch.yml` to
+`cordis.patch.yml.pre-benchmark` before re-arming. **Do not do that now.** The premise was stale: the
+`.pre-benchmark` and `.bak-egressbench` files on this machine are already byte-identical to each other
+(SHA-256 `A58D4506…` for `tauri`, `81642D8D…` for `web`), both written 16:06, and the live profiles are
+**already armed for arm B**. Re-running the copy would overwrite the only clean arm-A baseline with the
+arm-B file and destroy the thing `-Revert` exists to restore.
 
-Take a copy before touching anything, so the original state is recoverable:
+Verify the baseline is intact and that no copy is needed - this only reads:
 
+```powershell
+foreach ($d in 'tauri','web') {
+  $p = "$env:USERPROFILE\.dsh\profiles\$d\cordis.patch.yml"
+  "=== $d ==="
+  foreach ($f in 'cordis.patch.yml','cordis.patch.yml.pre-benchmark','cordis.patch.yml.bak-egressbench') {
+    $fp = Join-Path (Split-Path $p) $f
+    if (Test-Path $fp) {
+      "  {0,-42} {1}  {2,6}B  {3}" -f $f,
+        (Get-FileHash $fp -Algorithm SHA256).Hash.Substring(0,16),
+        (Get-Item $fp).Length, (Get-Item $fp).LastWriteTime.ToString('MM-dd HH:mm')
+    } else { "  {0,-42} MISSING" -f $f }
+  }
+  "  ACTIVE sourceReadEgress key: " + (Select-String -Path $p -Pattern '^\s*sourceReadEgress:' -Quiet)
+}
 ```
-copy "$env:USERPROFILE\.dsh\profiles\tauri\cordis.patch.yml" "$env:USERPROFILE\.dsh\profiles\tauri\cordis.patch.yml.pre-benchmark"
-copy "$env:USERPROFILE\.dsh\profiles\web\cordis.patch.yml"   "$env:USERPROFILE\.dsh\profiles\web\cordis.patch.yml.pre-benchmark"
-```
 
-These write outside the workspace, so a confined shell will deny them once; retry the same command with
-wider permission. Confirm both `.pre-benchmark` files exist before continuing.
+Expected shape, and what it means:
+
+| observation | meaning |
+| --- | --- |
+| `.pre-benchmark` and `.bak-egressbench` share a hash | the baseline is intact; **no copy needed** |
+| `ACTIVE sourceReadEgress key: True` | the profile is already armed for arm B |
+| the two differ, or a file is MISSING | the baseline is damaged - stop and rebuild it from git history before running |
+
+If a `.pre-benchmark` file is ever missing, recover the pre-benchmark state from the arm-A shape in the
+commented block inside the profile file rather than copying the live (arm-B) file over it.
 
 ---
 
 ## Part 1 - re-arm the profiles (run in a PLAIN PowerShell terminal, not in a DSH session)
 
-Both profiles currently have the egress keys **commented out** (the arm-A shape). The switch script
-detects an *active* key, so it will patch correctly over the comments.
+The profiles are **already armed for arm B** as this is written (both carry an active `sourceReadEgress`
+key). Running the script now is therefore expected to report `already patched` and change nothing, which
+is the correct and safe outcome - it is idempotent. Run it anyway to confirm the state rather than trust
+this paragraph:
 
 ```
 cd C:\Projects\DSHLaya\experiments\egress-benchmark
@@ -95,8 +119,20 @@ TASK 3
 NOTES: <anything that prevented a clean measurement, stated verbatim>
 ```
 
-Rules are the same as run 2: `readsRefused` is **NOT MEASURED** and must not be derived
-arithmetically; a failed task is reported with its numbers rather than retried; nothing is interpreted.
+Rules are the same as run 2, with two corrections established by run 2's direct observation:
+
+- `readsRefused` is **NOT MEASURABLE**, not merely unmeasured. A window containing two refused commands
+  was closed under arm B and contained **zero** refusal events - only `HOOK_EXIT` and `CONTEXT_QUALITY`.
+  A refusal emits no trace at all, so this number cannot be recovered from the log and must not be
+  derived arithmetically from the other columns. Report it as `NOT MEASURABLE`.
+- A read of `.json`, `.cjs`, `.md` or `.yml` is served **raw** in both arms - those extensions are
+  outside the four the control covers. Do not record such a read as a governance success.
+- Expect the guard to refuse commands that merely **name** source files, without reading them. This is a
+  known false positive, not a fault in your command: under arm B, a shell command containing a literal
+  `.js` path is refused even when it opens nothing. Rephrase to avoid naming source paths, or accept the
+  refusal and note it verbatim.
+
+A failed task is reported with its numbers rather than retried; nothing is interpreted.
 
 ### Expect this in arm B
 
