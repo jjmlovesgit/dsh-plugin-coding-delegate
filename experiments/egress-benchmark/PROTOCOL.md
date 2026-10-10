@@ -1,0 +1,157 @@
+# Protocol: does `sourceReadEgress: 'declarations'` reduce friction or coverage?
+
+A controlled comparison of the plugin's **egress control** across two arms, on a fixed three-task list.
+The task definitions and the telemetry schema are in [`benchmark-tasks.json`](benchmark-tasks.json).
+
+**What this measures.** Not whether the plugin is valuable — that is settled elsewhere and was refuted
+for cost and privacy. This measures what the `'declarations'` control actually *reaches*, and what it
+costs in turns for the work it does reach. A task that behaves identically in both arms is a task the
+control does not cover, and that is a finding rather than a null result.
+
+## The two arms
+
+| | arm A | arm B |
+| --- | --- | --- |
+| setting | `sourceReadEgress: 'source'` | `sourceReadEgress: 'declarations'` |
+| `declarationRoot` | unset | `C:\Projects\DSHLaya\plugin\dist` |
+| a `.ts` read returns | the file | the compiled `.d.ts` skeleton, or a refusal |
+| a `.json` / `.cjs` / `.md` read returns | the file | **the file** — outside the control |
+
+**Arm A is the current live state.** The profile patch at
+`~/.dsh/profiles/tauri/cordis.patch.yml` sets neither `sourceReadEgress` nor `declarationRoot`, so the
+default path is `'source'`. Arm A should be run first, so the second arm is the only change.
+
+### Switching arms
+
+Add to the `local-router` entry in the profile patch (the entry begins at line 11):
+
+```yaml
+    sourceReadEgress: 'declarations'
+    declarationRoot: 'C:\Projects\DSHLaya\plugin\dist'
+```
+
+Then **restart DSH.** Plugin options are read once at registration, so a profile edit without a restart
+leaves the previous arm live and the run silently measures the wrong thing.
+
+## Prerequisites, and why each is load-bearing
+
+### 1. Build before measuring arm B
+
+```
+cd plugin && npm run build
+```
+
+`declarationPathFor` maps a source path to `<declarationRoot>/<relative>.d.ts`. `tsconfig.json` sets
+`declaration: true`, `outDir: ./dist`, `rootDir: ./src`, so `plugin/src/guard.ts` resolves to
+`plugin/dist/guard.d.ts` — which exists. Without a current build, arm B produces only refusals: a
+missing skeleton is refused, and one **older than its source** is refused as stale. Either way the arm
+measures nothing but its own prerequisite, and the run is void.
+
+Verify the mapping before starting:
+
+```
+node -e "const {declarationPathFor}=require('./plugin/dist/guard.js'); console.log(declarationPathFor('plugin/src/guard.ts','plugin/dist'))"
+```
+
+It must print a path that exists on disk.
+
+### 2. Confirm the arm is live
+
+Read one `.ts` file, then search the debug log for `SOURCE_DECLARATION_SERVED`. **Its absence means arm
+B is not live**, whatever the profile says. Do this before measuring, not after.
+
+### 3. Reset between tasks
+
+`git checkout -- <paths>` before each task. A task in one arm must not inherit the other arm's edit.
+
+### 4. Know which extensions the control actually covers
+
+`declarationPathFor` returns non-null for exactly four extensions, and null for everything else. The
+consequence for this benchmark, checked against the built module rather than assumed:
+
+| path | `declarationPathFor` | what arm B serves |
+| --- | --- | --- |
+| `plugin/src/guard.ts` | `plugin/dist/guard.d.ts` (exists) | the skeleton |
+| `plugin/tests/plugin.test.ts` | `plugin/dist/plugin.test.d.ts` (**does not exist**) | **refused** |
+| `plugin/tests/fixtures/classifier-goldens.json` | `null` | **the raw file** |
+| `scripts/verification-golden.cjs` | `null` | **the raw file** |
+| `README.md` | `null` | **the raw file** |
+
+Note the third row. A `.ts` file under `tests/` maps through the basename fallback
+(`guard.ts:583-587`) to a skeleton that no build produces, because `tsconfig.json` sets `rootDir: ./src`
+and `include: ["src/**/*"]`. Arm B therefore **refuses** reads of the test suite — not because tests are
+sensitive, but because the mapping produces a path nothing emits. That is a coverage artefact of the
+benchmark, and it is why tier tasks must name their files precisely: a tier-2 task pointed at a test file
+would measure a refusal, not the friction it was designed to measure.
+
+## Metric collection
+
+The log is `resolveDataDir() + '/router-debug.log'`, which is
+`C:\Users\Jim\.dsh\local-router\router-debug.log` on this machine. It is append-only.
+
+**Per run:**
+
+1. Record the log's **byte length** before the task.
+2. Run exactly one task. Nothing else, nothing concurrent.
+3. Re-read the log from that byte offset, and count `SOURCE_READ` and `SOURCE_DECLARATION_SERVED`
+   events **within that window**.
+4. Record `turnsTaken` and `wallClockMs`.
+5. Reset the tree.
+
+The byte offset is what makes a run attributable. The log is shared with the running host app, so
+counts taken from the whole file mix this task with unrelated traffic — and because the host also writes
+to it, a before/after line count is not enough.
+
+**Run all three tasks in arm A, restart, then all three in arm B.** Do not interleave arms: a restart is
+required to switch, so an interleaved order would mean four restarts and four session boundaries.
+
+## What the instruments can and cannot say
+
+This is the part that decides whether a number is evidence or decoration.
+
+| field | status | source |
+| --- | --- | --- |
+| `readsServedDeclarations` | **measured** | `SOURCE_DECLARATION_SERVED`, traced at `index.ts:1477` with the requested path and the served skeleton |
+| `readsAttempted` | **partial** | `SOURCE_READ`, traced at `index.ts:1366` — but it fires from `tools/pre-execute` for calls the guard **allowed**, so it undercounts and cannot see refusals |
+| `readsRefused` | **not measured** | a refusal is a post-execute block decision with no trace event of its own |
+| `wallClockMs` | measured | operator |
+| `turnsTaken` | measured | session transcript |
+
+**Do not compute `readsRefused` from `SOURCE_READ` arithmetic.** A read that is refused never produces a
+`SOURCE_READ` event, so `attempted - served` silently yields zero refusals no matter how many occurred —
+a number that looks measured and is not. Counting refusals requires either scanning the session
+transcript for block decisions, or one added `trace` call in the declarations block of `index.ts`.
+
+This matters more than it looks: a benchmark whose `readsRefused` is structurally always zero would
+report "the control refuses nothing", which is the opposite of what the control does.
+
+## Threats to validity
+
+- **n = 1 per task per arm.** This can suggest; it cannot prove.
+- **The operator is not blind.** Knowing the hypothesis changes how a task is attempted.
+- **The arms are different sessions.** A restart intervenes, so prior context differs.
+- **Tier difficulty is not comparable.** Aggregate percentages across tiers are meaningless; compare
+  within a tier.
+- **Reads are not the only egress.** `contextFiles` injected to the worker are governed by a different
+  check and are not affected by `sourceReadEgress` at all.
+- **A null result is not proof of irrelevance.** A task succeeding in both arms shows that task did not
+  require withheld bodies; it says nothing about tasks that do.
+
+## The decision rule, written before the runs
+
+1. **If tier 3 is served in full in arm B**, the control's coverage stops at four extensions. Record a
+   coverage limit — do not report a successful mitigation.
+2. **If tiers 1 and 2 show no difference**, signature-level work costs nothing to protect, and the only
+   open question is coverage.
+3. **If tier 2 costs materially more turns in arm B**, that is the price of withholding bodies from patch
+   work. Name the mechanism: a `.d.ts` does not contain the string literal a SEARCH block must match
+   byte-for-byte, so the exact text has to be supplied as context.
+4. **Any run in which arm B never emits `SOURCE_DECLARATION_SERVED` is void.** The arm was not live; the
+   run measured the default while claiming to measure the control.
+
+## Recording the result
+
+Write one row per task per arm into a results table in this file, with the arm, the three counts, turns,
+wall clock, and whether the acceptance check passed. Report the two arms side by side **per tier**, and
+state the coverage gap for tier 3 separately from the friction numbers for tiers 1 and 2 — they answer
+different questions and must not be averaged together.
