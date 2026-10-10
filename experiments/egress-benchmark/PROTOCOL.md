@@ -181,7 +181,49 @@ report "the control refuses nothing", which is the opposite of what the control 
 4. **Any run in which arm B never emits `SOURCE_DECLARATION_SERVED` is void.** The arm was not live; the
    run measured the default while claiming to measure the control.
 
-## Recording the result
+## Results
+
+### Arm A — `sourceReadEgress: 'source'` (the live default)
+
+Recorded 2026-10-10, one fresh session, three tasks run sequentially with a tree reset after each.
+`router-debug.log` windows are 1-based line indices; counts are confined to each window.
+
+| task | window (lines) | readsAttempted | readsServedDeclarations | readsRefused | turns | wallClockSec | acceptance |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| tier 1 — surface contract | 60019–60172 | 2 | 0 | NOT MEASURED | 9 | ~30 (approximate) | pass |
+| tier 2 — boundary patch | 60224–60334 | 1 | 0 | NOT MEASURED | 6 | 18.2 | pass, 14/14 |
+| tier 3 — fixture audit | 60386–60419 | 0 | 0 | NOT MEASURED | 5 | 5.7 | pass |
+
+**Independently recounted** from the log by the architect afterwards, not taken from the run's own
+report: the three windows contain 2, 1 and 0 `SOURCE_READ` events respectively, and 0
+`SOURCE_DECLARATION_SERVED` in any window. Arm A is the `'source'` path, so no declaration should be
+served, and none was — the run is consistent with its arm.
+
+**Observation about tier 3: zero reads.** The task asked for every line matching a credential regex
+across two files, and the run satisfied it with `grep` and **no file read at all** — 0 `SOURCE_READ`
+events, 5 turns, 5.7s. This is the sharpest early result and it is about the *instrument*, not the
+control: on this plugin, a search tool returns matching lines directly, so a content-inspection task
+never needs a read for `sourceReadEgress` to govern. Measuring egress friction on such a task measures
+nothing.
+
+### Instrument notes discovered during the run
+
+- **`node --test` is denied in the confined sandbox.** The tier-2 acceptance command hit the
+  documented `spawn EPERM` — a denial of piped-stdio child processes, not a test failure — and
+  succeeded on a single retry with wider permission. An operator without that escalation cannot run the
+  oracle acceptance as written.
+- **The declared reset command is necessary but not sufficient.** `git checkout --
+  plugin/src/declaration-egress.ts` restores the source, but the tier-1 and tier-2 builds also rewrite
+  tracked files under `plugin/dist/`, so the tree is not clean until `plugin/dist/` is reset too. On
+  this run `dist` proved deterministic — it matched HEAD afterwards with zero uncommitted changes — so
+  the extra reset was harmless rather than a correction of real drift. Do it anyway: whether a build
+  dirties a tracked artifact is a property of the build, not a guarantee.
+- **Stale `SOURCE_DECLARATION_SERVED` events already exist** in the shared log (lines 38962 and 40368,
+  from earlier work). A liveness check that greps the whole file will therefore pass against Arm A.
+  Arm B's gate must confirm a **new** event after the pre-read line count, not merely that the pattern
+  appears anywhere.
+
+
 
 Write one row per task per arm into a results table in this file, with the arm, the three counts, turns,
 wall clock, and whether the acceptance check passed. Report the two arms side by side **per tier**, and
