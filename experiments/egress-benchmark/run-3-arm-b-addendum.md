@@ -204,6 +204,21 @@ Record **`promptTokensEst`, `completionTokensEst`, `totalTokensEst`, `cloudEquiv
 `outcome` and `succeeded` for attribution. `cloudEquivUSD` is the avoided plan exposure the run reports;
 it is not money saved.
 
+**The ledger instruments delegated worker calls only.** Its own `scope` field says so, and the baseline
+taken before this run agrees: 424 history records, all `localTurns`, with `cloudTurns`,
+`architectTurns`, `totalCloudTokens` and `totalSpendUSD` all zero, because the host events that would
+feed them do not exist or carry no usage. Two consequences the record must not smooth over:
+
+- An arm A window that delegated nothing has **no ledger rows at all**. Record
+  `NO LEDGER ROWS (architect usage is not instrumented)` — never `0`, and never a blank, both of which
+  read as "measured, and nothing happened".
+- The arm's architect-side turns, wall clock and read counts come from the protocol's own window
+  counting (`SOURCE_READ` / `SOURCE_DECLARATION_SERVED`, `START_n`/`END_n`, operator timings), not from
+  this file. The ledger is a secondary instrument for the worker side and for `cloudEquivUSD`.
+- `cloudEquivUSD = 0` on a window means no local tokens were spent, **not** that no exposure was
+  avoided. The architect's exposure is measured as context by `context-quality.ts` off `session/event`,
+  which is a different instrument with a different unit.
+
 ### 3.2 `tokensPerSecond` is end-to-end throughput
 
 It is `completionTokensEst / (elapsedMs / 1000)` — verified on the newest record at the 2026-10-10
@@ -384,6 +399,7 @@ TASK 1
   startLine / endLine / sourceRead / declarationsServed / turns / wallClockSec / acceptancePassed
   dlpTripped_window / dlpPinned_window / contaminated <yes|no>
   promptTokensEst / completionTokensEst / totalTokensEst / cloudEquivUSD / elapsedMs / tokensPerSecond (e2e)
+  # or, when the window delegated nothing: NO LEDGER ROWS (architect usage is not instrumented)
 TASK 2
   ...
 TASK 3
