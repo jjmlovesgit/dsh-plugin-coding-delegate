@@ -113,7 +113,7 @@ export declare function evaluateSettledFile(record: DelegatedRecord | undefined,
  * The transform mirrors what `tsc --declaration --emitDeclarationOnly` emits for a `rootDir` of the source
  * directory: the tree below the root is preserved and only the extension changes.
  */
-export declare function declarationPathFor(sourcePath: string, declarationRoot: string): string | null;
+export declare function declarationPathFor(sourcePath: string, declarationRoot?: string): string | null;
 /**
  * Is a declaration STALE relative to the source it is supposed to describe?
  *

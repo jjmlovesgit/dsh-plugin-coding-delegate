@@ -568,7 +568,7 @@ export function evaluateSettledFile(
  * The transform mirrors what `tsc --declaration --emitDeclarationOnly` emits for a `rootDir` of the source
  * directory: the tree below the root is preserved and only the extension changes.
  */
-export function declarationPathFor(sourcePath: string, declarationRoot: string): string | null {
+export function declarationPathFor(sourcePath: string, declarationRoot: string = ''): string | null {
   if (typeof sourcePath !== 'string' || !sourcePath.trim()) return null
   const extension = path.extname(sourcePath).toLowerCase()
   if (extension !== '.ts' && extension !== '.tsx' && extension !== '.js' && extension !== '.jsx') {

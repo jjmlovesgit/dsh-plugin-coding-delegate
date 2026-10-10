@@ -570,7 +570,7 @@ function evaluateSettledFile(record, currentHash) {
  * The transform mirrors what `tsc --declaration --emitDeclarationOnly` emits for a `rootDir` of the source
  * directory: the tree below the root is preserved and only the extension changes.
  */
-function declarationPathFor(sourcePath, declarationRoot) {
+function declarationPathFor(sourcePath, declarationRoot = '') {
     if (typeof sourcePath !== 'string' || !sourcePath.trim())
         return null;
     const extension = path.extname(sourcePath).toLowerCase();
