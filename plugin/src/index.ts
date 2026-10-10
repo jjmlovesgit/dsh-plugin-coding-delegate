@@ -10,6 +10,7 @@ import { classifyLocally, SECRET_PATTERN_RULES, findHighEntropyTokens } from './
 import { resolveDataDir, trace } from './logging'
 import { canonicalisePath, isPathWithin, CODE_EXTENSIONS } from './paths'
 import { resolveWorkspaceContainment } from './containment'
+import { classifyDestination } from './routing'
 import { selectAttestableTargets } from './attestation'
 import {
   FileEmissionResult,
@@ -1637,8 +1638,37 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
       // never transmitted) but never hard-blocked, because digests and base64 payloads
       // are legitimate content that merely looks random.
       const entropyOnly = dlpTripped && !dlpResult.highConfidence
-      const rerouteLocal = dlpTripped && (entropyOnly || options?.dlpAction === 'local')
-      const shouldBlock = dlpTripped && !rerouteLocal
+      // WHERE THIS WILL ACTUALLY LAND, decided before the role is applied and before anything is
+      // transmitted. The reroute used to be committed here on entropy alone, which in the documented
+      // cloud-only setup pinned the payload to the provider it was meant to be kept away from.
+      // `classifyDestination` refuses instead when a reroute was requested but there is no distinct
+      // local provider, or when the policy says block.
+      const classification = classifyDestination({
+        provider: resolvedConfig?.provider || '',
+        localProvider: config.localProvider,
+        cloudProvider: config.cloudProvider,
+        dlpTripped,
+        entropyOnly,
+        dlpAction: options?.dlpAction,
+      })
+
+      if (classification.decision === 'block') {
+        // Name the pattern, not just the policy. An earlier throw said "credentials detected (API Key)",
+        // and dropping that to a bare classification reason cost a test that asserts the message names
+        // the offending pattern -- which is also what tells an operator what to remove.
+        const violations = dlpResult.violations.join(', ')
+        const why = violations
+          ? 'credentials detected (' + violations + '). ' + (classification.reason || '')
+          : classification.reason || 'policy says block'
+        console.error('[DLP_FIREWALL_BLOCK] Refusing to transmit: ' + why + '. Nothing was sent to the cloud.')
+        throw new Error(
+          'DLP firewall blocked this request: ' + why +
+            '. Nothing was transmitted. This gate scans every user message it has seen in this session, ' +
+            "so a credential that appeared in an earlier turn keeps blocking until the session is restarted."
+        )
+      }
+
+      const rerouteLocal = classification.rerouteLocal
 
       if (dlpTripped) {
         const violations = dlpResult.violations.join(', ')
@@ -1649,19 +1679,9 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
           prompt: prompt.slice(0, 100),
         })
 
-        if (shouldBlock) {
-          console.error(
-            `[DLP_FIREWALL_BLOCK] Refusing to transmit: credentials detected (${violations}). Nothing was sent to the cloud.`
-          )
-          throw new Error(
-            `DLP firewall blocked this request: ${violations} detected in the outbound payload. ` +
-              `Nothing was transmitted. Remove the credential from the conversation and retry. This gate scans every ` +
-              `user message it has seen in this session, so a credential that appeared in an earlier turn keeps ` +
-              `blocking until the session is restarted. Set dlpAction: 'local' to route such requests to the local ` +
-              `worker instead of refusing them. Assistant output and tool results are assembled by the host after ` +
-              `this hook runs and are not scanned.`
-          )
-        }
+        // The old shouldBlock branch stood here. It is dead: the classification above already threw for
+        // the same two cases -- a reroute requested with no distinct local provider, and an explicit
+        // block policy -- and it throws with a reason that names the actual cause.
 
         console.warn(
           `[DLP_FIREWALL_REROUTE] Sensitive data (${violations}) pinned to the LOCAL worker; it will not reach the WAN.`

@@ -57,6 +57,26 @@ function classifyDestination(input) {
             reason: 'DLP violation: dlpAction is configured to block.',
         };
     }
+    // 2b. A HIGH-CONFIDENCE hit that was not rerouted is refused, at every action setting.
+    //
+    // This clause is not optional and its absence shipped a credential leak in the first wiring attempt:
+    // without it, a high-confidence secret with a DISTINCT local provider and no policy fell through to
+    // step 3, matched `dest === local`, and returned proceed/local -- so the payload passed the gate and,
+    // because it was labelled local, source egress did not stop it either. `dlp-gate.test.cjs` caught it
+    // as "Missing expected rejection"; the reasoning that it was covered by egress did not hold.
+    //
+    // The rule is the one the original expression encoded: only an entropy-only hit, or an explicit
+    // 'local' action, may be rerouted. Everything else a tripped gate found is refused, because a
+    // medium-confidence heuristic is the only thing entitled to a soft landing.
+    if (input.dlpTripped && !input.entropyOnly) {
+        return {
+            destination: 'cloud',
+            decision: 'block',
+            rerouteLocal: false,
+            reason: 'DLP violation: a high-confidence match may only be rerouted when dlpAction is ' +
+                "'local'. It was not, so nothing was transmitted.",
+        };
+    }
     // 3. No reroute: classify where the payload actually lands. In a cloud-only setup it is cloud
     //    regardless of whether the provider string happens to equal localProvider.
     const effectiveDestination = !isCloudOnly && dest === local ? 'local' : 'cloud';
