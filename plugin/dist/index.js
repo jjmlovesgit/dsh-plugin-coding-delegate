@@ -48,6 +48,7 @@ Object.defineProperty(exports, "PROFILES", { enumerable: true, get: function () 
 const local_classifier_1 = require("./local-classifier");
 const logging_1 = require("./logging");
 const paths_1 = require("./paths");
+const attestation_1 = require("./attestation");
 const emission_1 = require("./emission");
 const verification_1 = require("./verification");
 const context_1 = require("./context");
@@ -667,6 +668,17 @@ function apply(ctx, options = {}) {
                             // review, so the absence of an identity is a refusal, not a value to invent. Precedence is
                             // the call's `attestOperator`, then the plugin's `operatorIdentity` -- explicit over ambient.
                             const operator = String(attestOperator || options?.operatorIdentity || '').trim();
+                            // Scope before attesting: a path may be attested only if this unit actually wrote it.
+                            // Attesting anything else is how a caller forged a human review over a file the unit
+                            // never touched. Placed after `operator` because the helper needs it.
+                            const scope = (0, attestation_1.selectAttestableTargets)({
+                                requested: Array.isArray(attestTargets) ? attestTargets : [],
+                                filesWritten: Array.isArray(verdict?.filesWritten) ? verdict.filesWritten : [],
+                                operator,
+                            });
+                            if (scope.refused.length > 0) {
+                                verdict.attestationErrors = scope.refused.map((p) => 'attestTargets must be written and verified in the current unit: ' + p);
+                            }
                             if (!operator) {
                                 // Refused, and the unit's own verdict is left INTACT. Throwing here would destroy a passing
                                 // unit's result over a bookkeeping failure, which is not what failing closed means at this
@@ -681,7 +693,8 @@ function apply(ctx, options = {}) {
                                 const evidence = String(attestEvidence || '').trim() ||
                                     'operator reviewed the passing unit from delegation ' + String(verdict.taskName || '');
                                 const attested = [];
-                                for (const target of attestTargets) {
+                                // Only what this unit wrote, so an answer-only delegation attests nothing.
+                                for (const target of scope.attestable) {
                                     try {
                                         const record = (0, contracts_1.recordOperatorAttestation)(String(target), operator, evidence);
                                         if (record)

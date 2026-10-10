@@ -157,8 +157,13 @@ explicit human review (`OPERATOR_ATTESTED`). Any post-verdict edit invalidates i
 judgement cases and **runs in CI** — a missing verdict branch is the bug it exists to catch, because a
 fall-through to a generic refusal is indistinguishable from correct strictness.
 *The limits:* the registry is **per-machine and not in the repository**, so the socket is a local pre-commit
-gate rather than a CI gate; and `operator` is **a self-reported string with no key and no signature**. That
-is tamper-evidence, not cryptographic non-repudiation.
+gate rather than a CI gate; `operator` is **a self-reported string with no key and no signature**, so an
+attestation is caller-*attributed* metadata rather than an authenticated identity; and an attestation covers
+**only files the unit actually wrote and verified**, because the gate is membership in that unit's
+`filesWritten` and a unit that wrote files cannot reach `SUCCESS` unverified. What that closes is a caller
+attesting an arbitrary readable path from a delegation that wrote nothing — the shape that forged a human
+review over an untouched file. What it does not close is a caller **naming a person**, which no amount of
+gating inside this process can establish. That is tamper-evidence, not cryptographic non-repudiation.
 
 **3. Egress is bounded by build provenance.** With `sourceReadEgress: 'declarations'`, reads of `.ts` files
 are answered with compiler-emitted `.d.ts` stubs, so the architect gets types and signatures without

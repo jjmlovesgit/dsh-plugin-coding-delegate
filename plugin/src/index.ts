@@ -9,6 +9,7 @@ import { PROFILES, ProfileConfig, WORKER_BENCHMARKS, WORKER_BENCHMARK_SOURCE } f
 import { classifyLocally, SECRET_PATTERN_RULES, findHighEntropyTokens } from './local-classifier'
 import { resolveDataDir, trace } from './logging'
 import { canonicalisePath, isPathWithin, CODE_EXTENSIONS } from './paths'
+import { selectAttestableTargets } from './attestation'
 import {
   FileEmissionResult,
   evaluateEmissionPath,
@@ -1109,6 +1110,19 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
               // review, so the absence of an identity is a refusal, not a value to invent. Precedence is
               // the call's `attestOperator`, then the plugin's `operatorIdentity` -- explicit over ambient.
               const operator = String(attestOperator || options?.operatorIdentity || '').trim()
+              // Scope before attesting: a path may be attested only if this unit actually wrote it.
+              // Attesting anything else is how a caller forged a human review over a file the unit
+              // never touched. Placed after `operator` because the helper needs it.
+              const scope = selectAttestableTargets({
+                requested: Array.isArray(attestTargets) ? attestTargets : [],
+                filesWritten: Array.isArray(verdict?.filesWritten) ? verdict.filesWritten : [],
+                operator,
+              })
+              if (scope.refused.length > 0) {
+                verdict.attestationErrors = scope.refused.map(
+                  (p) => 'attestTargets must be written and verified in the current unit: ' + p
+                )
+              }
               if (!operator) {
                 // Refused, and the unit's own verdict is left INTACT. Throwing here would destroy a passing
                 // unit's result over a bookkeeping failure, which is not what failing closed means at this
@@ -1123,7 +1137,8 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
                 String(attestEvidence || '').trim() ||
                 'operator reviewed the passing unit from delegation ' + String(verdict.taskName || '')
               const attested: string[] = []
-              for (const target of attestTargets) {
+              // Only what this unit wrote, so an answer-only delegation attests nothing.
+              for (const target of scope.attestable) {
                 try {
                   const record = recordOperatorAttestation(String(target), operator, evidence)
                   if (record) attested.push(record.path)
