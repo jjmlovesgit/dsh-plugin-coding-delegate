@@ -223,7 +223,46 @@ nothing.
   Arm B's gate must confirm a **new** event after the pre-read line count, not merely that the pattern
   appears anywhere.
 
+### Arm B — attempted, LIVENESS GATE FAILED, no data
 
+**One attempt, voided.** Recorded rather than discarded, because the failure mode is the one the protocol
+exists to catch.
+
+The gate ran before any task and failed:
+
+| reading | value |
+| --- | --- |
+| `LIVE_BEFORE` | 60691 |
+| `LIVE_AFTER` | 60734 |
+| `SOURCE_DECLARATION_SERVED` after `LIVE_BEFORE` | **0** |
+| `SOURCE_READ` in the same window | 1 |
+
+A read of a covered `.ts` file (`plugin/src/declaration-egress.ts`) was classified as a read-class egress
+event and **no declaration was served** — the signature of the `'source'` path, not of declarations mode.
+
+Diagnosed afterwards from host state, not guessed:
+
+- **Neither profile was patched.** `~/.dsh/profiles/tauri/` and `~/.dsh/profiles/web/` both carry the
+  `local-router` entry and neither contains `sourceReadEgress` or `declarationRoot`.
+- **The plugin was never re-initialised.** No `PLUGIN_INIT` / `LOCAL_ROUTER_INIT` event appears after the
+  gate window, so **no restart occurred** and the running process still held the `'source'` options read
+  at registration.
+
+Had the gate been omitted — or had it grepped the whole file and matched the two stale events at lines
+38962 and 40368 — three more runs would have been recorded as declarations-mode measurements while
+being, in fact, arm A.
+
+**A second defect the gate does not catch.** The arm-B work ran in the *same session* as arm A: line
+numbers continued rather than opening a fresh window, and no restart intervened. The protocol requires
+one clean session per arm. Even with the profile correctly patched, this session would have confounded
+the comparison with carried-over context. **Arm B requires a genuinely new session**, not merely the
+option being set.
+
+**Consequence: no friction delta exists.** There is one arm of data. The coverage boundary is likewise
+unconfirmed. What arm A does show is narrower and about the instrument: a *search*-based inspection never
+reads at all, so a task like tier 3 never exercises the read path that `sourceReadEgress` governs.
+
+## Recording the result
 
 Write one row per task per arm into a results table in this file, with the arm, the three counts, turns,
 wall clock, and whether the acceptance check passed. Report the two arms side by side **per tier**, and
