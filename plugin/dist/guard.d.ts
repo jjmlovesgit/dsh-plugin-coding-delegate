@@ -1,4 +1,6 @@
 import type { DelegatedRecord } from './contracts';
+/** Shell tools can write files as a side effect; detection is best-effort. */
+export declare const SHELL_TOOLS: Set<string>;
 /**
  * Tools that read a file's contents into the caller's context. Exported because `describeSourceRead`
  * asks the same question — is this tool a read? — and two lists would drift.
@@ -61,6 +63,14 @@ export declare function shellCommandName(token: string): string;
  * cannot use this set as its membership test without also un-gating nothing. See the read gate.
  */
 export declare function commandReadsContent(command: string): boolean;
+/**
+ * The longest source-extension reference in a string.
+ *
+ * The guard previously took the FIRST match, so a command whose prose happened to contain
+ * something extension-shaped — an explanation mentioning `(.ts)` — reported that fragment as
+ * the target instead of the real path.
+ */
+export declare function longestCodeReference(text: string): string | undefined;
 export type DelegateReadPolicy = 'ask' | 'allow' | 'deny';
 /**
  * What happens when an agent reads a file a delegated worker wrote.

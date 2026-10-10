@@ -84,7 +84,7 @@ test("a scope-free search is refused under declarations mode", async () => {
 
 // SHELL: the same leak by the other door.
 test("a shell command that reads a source file is refused under declarations mode", async () => {
-  const decision = await dispatch("pwsh", { command: "cat src/guard.ts" });
+  const decision = await dispatch("pwsh", { command: "Get-Content src/guard.ts" });
   assert.ok(replacedContent(decision), "shell stdout must not carry an implementation body");
   assert.match(textOf(decision), /declarations/i, "the refusal must name the setting");
 });

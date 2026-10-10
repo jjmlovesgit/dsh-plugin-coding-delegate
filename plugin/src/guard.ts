@@ -14,7 +14,7 @@ const WRITE_TOOLS = new Set([
 ])
 
 /** Shell tools can write files as a side effect; detection is best-effort. */
-const SHELL_TOOLS = new Set([
+export const SHELL_TOOLS = new Set([
   'pwsh', 'bash', 'shell', 'terminal', 'run_command', 'pwsh_persistent', 'bash_persistent',
 ])
 
@@ -376,7 +376,7 @@ function findDelegatedRead(
  * something extension-shaped — an explanation mentioning `(.ts)` — reported that fragment as
  * the target instead of the real path.
  */
-function longestCodeReference(text: string): string | undefined {
+export function longestCodeReference(text: string): string | undefined {
   const scanner = new RegExp(CODE_REFERENCE.source, 'gi')
   let longest: string | undefined
   for (const match of text.matchAll(scanner)) {

@@ -33,12 +33,13 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.DELETE_PRIMITIVES = exports.SEARCH_TOOLS = exports.READ_TOOLS = void 0;
+exports.DELETE_PRIMITIVES = exports.SEARCH_TOOLS = exports.READ_TOOLS = exports.SHELL_TOOLS = void 0;
 exports.extractWriteTarget = extractWriteTarget;
 exports.hasCommandWriteSignal = hasCommandWriteSignal;
 exports.hasCommandDeleteSignal = hasCommandDeleteSignal;
 exports.shellCommandName = shellCommandName;
 exports.commandReadsContent = commandReadsContent;
+exports.longestCodeReference = longestCodeReference;
 exports.evaluateDelegatedReadPolicy = evaluateDelegatedReadPolicy;
 exports.evaluateSettledFile = evaluateSettledFile;
 exports.declarationPathFor = declarationPathFor;
@@ -57,7 +58,7 @@ const WRITE_TOOLS = new Set([
     'create_file', 'write_file', 'fs_write', 'notebook_edit',
 ]);
 /** Shell tools can write files as a side effect; detection is best-effort. */
-const SHELL_TOOLS = new Set([
+exports.SHELL_TOOLS = new Set([
     'pwsh', 'bash', 'shell', 'terminal', 'run_command', 'pwsh_persistent', 'bash_persistent',
 ]);
 /**
@@ -677,7 +678,7 @@ function evaluateCodeWriteGuard(exec, config = {}) {
             ].filter((v, i, all) => all.indexOf(v) === i);
             return { target: scope || '(workspace)', matched };
         }
-        if (SHELL_TOOLS.has(name)) {
+        if (exports.SHELL_TOOLS.has(name)) {
             const command = String((args ?? {}).command ?? '');
             if (!command)
                 return null;
@@ -795,7 +796,7 @@ function evaluateCodeWriteGuard(exec, config = {}) {
                 (downgrade ? ' This path is approval-eligible (architect-owned test/tooling).' : ''),
         };
     }
-    if (SHELL_TOOLS.has(name)) {
+    if (exports.SHELL_TOOLS.has(name)) {
         const command = args?.command ?? args?.script ?? '';
         const target = shellWriteTarget(command);
         if (target) {
