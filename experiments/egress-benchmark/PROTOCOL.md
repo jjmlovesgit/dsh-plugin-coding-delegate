@@ -98,6 +98,19 @@ would measure a refusal, not the friction it was designed to measure.
 The log is `resolveDataDir() + '/router-debug.log'`, which is
 `C:\Users\Jim\.dsh\local-router\router-debug.log` on this machine. It is append-only.
 
+### Who can run this
+
+**An agent working inside a DSH session cannot run this benchmark.** Three reasons, each independently
+disqualifying:
+
+1. It has no way to open a *fresh* session, so its runs are all in one long-lived context.
+2. Switching arms requires a restart, which terminates the session executing it.
+3. It already knows the hypotheses, the task list and the fixture answers, so its turn counts measure a
+   model that is not blind.
+
+The run requires a human operator with a session launcher: one clean session per arm, six task runs
+total. An agent may prepare the artifacts and tabulate the results, and must not supply the numbers.
+
 **Per run:**
 
 1. Record the log's **byte length** before the task.
@@ -105,7 +118,17 @@ The log is `resolveDataDir() + '/router-debug.log'`, which is
 3. Re-read the log from that byte offset, and count `SOURCE_READ` and `SOURCE_DECLARATION_SERVED`
    events **within that window**.
 4. Record `turnsTaken` and `wallClockMs`.
-5. Reset the tree.
+5. **Reset the tree** — `git checkout -- plugin/src/declaration-egress.ts` — after *every* task, not only
+   between arms. Tasks 1 and 2 both edit that file, so without a reset task 2 inherits task 1's interface
+   addition, and its turn count stops being comparable with the same task in the other arm.
+
+### Acceptance commands, checked against the tree
+
+| task | acceptance | note |
+| --- | --- | --- |
+| tier 1 | `npm run build` then `node tests/oracles/declaration-egress-scope.test.cjs` (14 tests) | there is no `tests/declaration-egress.test.ts`; the oracles above are the real judges |
+| tier 2 | same as tier 1 | the scope oracle must still report 14 passing |
+| tier 3 | the answer must name **1** entry labelled `api key assignment`, out of 34 in `entries` | the file is a wrapper object `{$comment, source, capturedAt, count, entries}`, not a bare array |
 
 The byte offset is what makes a run attributable. The log is shared with the running host app, so
 counts taken from the whole file mix this task with unrelated traffic — and because the host also writes
