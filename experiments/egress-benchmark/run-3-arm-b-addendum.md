@@ -241,17 +241,37 @@ state its value with the results.
 ### 3.5 The session-scoped gate
 
 ```powershell
+# by session id (preferred: no long path to mistype)
+node experiments\egress-benchmark\run-3-session-gate.cjs --session <session-id> --arm A
+node experiments\egress-benchmark\run-3-session-gate.cjs --session <session-id> --arm B
+
+# or by explicit path
 node experiments\egress-benchmark\run-3-session-gate.cjs `
   "$env:USERPROFILE\.dsh\sessions\--C-Projects-DSHLaya--\<session-id>\session.v3.jsonl.zstd" `
-  --expect cloud      # arm A;  --expect local for arm B after the trigger
+  --expect cloud
 ```
+
+`--arm A` is `--expect cloud` and `--arm B` is `--expect local`; `--session <id>` resolves the store
+under `$DSH_HOME/sessions/` and refuses when the id matches no store or more than one. An unrecognised
+flag is an error, not a no-op: a typo such as `--Arm A` would otherwise drop the arm's expectation and
+still report a green gate.
 
 `--expect cloud` fails the gate if any request in this session was dispatched to `lm-studio`.
 `--expect local` requires at least one such request and requires that none of them still carries
 `reasoningEffort` (the `fcb9340` signature). Independently of `--expect`, the script always asserts the
 trailing turn completed and that no turn ended `UNSUPPORTED_REASONING_EFFORT`; with no `--expect` it makes
-no claim about the route at all. Exit codes: `0` the recorded facts match, `1` they do not, `2` the file
-could not be read as a session store.
+no claim about the route at all.
+
+Exit codes: `0` the recorded facts match, `1` they do not, `2` **the store could not be certified** —
+unreadable, torn, or carrying a line that is not JSON. Exit 2 is a refusal to report, not a failing
+measurement: a torn final frame decodes to zero bytes without raising, so before the gate's strictness
+rules a crashed run could have been certified from an earlier completed turn. Do not treat exit 2 as a
+number to record; it means the window cannot be measured from this store.
+
+Every verdict above is pinned by `plugin/tests/oracles/session-gate.test.cjs` against synthesised
+multi-frame fixtures, so a silent regression in the gate fails the oracle suite rather than the
+measurement. The one limit that oracle pins as a limit rather than a failure: a truncation that removes
+*whole* frames leaves a valid shorter log, indistinguishable from a session that ended earlier.
 
 It asserts over the **whole session**, which is why the arm session must be fresh — the same prerequisite
 `run-2-arm-a.md` already imposes ("DSH was restarted before this session"). A session that is not fresh

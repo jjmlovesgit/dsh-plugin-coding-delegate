@@ -26,70 +26,184 @@
  * them tripped by a one-character prompt, because the DLP corpus accumulates what a session has
  * said and stays sticky for its lifetime (`plugin/src/index.ts`, the corpus comment block).
  *
+ * A REFUSED REQUEST WRITES NO HEADER
+ * ----------------------------------
+ * Measured on that same store: 5 `UNSUPPORTED_REASONING_EFFORT` turns against 0 `lm-studio`
+ * `request/header` records. A refused request never reaches dispatch, so it logs no header. The
+ * header is therefore **positive-only** evidence: its presence proves a dispatch, its absence
+ * proves nothing. Zero local headers must never be read as "no pin occurred" on a build without
+ * `fcb9340` (the commit that drops the effort at the pin), where the pin's only session-scoped trace
+ * is the error turn.
+ *
+ * STRICTNESS: WHY A TORN STORE IS REFUSED RATHER THAN DECODED
+ * ----------------------------------------------------------
+ * `zlib.zstdDecompressSync` does not throw on a torn final frame. Measured 2026-10-10 against
+ * checksummed frames of the kind this host writes (frame-header descriptor 0x04, content checksum
+ * set, no content-size field):
+ *
+ *   truncate the last frame by 8 bytes   -> decodes to 0 bytes, no error
+ *   truncate a frame at a record boundary-> frame simply absent, no error
+ *   flip one payload byte                -> throws ZSTD_error_checksum_wrong
+ *
+ * A decoder that returns a prefix without complaint would let a crashed run be certified, which is
+ * the one failure a measurement gate must not make. Three rules therefore guard the decode:
+ *
+ *   R1  every frame must decode to at least one byte (a valid frame always carries a record);
+ *   R2  the decoded text must end with a newline (records are newline-terminated, so a torn
+ *       mid-record tail is visible);
+ *   R3  every decoded line must parse as JSON -- an unparseable line is refused rather than skipped.
+ *
+ * Residual limit, stated rather than implied: bytes appended after a *complete* final frame are not
+ * detectable here. The magic walk extends the last frame's byte range to EOF and Zstandard ignores
+ * trailing bytes, and a frame header declares its decompressed size, not its compressed length. That
+ * case is a torn tail, which R1-R3 catch; it is not the crash pattern this gate exists for.
+ *
  * Frame format: DSH writes a concatenation of independent Zstandard frames -- one for the header,
- * one per append batch -- each with the content-checksum flag set (frame-header descriptor 0x04).
- * `zlib.zstdDecompressSync` decodes only the FIRST frame, so every frame is walked by its magic
- * offset here. Node's own `zstdCompressSync` writes checksum-less frames (descriptor 0x20); a log
- * carrying those is not the byte stream this host produces.
+ * one per append batch -- each with the content-checksum flag set (descriptor 0x04).
+ * `zstdDecompressSync` decodes only one frame at a time, so every frame is walked by its magic
+ * offset here. Node's own `zstdCompressSync` writes descriptor 0x20 by default (single-segment, no
+ * checksum); pass `ZSTD_c_checksumFlag: 1` to write frames that carry a checksum like the host's.
  *
  * Usage:
  *   node run-3-session-gate.cjs <session.v3.jsonl.zstd> [--expect cloud|local]
+ *   node run-3-session-gate.cjs --session <session-id>  [--arm A|B]
  *
- *   --expect cloud   arm A: this session must have dispatched NO request to the local provider
- *   --expect local    arm B after a pin: at least one local request, none carrying reasoningEffort
+ *   --session <id>   resolve the store under $DSH_HOME/sessions/<project>/<id>/ instead of a path
+ *   --arm A          alias for --expect cloud: this session must have dispatched nothing locally
+ *   --arm B          alias for --expect local: at least one local request, none carrying the effort
+ *   --expect cloud   arm A semantics
+ *   --expect local   arm B semantics
  *   (omitted)        report only; the trailing-turn assertion still decides the exit code
  *
- * Exit codes: 0 = the recorded facts match the expectation, 1 = they do not, 2 = the file could not
- * be read as a session store. Run it as a direct `node <file>`: `node --test` needs to spawn a child
+ * Exit codes: 0 = the recorded facts match the expectation, 1 = they do not, 2 = the store could not
+ * be read or certified. Run it as a direct `node <file>`: `node --test` needs to spawn a child
  * process, which the workspace sandbox refuses with `spawn EPERM`.
  */
 'use strict';
 
 const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const zlib = require('node:zlib');
 
 const ZSTD_MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd]);
 const LOCAL_PROVIDER = 'lm-studio';
 const UNSUPPORTED = 'UNSUPPORTED_REASONING_EFFORT';
 
-/** Decode every frame in the store, in order. */
-function decodeAllFrames(buf) {
+/** Frame start offsets, in order. */
+function frameStarts(buf) {
   const starts = [];
   for (let i = 0; i + 3 < buf.length; i++) {
     if (buf[i] === ZSTD_MAGIC[0] && buf[i + 1] === ZSTD_MAGIC[1] &&
         buf[i + 2] === ZSTD_MAGIC[2] && buf[i + 3] === ZSTD_MAGIC[3]) starts.push(i);
   }
+  return starts;
+}
+
+/** Decode every frame in the store under rules R1-R3, or throw. */
+function decodeAllFrames(buf) {
+  const starts = frameStarts(buf);
   if (starts.length === 0) throw new Error('no zstandard frames found');
   if (starts[0] !== 0) throw new Error('first frame does not start at offset 0');
   const parts = [];
   for (let k = 0; k < starts.length; k++) {
     const from = starts[k];
     const to = k + 1 < starts.length ? starts[k + 1] : buf.length;
-    parts.push(zlib.zstdDecompressSync(buf.subarray(from, to)));
+    // Throws on a checksum or structural failure inside a complete frame.
+    const decoded = zlib.zstdDecompressSync(buf.subarray(from, to));
+    // R1: a valid frame carries at least one record; a torn frame decodes to nothing.
+    if (decoded.length === 0) {
+      throw new Error('frame ' + k + ' (offset ' + from + ') decoded to zero bytes: the store is torn');
+    }
+    parts.push(decoded);
   }
-  return { text: Buffer.concat(parts).toString('utf8'), frames: starts.length };
+  const text = Buffer.concat(parts).toString('utf8');
+  // R2: DSH writes newline-terminated JSONL, so a torn mid-record tail shows up here.
+  if (!text.endsWith('\n')) throw new Error('decoded text does not end at a record boundary: the store is torn');
+  return { text, frames: starts.length };
+}
+
+/** Resolve a session id to its store path under the DSH home. */
+function resolveSession(id) {
+  const home = process.env.DSH_HOME && process.env.DSH_HOME.length > 0
+    ? process.env.DSH_HOME
+    : path.join(os.homedir(), '.dsh');
+  const root = path.join(home, 'sessions');
+  const hits = [];
+  for (const project of fs.readdirSync(root, { withFileTypes: true })) {
+    if (!project.isDirectory()) continue;
+    const store = path.join(root, project.name, id, 'session.v3.jsonl.zstd');
+    if (fs.existsSync(store)) hits.push(store);
+  }
+  if (hits.length === 0) throw new Error('no store found for session ' + id + ' under ' + root);
+  if (hits.length > 1) throw new Error('session ' + id + ' resolves to ' + hits.length + ' stores');
+  return hits[0];
 }
 
 function main() {
   const argv = process.argv.slice(2);
-  const file = argv.find((a) => !a.startsWith('--'));
-  if (!file) {
-    console.error('usage: node run-3-session-gate.cjs <session.v3.jsonl.zstd> [--expect cloud|local]');
-    process.exitCode = 2;
-    return;
+  // A flag's value is not a positional. Unknown flags are rejected rather than ignored: a typo such
+  // as `--Arm A` would otherwise drop the arm's expectation and still report a green gate.
+  const VALUE_FLAGS = new Set(['--session', '--expect', '--arm']);
+  const positional = [];
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (VALUE_FLAGS.has(arg)) { i++; continue; }
+    if (arg.startsWith('--')) {
+      console.error('unknown flag: ' + arg);
+      process.exitCode = 2;
+      return;
+    }
+    positional.push(arg);
   }
+  const flagValue = (name) => {
+    const i = argv.indexOf(name);
+    return i >= 0 ? argv[i + 1] : undefined;
+  };
+
   const expectIndex = argv.indexOf('--expect');
-  const expect = expectIndex >= 0 ? argv[expectIndex + 1] : undefined;
+  let expect = expectIndex >= 0 ? argv[expectIndex + 1] : undefined;
+  const arm = flagValue('--arm');
+  if (arm !== undefined) {
+    if (arm !== 'A' && arm !== 'B') {
+      console.error('--arm takes A or B');
+      process.exitCode = 2;
+      return;
+    }
+    if (expect !== undefined && expect !== (arm === 'A' ? 'cloud' : 'local')) {
+      console.error('--arm ' + arm + ' contradicts --expect ' + expect);
+      process.exitCode = 2;
+      return;
+    }
+    expect = arm === 'A' ? 'cloud' : 'local';
+  }
   if (expect !== undefined && expect !== 'cloud' && expect !== 'local') {
     console.error('--expect takes cloud or local');
     process.exitCode = 2;
     return;
   }
 
+  const sessionId = flagValue('--session');
+  if (sessionId !== undefined && positional.length > 0) {
+    console.error('pass a store path or --session <id>, not both');
+    process.exitCode = 2;
+    return;
+  }
+  if (sessionId === undefined && positional.length === 0) {
+    console.error('usage: node run-3-session-gate.cjs <session.v3.jsonl.zstd> [--expect cloud|local]');
+    console.error('       node run-3-session-gate.cjs --session <session-id> [--arm A|B]');
+    process.exitCode = 2;
+    return;
+  }
+
+  const file = sessionId !== undefined ? resolveSession(sessionId) : positional[0];
   const { text, frames } = decodeAllFrames(fs.readFileSync(file));
-  const rows = text.split('\n').filter(Boolean)
-    .map((line) => { try { return JSON.parse(line); } catch { return null; } })
-    .filter(Boolean);
+  const rawLines = text.split('\n').filter(Boolean);
+  const rows = [];
+  for (const line of rawLines) {
+    try { rows.push(JSON.parse(line)); }
+    catch { throw new Error('decoded line is not JSON: ' + JSON.stringify(line.slice(0, 60))); }
+  }
 
   const header = rows[0];
   const requests = rows.filter((r) => r.type === 'request/header');
@@ -106,6 +220,7 @@ function main() {
 
   const out = [];
   out.push('session      : ' + String(header?.id ?? '(no header record)'));
+  out.push('store        : ' + file);
   out.push('frames       : ' + frames + '   records: ' + rows.length);
   out.push('requests     : ' + requests.length + '   turns: ' + turns.length);
   out.push('');
@@ -146,13 +261,12 @@ function main() {
     problems.push(localRequests.length + ' request(s) dispatched to ' + LOCAL_PROVIDER +
       ': this arm A session is CONTAMINATED by a DLP pin');
   }
-  if (expect === 'local') {
-    if (localRequests.length === 0) {
-      problems.push('--expect local but no request dispatched to ' + LOCAL_PROVIDER);
-    }
-    if (localWithEffort.length > 0) {
-      problems.push(localWithEffort.length + ' pinned request(s) still carry reasoningEffort: fcb9340 is not loaded');
-    }
+  if (expect === 'local' && localRequests.length === 0) {
+    problems.push('--expect local but no request dispatched to ' + LOCAL_PROVIDER +
+      ': the pin left no session-scoped evidence (check the log direction before concluding anything)');
+  }
+  if (expect === 'local' && localWithEffort.length > 0) {
+    problems.push(localWithEffort.length + ' pinned request(s) still carry reasoningEffort: fcb9340 is not loaded');
   }
 
   console.log('');
@@ -165,6 +279,6 @@ function main() {
 }
 
 try { main(); } catch (err) {
-  console.error('GATE: cannot read this store: ' + err.message);
+  console.error('GATE: cannot certify this store: ' + err.message);
   process.exitCode = 2;
 }
