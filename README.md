@@ -220,7 +220,7 @@ Stated here rather than discovered in a procurement conversation:
   correct semantics, since a verdict describes content, but it means a human attestation must be
   re-established and is not a permanent certificate.
 - **Task scoping is opt-in**, as above: nothing forces an architect to declare `targetFiles`.
-- **A personal project at 0.2.0.** The API is not frozen. The honest limits are documented rather than
+- **A personal project at 0.2.1.** The API is not frozen. The honest limits are documented rather than
   glossed, which is the trait an evaluation should weigh in its favour given how rare it is.
 
 The proposition is not that this shaves a metered bill — measured, that is worth about **fifteen cents**. It
