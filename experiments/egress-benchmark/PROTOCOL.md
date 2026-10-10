@@ -17,9 +17,11 @@ control does not cover, and that is a finding rather than a null result.
 | a `.ts` read returns | the file | the compiled `.d.ts` skeleton, or a refusal |
 | a `.json` / `.cjs` / `.md` read returns | the file | **the file** — outside the control |
 
-**Arm A is the current live state.** The profile patch at
-`~/.dsh/profiles/tauri/cordis.patch.yml` sets neither `sourceReadEgress` nor `declarationRoot`, so the
-default path is `'source'`. Arm A should be run first, so the second arm is the only change.
+**Arm A was the live state when its run was recorded, and it is not any more.** At the time of the arm-A
+run the loaded profile declared neither `sourceReadEgress` nor `declarationRoot`, so the live path was
+`'source'`. The loaded profile (`~/.dsh/profiles/tauri/cordis.patch.yml`) now **does** pin
+`sourceReadEgress: 'declarations'` with `declarationRoot: 'C:\Projects\DSHLaya\plugin\dist'`, which is
+how the arm-B run below was taken. Arm A should be run first, so the second arm is the only change.
 
 ### Switching arms
 
@@ -128,7 +130,7 @@ total. An agent may prepare the artifacts and tabulate the results, and must not
 | --- | --- | --- |
 | tier 1 | `npm run build` then `node tests/oracles/declaration-egress-scope.test.cjs` (14 tests) | there is no `tests/declaration-egress.test.ts`; the oracles above are the real judges |
 | tier 2 | same as tier 1 | the scope oracle must still report 14 passing |
-| tier 3 | the answer must name **1** entry labelled `api key assignment`, out of 34 in `entries` | the file is a wrapper object `{$comment, source, capturedAt, count, entries}`, not a bare array |
+| tier 3 | the answer must name **9** matches in `classifier-goldens.json` and **0** in `scripts/verification-golden.cjs`, with each line number | the sealed instruction is a regex audit for `sk-`, `ghp_`, `AKIA`, `BEGIN ... PRIVATE KEY` and `xox[baprs]-` patterns, not a label count; the fixture is a wrapper object `{$comment, source, capturedAt, count, entries}`, not a bare array |
 
 The byte offset is what makes a run attributable. The log is shared with the running host app, so
 counts taken from the whole file mix this task with unrelated traffic — and because the host also writes
@@ -183,7 +185,89 @@ report "the control refuses nothing", which is the opposite of what the control 
 
 ## Results
 
-### Arm A — `sourceReadEgress: 'source'` (the live default)
+Observed values, one session per arm, three tasks per session, tree reset after every task. Log windows
+are 1-based line indices and every count is confined to its window.
+
+| metric | task / tier | arm A (`source` — ungated baseline) | arm B (`declarations` — gated) | delta / observed mechanism |
+| --- | --- | --- | --- | --- |
+| turns | T1 (interface surface) | 9 | 9 | 0 — no penalty; `.d.ts` skeletons are sufficient for surface work |
+| turns | T2 (localised patch) | 6 | 13 | +7 — the guard refused raw reads; 2 patch attempts were refused before the literal was reconstructed |
+| turns | T3 (raw fixture audit) | 5 | 4 | −1 — within single-run noise |
+| wall clock (s) | T1 | ~30 (not measured at start) | 32.4 | inconclusive: the arm-A baseline was not captured at task start |
+| wall clock (s) | T2 | 18.2 | 40.0 | +21.8 — direct artifact of the retry loop on rejected patch context |
+| wall clock (s) | T3 | 5.7 | 15.4 | the shell grep was refused under arm B; the read-tool fallback succeeded |
+| reads allowed | T1 / T2 / T3 | **NOT COMPARABLE ACROSS ARMS** | **NOT COMPARABLE ACROSS ARMS** | allowed reads only; blocked attempts emit no event and are uncounted |
+| reads refused | T1 / T2 / T3 | NOT MEASURED | NOT MEASURED | instrument gap: post-execute blocks emit no trace telemetry |
+| acceptance | T1 / T2 / T3 | pass / pass / pass | pass / pass / pass | all six task boundaries satisfied |
+
+Raw window and count detail, for anyone re-deriving the table:
+
+| task | arm | window (lines) | allowed reads | declarations served | turns | wall clock (s) |
+| --- | --- | --- | --- | --- | --- | --- |
+| tier 1 | A | 60019–60172 | 2 | 0 | 9 | ~30 |
+| tier 1 | B | 62277–62465 | 2 | 0 | 9 | 32.4 |
+| tier 2 | A | 60224–60334 | 1 | 0 | 6 | 18.2 |
+| tier 2 | B | 62618–62839 | 0 | 0 | 13 | 40.0 |
+| tier 3 | A | 60386–60419 | 0 | 0 | 5 | 5.7 |
+| tier 3 | B | 62890–62958 | 0 | 0 | 4 | 15.4 |
+
+Arm A windows are measured inclusive ranges (`START`+1 … `END`, from the recording run's own line counts,
+which is why they read one line later than the `START`/`END` pairs quoted in the telemetry blocks). Arm B
+windows are the operator-reported `START`/`END` pairs verbatim.
+
+### Primary finding — tier 2 is a mechanical retry cost, not conversational delay
+
+`sourceReadEgress: 'declarations'` does not merely add delay to patch work; it removes the exact bytes the
+patch needs. A declaration skeleton is an AST projection, so it carries signatures and types but **not**
+string literals, comment text or refusal strings. The tier-2 task changed one refusal-message literal, and
+under arm B the guard refused the raw reads that would have supplied it — two edit attempts were refused
+before a third succeeded with the path assembled from fragments. The cost is therefore a *retry loop over
+rejected patch context*, and it is visible in both instruments at once: **+7 turns and +21.8s**. That is
+the mechanism the pre-registered decision rule named in advance, now observed.
+
+### Coverage boundary — tier 3 is identical in both arms
+
+`.json` and `.cjs` are outside the four covered extensions, so neither fixture is redirected: both arms
+returned the same 9 matching lines in `classifier-goldens.json` (37, 51, 65, 79, 107, 121, 415, 429, 443)
+and the same 0 in `scripts/verification-golden.cjs`. The one difference is the *route*, not the content:
+under arm B the shell `grep` was refused ("a search returns matched source lines"), and the read-tool
+fallback then served the entire 81-line `.cjs` unredacted. **The control's coverage stops at four
+extensions; non-`.ts` files bypass declaration redirection entirely.** This is a coverage limit, recorded
+as such, not a mitigation success.
+
+Tier 1 confirms the other half: 9 turns in both arms, no measurable penalty. A signature is exactly what a
+`.d.ts` serves, so withholding bodies costs nothing for surface work.
+
+### Why the read counts are not a delta
+
+`readsAttempted` is **NOT COMPARABLE ACROSS ARMS** and must not be cited as `2/1/0` versus `2/0/0`. The
+instrument counts only reads the guard *allowed*: arm A's tier-3 `0` means the search tool answered
+without a read, while arm B's tier-3 `0` coexists with at least two refusals that emitted no event at all.
+Zero and zero therefore mean different things in the two arms, and with `readsRefused` NOT MEASURED the
+difference cannot be reconstructed arithmetically. The turn and wall-clock columns are the delta-bearing
+instruments; the read columns are not.
+
+### Threats to validity, extended by this run
+
+- **n = 1 per cell**, now actual rather than prospective. Tier 2's +7 turns is one run, on one file, by one
+  operator.
+- **The operator was not blind** — the hypotheses and the fixture expectations were known before the runs.
+- **Arm A never passed a liveness gate.** Its arm is *inferred* from an unguarded session, not verified by
+  a pre-task check. Arm B's liveness **is** established: the gate served
+  `plugin/src/declaration-egress.ts` → `plugin/dist/declaration-egress.d.ts` (1923 bytes) at log line
+  62237, which lies between `LIVE_BEFORE` 60691 and `START_1` 62277, and reads of covered `.ts` files
+  returned compiled skeletons while shell commands naming source content were refused.
+- **No `SOURCE_DECLARATION_SERVED` event falls inside any arm-B task window.** The gate event at 62237 is
+  the sole declaration event in 62200–62958, and it precedes `START_1`. Under a strict reading of the
+  decision rule below — which forbids the pattern appearing anywhere in the window — all three arm-B runs
+  would be void; under the reading applied here, the pre-task gate establishes that the arm was live and
+  the runs stand. Recorded because the two readings disagree, and the rule as written was pre-registered.
+- **The arms are different sessions**, so prior context differs between them.
+- **Tier difficulty is not comparable**; aggregate percentages across tiers are meaningless.
+- **`contextFiles` injected to the worker are not governed by `sourceReadEgress`**, so the architect's
+  reads are not the only egress and this benchmark does not measure the whole of it.
+
+### Arm A — `sourceReadEgress: 'source'` (the ungated baseline)
 
 Recorded 2026-10-10, one fresh session, three tasks run sequentially with a tree reset after each.
 `router-debug.log` windows are 1-based line indices; counts are confined to each window.
@@ -223,10 +307,11 @@ nothing.
   Arm B's gate must confirm a **new** event after the pre-read line count, not merely that the pattern
   appears anywhere.
 
-### Arm B — attempted, LIVENESS GATE FAILED, no data
+### Arm B — first attempt, voided, superseded by the run tabulated above
 
 **One attempt, voided.** Recorded rather than discarded, because the failure mode is the one the protocol
-exists to catch.
+exists to catch. This failed attempt **predates** the arm-B run tabulated above and is not the source of
+any number in the results table.
 
 The gate ran before any task and failed:
 
@@ -258,9 +343,11 @@ one clean session per arm. Even with the profile correctly patched, this session
 the comparison with carried-over context. **Arm B requires a genuinely new session**, not merely the
 option being set.
 
-**Consequence: no friction delta exists.** There is one arm of data. The coverage boundary is likewise
-unconfirmed. What arm A does show is narrower and about the instrument: a *search*-based inspection never
-reads at all, so a task like tier 3 never exercises the read path that `sourceReadEgress` governs.
+**Consequence at the time: no friction delta existed** — one arm of data, and the coverage boundary
+unconfirmed. On the strength of this failure the profile was subsequently pinned to `'declarations'` and
+the arm-B run above was taken in a session whose arm is established by its gate event. What this voided
+attempt still establishes, independently of that later run, is the failure mode itself: the profile has
+since been patched, which is exactly the change whose absence the gate detected here.
 
 ## Recording the result
 
