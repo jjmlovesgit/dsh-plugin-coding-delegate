@@ -25,10 +25,16 @@ function hooksFor(options = {}) {
   return handlers;
 }
 
+// The host carries `agent` on the `agent/pre-step` payload (see its runtime-types), and the gate keys
+// its per-session state on it. One fresh session per issued request, because the DLP corpus is keyed by
+// session and lives for the process -- a shared id would carry one case's credential into the next.
+let entropySessionSeq = 0;
+
 async function issueRequest(handlers, prompt, turn = 1) {
-  await handlers["agent/pre-step"]({ turn, messages: [{ role: "user", content: prompt }] }, async () => ({}));
+  const agent = { id: `entropy-gate-session-${++entropySessionSeq}` };
+  await handlers["agent/pre-step"]({ turn, agent, messages: [{ role: "user", content: prompt }] }, async () => ({}));
   const next = async () => ({ provider: "upstream", model: "upstream" });
-  return handlers["agent/request"]({ agent: { id: "a" }, turn, step: 1, signal: new AbortController().signal }, next);
+  return handlers["agent/request"]({ agent, turn, step: 1, signal: new AbortController().signal }, next);
 }
 
 // ---------------------------------------------------------------------------

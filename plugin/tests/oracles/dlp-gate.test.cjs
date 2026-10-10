@@ -27,14 +27,25 @@ function hooksFor(options = {}) {
   return handlers;
 }
 
+// The session identity the host puts on `agent/pre-step` -- its payload type carries `agent`
+// (`@deepseek-ai/dsh-agent` runtime-types, `'agent/pre-step'`), and it is what a per-session gate
+// keys on. This helper used to pass an agent to the request hook only, which the gate could still
+// bridge because the pending prompt was keyed by turn alone; that ambiguity is what
+// dlp-session-scope.test.cjs now pins, so the helper models the host instead.
+//
+// One fresh session per issued request: the DLP corpus is keyed by session and lives for the process,
+// so a shared id would carry one case's credential into the next case's corpus.
+let sessionSeq = 0;
+
 /** Feed a prompt through the real pre-step capture, then run the request gate. */
 async function issueRequest(handlers, prompt, turn = 1) {
+  const agent = { id: `dlp-gate-session-${++sessionSeq}` };
   const preStep = handlers["agent/pre-step"];
   if (preStep) {
-    await preStep({ turn, messages: [{ role: "user", content: prompt }] }, async () => ({}));
+    await preStep({ turn, agent, messages: [{ role: "user", content: prompt }] }, async () => ({}));
   }
   const next = async () => ({ provider: "upstream-default", model: "upstream-default" });
-  return handlers["agent/request"]({ agent: { id: "agent-1" }, turn, step: 1, signal: new AbortController().signal }, next);
+  return handlers["agent/request"]({ agent, turn, step: 1, signal: new AbortController().signal }, next);
 }
 
 test("a clean payload is passed through to the cloud architect unchanged", async () => {

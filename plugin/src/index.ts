@@ -795,7 +795,20 @@ export class LocalRouter {
   }
 }
 
-const pendingTurnPrompts = new Map<number, string>()
+/**
+ * The prompt stashed at `agent/pre-step` for the request hook, keyed by session AND turn.
+ *
+ * The key carries the session because turn numbers are per session: every delegated subagent starts
+ * at turn 1, so keying on the turn alone let two sessions sitting on the same turn hand each other
+ * their text. The gate scans `corpus.length > prompt.length ? corpus : prompt`, so a borrowed prompt
+ * longer than this session's own corpus replaced it and this session's text was never scanned at all
+ * -- a credential went out unscanned, measured in tests/oracles/dlp-session-scope.test.cjs.
+ */
+const pendingTurnPrompts = new Map<string, string>()
+/** One stashed prompt per turn in flight; a turn whose request never runs would otherwise leak one. */
+const PENDING_TURN_PROMPTS_MAX = 256
+/** Session ids and turn numbers cannot contain NUL, so the key is injective by construction. */
+const TURN_PROMPT_SEPARATOR = '\u0000'
 
 /**
  * Every user-message text this plugin has seen, per session.
@@ -814,6 +827,23 @@ const GLOBAL_CORPUS_KEY = '__global__'
 function corpusKeyFor(payload: any): string {
   const id = payload?.agent?.id ?? payload?.agent?.session?.id ?? payload?.session?.id
   return typeof id === 'string' && id.length > 0 ? id : GLOBAL_CORPUS_KEY
+}
+
+/** The stash key for one session's turn. */
+function turnPromptKey(payload: any, turn: number): string {
+  return corpusKeyFor(payload) + TURN_PROMPT_SEPARATOR + String(turn)
+}
+
+/** Stash one turn's prompt, keeping insertion order as recency and bounding the map. */
+function rememberTurnPrompt(payload: any, turn: number, prompt: string): void {
+  const key = turnPromptKey(payload, turn)
+  pendingTurnPrompts.delete(key)
+  pendingTurnPrompts.set(key, prompt)
+  while (pendingTurnPrompts.size > PENDING_TURN_PROMPTS_MAX) {
+    const oldest = pendingTurnPrompts.keys().next().value
+    if (oldest === undefined) break
+    pendingTurnPrompts.delete(oldest)
+  }
 }
 
 function accumulateCorpus(key: string, text: string): void {
@@ -1519,7 +1549,7 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
       const turn = payload?.turn
       const prompt = extractTextFromClaimedMessages(payload?.messages)
       if (turn !== undefined && prompt) {
-        pendingTurnPrompts.set(turn, prompt)
+        rememberTurnPrompt(payload, turn, prompt)
         accumulateCorpus(corpusKeyFor(payload), prompt)
         trace('HOOK_CAPTURE: PROMPT_CAPTURED (agent/pre-step)', {
           turn,
@@ -1602,9 +1632,9 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
       const turn = payload?.turn
       const agent = payload?.agent
 
-      let prompt = (turn !== undefined ? pendingTurnPrompts.get(turn) : '') || ''
+      let prompt = (turn !== undefined ? pendingTurnPrompts.get(turnPromptKey(payload, turn)) : '') || ''
       if (turn !== undefined) {
-        pendingTurnPrompts.delete(turn)
+        pendingTurnPrompts.delete(turnPromptKey(payload, turn))
       }
 
       if (!prompt) {
