@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-coding-delegate",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "A preventive control for DeepSeek Harness: the metered model cannot author code and every delegation leaves a hashable verdict. The architect specifies and is denied write and shell access; a local worker implements inside a bounded workspace; promotion accepts only a SHA-256 match against a machine-checked or operator-attested record.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

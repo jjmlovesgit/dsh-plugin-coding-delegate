@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-coding-delegate",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "description": "A preventive control for DeepSeek Harness: the cloud planner cannot author code and every delegation leaves a hashable verdict. Sandboxed local execution with hash-bound promotion.",
   "license": "MIT",

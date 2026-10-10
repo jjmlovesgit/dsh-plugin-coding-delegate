@@ -21,5 +21,9 @@ tmp_test_*
 # rollback copies - git history replaces these
 *.bak*
 
+# scratch holds and packaging caches, kept out of the repository
+.scratch-hold/
+.npm-cache/
+
 # external review inputs - kept out of the repository
 report.md
