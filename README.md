@@ -15,7 +15,10 @@ own window and lets exactly two things cross between them.
 
 **The architect** is the metered thinking model. It holds the design conversation, decides how the work
 decomposes, and writes a **contract** for each unit: what to build, where the worker may write, and the
-command that decides whether the unit passed. It does not write source, and it does not read source back.
+command that decides whether the unit passed. It does not write source. Reading it back is governed
+rather than forbidden: with the default `sourceReadEgress: 'source'` a read returns the file, rule 3 makes
+a read of a freshly-delegated one ask first, and `sourceReadEgress: 'declarations'` serves a type skeleton
+instead of the body.
 
 **The worker** is whatever your GPU is already running. It receives one unit and everything that unit
 needs — nothing else — writes the code, and is discarded. A fresh context per unit costs nothing.
