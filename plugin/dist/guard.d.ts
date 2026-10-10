@@ -38,6 +38,29 @@ export declare function hasCommandWriteSignal(command: string): boolean;
 export declare const DELETE_PRIMITIVES: RegExp;
 /** Does this command line or script body carry a delete signal? */
 export declare function hasCommandDeleteSignal(text: string): boolean;
+/**
+ * Normalise one shell token to a bare program name.
+ *
+ * The extension strip has to match everywhere a program is recognised, or an alias is half-known: the
+ * prefilter compared raw lowercased tokens while `commandReadsContent` and `isReadArgument` both
+ * stripped `.exe`/`.cmd`/`.bat`/`.ps1`, so `gc.ps1` was rejected by the first and accepted by the
+ * others. One normaliser, one answer.
+ */
+export declare function shellCommandName(token: string): string;
+/**
+ * Does this command READ FILE CONTENT, rather than list, test or compare?
+ *
+ * `CONTENT_READERS` and only `CONTENT_READERS`. An earlier attempt took the union with
+ * `READ_ONLY_INSPECTORS` here and `control-bypass.test.cjs` failed on the very next run: that set
+ * exists to answer "is this token read as data rather than invoked", which is a *different* question,
+ * and it carries `ls`, `get-childitem`, `test-path`, `stat` and friends. Treating those as byte
+ * readers is the false positive the two-set split was introduced to remove.
+ *
+ * Note what this predicate is NOT responsible for. A metadata command passes the prefilter and then
+ * correctly reports "does not read content" here, so it is allowed -- which is why the prefilter
+ * cannot use this set as its membership test without also un-gating nothing. See the read gate.
+ */
+export declare function commandReadsContent(command: string): boolean;
 export type DelegateReadPolicy = 'ask' | 'allow' | 'deny';
 /**
  * What happens when an agent reads a file a delegated worker wrote.

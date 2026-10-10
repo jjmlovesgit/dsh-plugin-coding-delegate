@@ -37,6 +37,8 @@ exports.DELETE_PRIMITIVES = exports.SEARCH_TOOLS = exports.READ_TOOLS = void 0;
 exports.extractWriteTarget = extractWriteTarget;
 exports.hasCommandWriteSignal = hasCommandWriteSignal;
 exports.hasCommandDeleteSignal = hasCommandDeleteSignal;
+exports.shellCommandName = shellCommandName;
+exports.commandReadsContent = commandReadsContent;
 exports.evaluateDelegatedReadPolicy = evaluateDelegatedReadPolicy;
 exports.evaluateSettledFile = evaluateSettledFile;
 exports.declarationPathFor = declarationPathFor;
@@ -274,12 +276,38 @@ const CONTENT_READERS = new Set([
     'select-string', 'get-content', 'gc', 'cat', 'type', 'head', 'tail', 'less', 'more',
     'grep', 'rg', 'findstr', 'strings', 'od', 'xxd',
 ]);
-/** Does this command read file CONTENT, rather than list, test or compare? */
+/**
+ * Normalise one shell token to a bare program name.
+ *
+ * The extension strip has to match everywhere a program is recognised, or an alias is half-known: the
+ * prefilter compared raw lowercased tokens while `commandReadsContent` and `isReadArgument` both
+ * stripped `.exe`/`.cmd`/`.bat`/`.ps1`, so `gc.ps1` was rejected by the first and accepted by the
+ * others. One normaliser, one answer.
+ */
+function shellCommandName(token) {
+    return path
+        .basename(String(token || '').trim())
+        .toLowerCase()
+        .replace(/\.(?:exe|cmd|bat|ps1)$/, '');
+}
+/**
+ * Does this command READ FILE CONTENT, rather than list, test or compare?
+ *
+ * `CONTENT_READERS` and only `CONTENT_READERS`. An earlier attempt took the union with
+ * `READ_ONLY_INSPECTORS` here and `control-bypass.test.cjs` failed on the very next run: that set
+ * exists to answer "is this token read as data rather than invoked", which is a *different* question,
+ * and it carries `ls`, `get-childitem`, `test-path`, `stat` and friends. Treating those as byte
+ * readers is the false positive the two-set split was introduced to remove.
+ *
+ * Note what this predicate is NOT responsible for. A metadata command passes the prefilter and then
+ * correctly reports "does not read content" here, so it is allowed -- which is why the prefilter
+ * cannot use this set as its membership test without also un-gating nothing. See the read gate.
+ */
 function commandReadsContent(command) {
-    return command
+    return String(command || '')
         .split(/[\s'"|;&()]+/)
         .filter(Boolean)
-        .some((token) => CONTENT_READERS.has(token.toLowerCase().replace(/\.(?:exe|cmd|bat|ps1)$/, '')));
+        .some((token) => CONTENT_READERS.has(shellCommandName(token)));
 }
 /**
  * Delegated files that sit under the directory an ABSOLUTE token names.
@@ -656,9 +684,21 @@ function evaluateCodeWriteGuard(exec, config = {}) {
             // A shell command has to actually read something to count as a read. Without this, any command
             // that merely names a directory containing delegated files would prompt — `npm --prefix plugin run build`,
             // even `cd plugin` — and a gate that fires on ordinary commands is one an operator turns off.
+            //
+            // The prefilter and `commandReadsContent` answer DIFFERENT questions, and this one must be the
+            // WIDER of the two. A metadata command has to pass here so that `commandReadsContent` can then
+            // correctly report that it reads no bytes -- if this set were narrowed to content readers, the
+            // listing commands would exit right here instead, and the distinction would be lost rather than
+            // enforced. It must nonetheless include every content reader, and it did not: `gc` was in
+            // CONTENT_READERS but not here, so `gc file.ts` returned null before containment was considered.
+            // The extension strip lives in `shellCommandName` so both lists agree on `gc.ps1` too.
             const hasReadSignal = command
                 .split(/[\s'"|;&]+/)
-                .some((t) => READ_ONLY_INSPECTORS.has(t.toLowerCase()));
+                .filter(Boolean)
+                .some((t) => {
+                const bare = shellCommandName(t);
+                return READ_ONLY_INSPECTORS.has(bare) || CONTENT_READERS.has(bare);
+            });
             if (!hasReadSignal)
                 return null;
             const matched = [];
