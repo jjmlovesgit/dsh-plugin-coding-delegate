@@ -152,8 +152,14 @@ dsh-plugin-coding-delegate:
 
 Two things to know here:
 
-- `dlpAction: 'local'` assumes a local worker to reroute to. With none configured, a
-  credential-bearing request has nowhere safe to go — so use `'block'` instead.
+- **`dlpAction: 'local'` is refused in this setup, not honoured.** `localProvider` and `cloudProvider`
+  are the same id, so a "local" reroute would send the payload to the same provider it is being kept
+  away from. The request is **blocked** and the reason names both providers. Configure a genuinely
+  distinct local provider if you want a reroute to land somewhere safe.
+- A **high-confidence** match is blocked whenever it is not rerouted, including when `dlpAction` is
+  unset. Only an entropy-only hit (medium confidence) is allowed to fall back to a reroute, or an
+  explicit `dlpAction: 'local'` with a distinct local provider — that is the single rule the gate
+  applies, and it is the same rule whether or not a local model exists.
 - `delegate_worker` and the local-code guard both assume a local model. In a cloud-only setup
   `delegate_worker` has no worker to dispatch to, so set `localCodeGuard: false` if you do
   not want source writes refused.
