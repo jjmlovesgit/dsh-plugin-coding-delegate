@@ -66,7 +66,7 @@ its contents are knowable from here, when they are not.
 
 `declarationPathFor` (`guard.ts:571`) returns a declaration path for exactly four extensions and `null`
 for everything else. The caller reads `null` as *"not a source file: nothing to strip"* and serves the
-file unchanged (`index.ts:1413`). Verified against the built module:
+file unchanged (`index.ts:1415-1416`). Verified against the built module:
 
 | path | `declarationPathFor` | what a read returns |
 | --- | --- | --- |
