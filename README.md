@@ -31,7 +31,7 @@ needs — nothing else — writes the code, and is discarded. A fresh context pe
 The verification command runs as an ordinary subprocess, with the operator's approval. Its raw output
 stays on the local machine; what travels back is the failure *structure*, with source stripped out.
 
-> **Status: 0.2.0,** The mechanisms work and are tested. Its **limits are documented
+> **Status: 0.2.1,** The mechanisms work and are tested. Its **limits are documented
 > rather than glossed**, including two that cannot be closed from inside the process — see
 > [What this control does not cover](#what-this-control-does-not-cover). Read that section before deciding
 > whether it fits your situation.
@@ -55,7 +55,34 @@ stays on the local machine; what travels back is the failure *structure*, with s
                           human approval before it runs  (rule 6)
 
   What the channel does NOT carry:
-    no design conversation   no other units   no code (either direction)
+    no design conversation   no other units   no code crossing by emission
+    (reads are GOVERNED, not blocked: see the egress row below)
+
+  WHERE THE GATES ACT, and what each one is called in the policy table:
+
+    architect requests a tool call
+       |
+       +-- write / modify ------> pre-execute, rule 2 ---> DENY
+       +-- shell / exec --------> pre-execute, rule 5 ---> DENY
+       +-- read / search / shell-> post-execute, rules 2/3
+       |                              |
+       |                              +-- sourceReadEgress: 'declarations' (OPT-IN)
+       |                              |     read  -> served as the .d.ts skeleton
+       |                              |     search-> refused (matched lines are bodies)
+       |                              |     shell -> refused when it reads source
+       |                              |
+       |                              +-- sourceReadEgress: 'source' (DEFAULT)
+       |                                    a read returns the file; rule 3 still
+       |                                    asks about files a worker just wrote
+       |
+       +-- delegate_worker ------> the worker, inside the containment matrix
+
+  ==============================[ HOST BOUNDARY ]==============================
+  The outbound request is assembled by DSH AFTER this plugin's hooks run.
+  Assistant output and tool results are therefore NOT scanned by the DLP gate,
+  which sees the session's user messages. Closing that needs a host seam that
+  exposes the outbound payload; it cannot be closed from inside the plugin.
+  See SECURITY-REVIEW-2.md, findings 13 and 15.
 ```
     
 ## What it does
