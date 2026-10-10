@@ -20,6 +20,11 @@
   "dsh": {
     "bundle": {
       "patch": "plugin/cordis.patch.yml"
+    },
+    "compatibility": {
+      "dshReleases": {
+        "0.2.0-rc.2": "compatible"
+      }
     }
   },
   "comment": "This root manifest exists so DSH plugin DIRECTORY discovery can find the plugin: registries read dsh.bundle from the repository ROOT package.json, and the real manifest lives at plugin/package.json and is unchanged. The path is relative with no '..' and no leading slash, per the discovery contract. Nothing installs from here: the published artefact is plugin/, and DSH loads it via a profile bundle.",

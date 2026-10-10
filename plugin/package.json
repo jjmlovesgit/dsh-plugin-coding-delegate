@@ -23,6 +23,11 @@
   "dsh": {
     "bundle": {
       "patch": "cordis.patch.yml"
+    },
+    "compatibility": {
+      "dshReleases": {
+        "0.2.0-rc.2": "compatible"
+      }
     }
   },
   "keywords": [
