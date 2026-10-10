@@ -143,6 +143,8 @@ A read of `.json`, `.cjs`, `.md` or `.yml` returns the **raw file** in both arms
 outside the control. If task 3 is satisfied by a search rather than a read, it will emit no read events
 at all; that is a fact about the task, not about the control, and should be reported as such.
 
+*For execution gates, DLP confound isolation, and Protocol Run 3 logging standards, refer directly to `run-3-arm-b-addendum.md`.*
+
 ---
 
 ## Part 3 - restore afterwards
