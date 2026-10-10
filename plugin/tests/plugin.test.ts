@@ -231,17 +231,19 @@ not ok 3 - PriorityQueue isEmpty
     expect(scanDLP(cleanText).hasSensitiveData).toBe(false)
     expect(scanDLP(cleanText).violations).toHaveLength(0)
 
-    const ghpText = 'Here is my GitHub token: ghp_1234567890abcdef1234567890abcdef1234'
+    // Assembled from fragments: no tracked file may contain a scanner-matching literal, while the
+    // runtime string stays byte-identical so scanDLP is still exercised on the real pattern.
+    const ghpText = 'Here is my GitHub token: ghp_' + '1234567890' + 'abcdef' + '1234567890' + 'abcdef1234'
     const ghpResult = scanDLP(ghpText)
     expect(ghpResult.hasSensitiveData).toBe(true)
     expect(ghpResult.violations).toContain('GitHub PAT')
 
-    const skText = 'sk-1234567890abcdef1234567890abcdef1234'
+    const skText = 'sk-' + '1234567890' + 'abcdef' + '1234567890' + 'abcdef1234'
     const skResult = scanDLP(skText)
     expect(skResult.hasSensitiveData).toBe(true)
     expect(skResult.violations).toContain('OpenAI/DeepSeek API Key')
 
-    const keyBlock = '-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC...\n-----END PRIVATE KEY-----'
+    const keyBlock = '-----BEGIN PRIVATE ' + 'KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC...\n-----END PRIVATE ' + 'KEY-----'
     const keyResult = scanDLP(keyBlock)
     expect(keyResult.hasSensitiveData).toBe(true)
     expect(keyResult.violations).toContain('Private Key Block')
@@ -249,19 +251,19 @@ not ok 3 - PriorityQueue isEmpty
 
   it('Local Classifier: privacy beats complexity and scans the whole prompt', () => {
     const secretThenComplex =
-      'api_key = "sk-1234567890abcdef1234567890abcdef1234" ' + 'refactor the async architecture '.repeat(50)
+      'api_key = "sk-' + '1234567890' + 'abcdef' + '1234567890' + 'abcdef1234' + '" ' + 'refactor the async architecture '.repeat(50)
     const decision = classifyLocally(secretThenComplex)
     expect(decision.route).toBe('local')
     expect(decision.scores.is_private).toBe(0.99)
     expect(decision.gate).toContain('Privacy Protection')
 
     // A credential behind the complexity window must still be found.
-    const farBehind = 'sk-1234567890abcdef1234567890abcdef1234 ' + 'filler '.repeat(600)
+    const farBehind = 'sk-' + '1234567890' + 'abcdef' + '1234567890' + 'abcdef1234' + ' ' + 'filler '.repeat(600)
     expect(classifyLocally(farBehind).scores.is_private).toBe(0.99)
   })
 
   it('DLP Privacy Routing: Sensitive credentials force WORKER_LOCAL route', async () => {
-    const sensitivePrompt = 'ghp_1234567890abcdef1234567890abcdef1234 secret_key="super_secret_pass"'
+    const sensitivePrompt = 'ghp_' + '1234567890' + 'abcdef' + '1234567890' + 'abcdef1234' + ' secret_key="super_secret_pass"'
     const session: LLMSession = {
       prompt: sensitivePrompt,
       options: {},

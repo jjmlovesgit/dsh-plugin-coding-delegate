@@ -186,7 +186,7 @@ test("unresolvable context refuses the delegation instead of calling the worker 
 test("context carrying a credential is refused rather than handed to a possibly-remote endpoint", async () => {
   const { delegateWorker } = require(DIST);
   const dir = tmp();
-  write(dir, "config.ts", 'export const AWS_KEY = "AKIAIOSFODNN7EXAMPLE"\n');
+  write(dir, "config.ts", 'export const AWS_KEY = "AKIA' + 'IOSFODNN7' + 'EXAMPLE"\n');
 
   const verdict = await delegateWorker({
     taskName: "dlp-check",

@@ -92,7 +92,7 @@ test("the benchmark banner is attributed and admits that throughput is hardware-
 test("no classifier rationale or gate names hardware, on any route", () => {
   const { classifyLocally } = require(path.join(PLUGIN, "dist", "local-classifier.js"));
   const inputs = [
-    "My AWS key is AKIAIOSFODNN7EXAMPLE",
+    "My AWS key is AKIA" + "IOSFODNN7" + "EXAMPLE",
     "password: hunter2",
     "Write a Raft implementation with leader election and log compaction",
     "rename a local variable",

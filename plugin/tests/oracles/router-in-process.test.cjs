@@ -126,7 +126,7 @@ test("no daemon endpoint survives anywhere in the build", () => {
 
 test("a credential-bearing prompt never reaches the cloud route", async () => {
   const router = new LocalRouter();
-  const secret = 'api_key = "sk-abcdefghijklmnopqrstuvwxyz0123456789" ' + "refactor the async architecture ".repeat(50);
+  const secret = 'api_key = "sk-' + "abcdefghijklmnopqrstuvwxyz" + "0123456789" + '" ' + "refactor the async architecture ".repeat(50);
   const decision = await router.predictRoute(secret);
   assert.equal(decision.route, "WORKER_LOCAL");
   assert.match(decision.gate, /DLP Firewall/);

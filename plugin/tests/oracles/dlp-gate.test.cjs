@@ -80,9 +80,9 @@ test("every credential family trips the gate", async () => {
     "github pat": "ghp_" + "a".repeat(36),
     "fine-grained pat": "github_pat_" + "b".repeat(22) + "_" + "c".repeat(59),
     "openai key": "sk-" + "d".repeat(32),
-    "aws key": "AKIAIOSFODNN7EXAMPLE",
-    "slack token": "xoxb-1234567890-abcdefghij",
-    "private key": "-----BEGIN RSA PRIVATE KEY-----\nMIIE\n-----END RSA PRIVATE KEY-----",
+    "aws key": "AKIA" + "IOSFODNN7" + "EXAMPLE",
+    "slack token": "xoxb-" + "1234567890-" + "abcdefghij",
+    "private key": "-----BEGIN RSA PRIVATE " + "KEY-----\nMIIE\n-----END RSA PRIVATE " + "KEY-----",
     password: 'password: "hunter2hunter2"',
   };
   for (const [name, payload] of Object.entries(samples)) {
