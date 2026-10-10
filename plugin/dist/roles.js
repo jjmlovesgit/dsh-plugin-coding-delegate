@@ -297,6 +297,23 @@ function applyArchitectConfig(requestConfig, options = {}) {
         mutatedConfig.provider = route.provider;
         mutatedConfig.model = route.model;
     }
+    // A request pinned to the local worker must not carry a reasoning effort.
+    //
+    // A session's model selection is sticky: the last `model/selection` record keeps
+    // `reasoningEffort: 'high'` on every later request, and a local model commonly advertises no efforts
+    // at all -- `qwen/qwen3.8-27b` under `lm-studio` is configured without any. The pin therefore handed
+    // the host a request it refused before any network I/O:
+    //
+    //   provider "lm-studio" model "qwen/qwen3.8-27b" does not support reasoning effort "high"
+    //
+    // and because the effort is stored rather than per-message, it refused every later turn of that
+    // session too, which reads as a session that is permanently stuck. `index.ts` already clears this
+    // field when its own classifier selects the local worker; this is the other route into the local
+    // worker, so it clears the field as well. The cloud path keeps it: an effort is a capability of the
+    // model it was configured for, and stripping it there would silently downgrade the architect.
+    const pinnedLocal = options.rerouteLocal === true && !misrouted;
+    if (pinnedLocal)
+        delete mutatedConfig.reasoningEffort;
     // Uncap the context window for the cloud architect.
     delete mutatedConfig.contextWindow;
     delete mutatedConfig.maxTokens;

@@ -286,6 +286,13 @@ context window, and supplies the architect's instruction plus `delegate_worker`.
 architect and wrong for anything else — a lead agent you configured to run locally would be redirected
 to the cloud and told it was the architect, silently undoing the preset.
 
+A request **pinned to the local worker** (a DLP reroute under `dlpAction: 'local'`) also drops the
+request's `reasoningEffort`. A session's model selection is sticky — the last `model/selection` record
+carries its effort into every later request — and a local model commonly advertises no efforts at all,
+so the host would otherwise refuse the pinned request before any network I/O
+(`UNSUPPORTED_REASONING_EFFORT`) and refuse every later turn of that session with it. The cloud route
+keeps the effort: it is a capability of the model it was configured for.
+
 `leadProviders` names the provider ids that are **not** the architect. A request the host has already
 resolved to one of them is passed through untouched: same provider, same model, same context window,
 same instruction, and no `delegate_worker`. The DLP firewall still runs on it, because opting a

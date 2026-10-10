@@ -16,6 +16,9 @@
 //   3. `rerouteLocal` KEEPS writing undefined when no local provider is configured. That request was meant
 //      to stay off the cloud, so falling back to the host's route could send source there; the
 //      misconfiguration is left to fail loudly rather than succeed somewhere wrong.
+//   4. A pin that actually lands locally also drops the request's `reasoningEffort`, because the stored
+//      selection keeps it for the whole session and the local model may advertise none. The cloud path
+//      keeps it.
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
@@ -74,4 +77,39 @@ test('the architect treatment that is not about routing is unchanged', () => {
     assert.equal(gone in result, false, gone + ' is uncapped or removed for the architect');
   }
   assert.equal(result.provider, 'cloud', 'and the route is still pinned when one is configured');
+});
+
+test('a local pin drops the stored reasoning effort the local model cannot honour', () => {
+  // A session's model selection is sticky: the last `model/selection` record keeps
+  // `reasoningEffort: 'high'` on every later request. So a DLP pin used to hand the local worker an
+  // effort it does not advertise, and the host refused the request before any network I/O:
+  //
+  //   provider "lm-studio" model "qwen/qwen3.8-27b" does not support reasoning effort "high"
+  //
+  // Because the effort is stored rather than per-message, every later turn of that session was refused
+  // too -- the session read as permanently stuck. The cloud path keeps the effort: it belongs to the
+  // model it was configured for.
+  const local = applyArchitectConfig(
+    { provider: 'host-route', model: 'host-model', reasoningEffort: 'high' },
+    { rerouteLocal: true, localProvider: 'lm-studio', localModel: 'qwen/qwen3.8-27b' }
+  );
+  assert.equal(local.provider, 'lm-studio', 'the pin still lands locally');
+  assert.equal('reasoningEffort' in local, false, 'the local model advertises no such effort');
+
+  const cloud = applyArchitectConfig(
+    { provider: 'host-route', model: 'host-model', reasoningEffort: 'high' },
+    { cloudProvider: 'deepseek-official', cloudModel: 'deepseek-flash' }
+  );
+  assert.equal(cloud.reasoningEffort, 'high', 'the cloud route keeps the effort it was configured with');
+});
+
+test('an unroutable local reroute is not a pin, so it strips nothing', () => {
+  // The request fails loudly (property 3); it must not also quietly rewrite an effort for a route it
+  // never reached. Keeps the strip tied to the route actually taken rather than to the intent.
+  const result = applyArchitectConfig(
+    { provider: 'host-route', model: 'host-model', reasoningEffort: 'high' },
+    { rerouteLocal: true }
+  );
+  assert.equal(result.provider, undefined);
+  assert.equal(result.reasoningEffort, 'high', 'no route was pinned, so no capability was stripped');
 });
