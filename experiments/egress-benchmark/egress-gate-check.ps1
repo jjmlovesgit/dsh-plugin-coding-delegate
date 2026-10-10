@@ -41,21 +41,11 @@ Write-Host ""
 
 # ---------------------------------------------------------------- 3. did the egress listener mount?
 Write-Host "3. EGRESS LISTENER" -ForegroundColor Yellow
-Write-Host "   (the plugin writes this to its own trace only when declarations mode is active)"
-$egress = Select-String -Path $log -Pattern 'Source egress control registered'
-if ($egress) {
-  $last = ($egress | Select-Object -Last 1)
-  Write-Host ("   FOUND at log line {0}" -f $last.LineNumber) -ForegroundColor Green
-  Write-Host ("   {0}" -f $last.Line.Trim())
-  if ($last.LineNumber -ge $lastInit.LineNumber) {
-    Write-Host "   => mounted AFTER the last init: the control IS live" -ForegroundColor Green
-  } else {
-    Write-Host "   => mounted BEFORE the last init: STALE, from an earlier session" -ForegroundColor Yellow
-  }
-} else {
-  Write-Host "   NOT FOUND anywhere in the log" -ForegroundColor Red
-  Write-Host "   => the declarations listener has never mounted in this data directory" -ForegroundColor Red
-}
+Write-Host "   REMOVED. The plugin announces this listener with console.log, which goes to"
+Write-Host "   stdout and NOT to router-debug.log, so it can never be found here. An earlier"
+Write-Host "   version of this script grepped the log for it, always found nothing, and"
+Write-Host "   reported 'never mounted' on hosts where the control was in fact live."
+Write-Host "   Section 4 below is the real signal: a served declaration is traced."
 Write-Host ""
 
 # ---------------------------------------------------------------- 4. has it ever served a declaration?
@@ -94,8 +84,28 @@ if ($armed) {
   Write-Host "LISTENER MOUNTED but nothing served yet." -ForegroundColor Yellow
   Write-Host "Read plugin/src/declaration-egress.ts once, then re-run this script." -ForegroundColor Yellow
 } else {
-  Write-Host "NOT ARMED - the declarations listener is not registered." -ForegroundColor Red
-  Write-Host "The profile is patched, so the plugin is not receiving the option." -ForegroundColor Red
-  Write-Host "Report section 3 to the architect." -ForegroundColor Red
+  # No declaration has been served since the last init. That is consistent with THREE
+  # different states, and this script cannot tell them apart by itself:
+  #   (a) arm A is live            - the option is absent, reads return source
+  #   (b) the plugin is NOT LOADED - no hooks at all, reads return source
+  #   (c) arm B is live but nothing covered has been read yet
+  # Section 5 discriminates: if reads happened and nothing was served, it is (a) or (b).
+  Write-Host "NO DECLARATION SERVED since the last init." -ForegroundColor Yellow
+  Write-Host ""
+  Write-Host "That is consistent with three states, and this script cannot separate them:" -ForegroundColor Yellow
+  Write-Host "  (a) you are in arm A, the ungated default"
+  Write-Host "  (b) the plugin is not loaded at all"
+  Write-Host "  (c) you are in arm B, but no covered file has been read yet"
+  Write-Host ""
+  if ($reads -gt 0) {
+    Write-Host ("Section 5 shows {0} read(s) after the init, so (c) is ruled out." -f $reads) -ForegroundColor Cyan
+    Write-Host "A covered read returned content and nothing was served: you are in (a) or (b)." -ForegroundColor Cyan
+    Write-Host "Read plugin/src/declaration-egress.ts and compare what you get:" -ForegroundColor Cyan
+    Write-Host "  raw source    -> arm A  (the plugin is loaded, the option is off)"
+    Write-Host "  type skeleton -> arm B  (re-run this script, section 4 should now show it)"
+  } else {
+    Write-Host "Section 5 shows no reads after the init, so nothing is proved yet." -ForegroundColor Cyan
+    Write-Host "To settle it, read plugin/src/declaration-egress.ts and re-run." -ForegroundColor Cyan
+  }
   exit 2
 }
