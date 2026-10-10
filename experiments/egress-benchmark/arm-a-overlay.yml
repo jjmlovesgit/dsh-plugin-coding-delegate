@@ -1,0 +1,82 @@
+# Temporary overlay for the VERIFIED arm-A baseline of the egress benchmark.
+#
+# PURPOSE: resolve sourceReadEgress back to 'source' for one isolated run, without
+# editing ~/.dsh/profiles/tauri/cordis.patch.yml, so the live session and its
+# loaded arm are left untouched. Applied with:
+#
+#   dsh --profile tauri --patch experiments/egress-benchmark/arm-a-overlay.yml "<task prompt>"
+#
+# WHY THIS FILE REPEATS THE WHOLE CONFIG. A --patch entry does NOT deep-merge into
+# the profile's entry: the overlay's `config` object REPLACES the profile's for that
+# id. Verified with --dump-config, which composed the entry as
+#
+#   - id: local-router
+#     config:
+#       sourceReadEgress: source
+#
+# and nothing else -- guardAskPaths, dlpAction, leadTier, coherenceVerification and
+# both llm-* provider entries were gone. A one-key overlay therefore does not produce
+# "the profile's harness with egress off"; it produces a different harness entirely,
+# with no guard configuration and no provider routing, and any baseline taken with it
+# would be confounded rather than controlled.
+#
+# SO: every key below is copied verbatim from the loaded profile's local-router entry
+# (`~/.dsh/profiles/tauri/cordis.patch.yml`) with exactly ONE value changed:
+#
+#   sourceReadEgress: 'declarations'   ->   sourceReadEgress: 'source'
+#
+# The `llm-pi-ai` and `llm-deepseek` entries are repeated for the same replacement
+# reason; without them the composed config loses the provider definitions and the run
+# cannot reach a model at all. Re-diff this file against the profile before use -- a
+# profile edit after this file was written makes the two disagree, and the overlay
+# wins silently.
+#
+# VERIFY BEFORE TRUSTING ANY NUMBER:
+#   dsh --profile tauri --patch experiments/egress-benchmark/arm-a-overlay.yml --dump-config
+# then confirm the composed local-router entry resolves to sourceReadEgress: source AND
+# still carries the keys below. Preparing the profile writes its composed cordis.yml
+# into ~/.dsh/profiles/<name>/, which is outside the benchmark workspace and may need
+# wider file permissions than a confined session grants.
+#
+# Delete this file once the arm-A baseline is recorded; it is a benchmark artifact,
+# not part of the plugin.
+
+- id: local-router
+  config:
+    # THE ONE DELIBERATE CHANGE: arm A.
+    sourceReadEgress: 'source'
+    # declarationRoot is intentionally retained even though arm A never consults it,
+    # so the two arms differ in exactly one key.
+    declarationRoot: 'C:\Projects\DSHLaya\plugin\dist'
+    localProvider: 'lm-studio'
+    localModel: 'qwen/qwen3.8-27b'
+    cloudProvider: 'deepseek-official'
+    cloudModel: 'deepseek-chat'
+    # guardAskPaths REPLACES the built-in default (tests/, tools/), so all three are
+    # listed explicitly, exactly as the profile lists them.
+    guardAskPaths:
+      - 'plugin/src/'
+      - 'tests/'
+      - 'tools/'
+    dlpAction: 'local'
+    contractWriteMode: 'allow'
+    leadTier: true
+    coherenceVerification: 'cd /d C:\Projects\DSHLaya\plugin && npm run build && npx vitest run && npm run test:oracles'
+
+- id: llm-pi-ai
+  name: '@deepseek-ai/dsh-llm-pi-ai'
+  config:
+    providers:
+      lm-studio:
+        api: openai-completions
+        baseURL: http://127.0.0.1:1234/v1
+        apiKeyEnv: LM_STUDIO_API_KEY
+        models:
+          - id: qwen/qwen3.8-27b
+            name: 'Qwen 3.8 27B Local'
+            maxTokens: 16384
+
+- id: llm-deepseek
+  name: '@deepseek-ai/dsh-llm-deepseek'
+  config:
+    apiKeyEnv: DEEPSEEK_API_KEY

@@ -185,8 +185,19 @@ report "the control refuses nothing", which is the opposite of what the control 
 
 ## Results
 
-Observed values, one session per arm, three tasks per session, tree reset after every task. Log windows
-are 1-based line indices and every count is confined to its window.
+**Preliminary / single-run (n = 1).** Observed values, one session per arm, three tasks per session, tree
+reset after every task. Log windows are 1-based line indices and every count is confined to its window.
+
+> **Boundary callout — the pre-registered void condition, both readings.**
+> The rule in `benchmark-tasks.json` voids any run in which arm B never emits `SOURCE_DECLARATION_SERVED`.
+> **Strict reading:** zero such events fall inside the task windows `W_T1`, `W_T2`, `W_T3`, so the arm-B
+> runs are formally unconfirmed by that in-window criterion. **Empirical-liveness reading:** line 62237
+> (`plugin/src/declaration-egress.ts` → `plugin/dist/declaration-egress.d.ts`, 1923 bytes) proves the
+> post-execute hook was mounted and functional immediately before task 1 began
+> (`LIVE_BEFORE` 60691 < 62237 < `START_1` 62277), and the absence of declaration events in `W_T2` and
+> `W_T3` was the mechanism working — refusals preempting declaration dispatch — not an inactive hook.
+> Both readings are retained. The table is not marked void; it is marked single-run and unconfirmed by the
+> in-window criterion.
 
 | metric | task / tier | arm A (`source` — ungated baseline) | arm B (`declarations` — gated) | delta / observed mechanism |
 | --- | --- | --- | --- | --- |
@@ -257,11 +268,10 @@ instruments; the read columns are not.
   `plugin/src/declaration-egress.ts` → `plugin/dist/declaration-egress.d.ts` (1923 bytes) at log line
   62237, which lies between `LIVE_BEFORE` 60691 and `START_1` 62277, and reads of covered `.ts` files
   returned compiled skeletons while shell commands naming source content were refused.
-- **No `SOURCE_DECLARATION_SERVED` event falls inside any arm-B task window.** The gate event at 62237 is
-  the sole declaration event in 62200–62958, and it precedes `START_1`. Under a strict reading of the
-  decision rule below — which forbids the pattern appearing anywhere in the window — all three arm-B runs
-  would be void; under the reading applied here, the pre-task gate establishes that the arm was live and
-  the runs stand. Recorded because the two readings disagree, and the rule as written was pre-registered.
+- **No `SOURCE_DECLARATION_SERVED` event falls inside any arm-B task window.** See the boundary callout
+  above: the strict reading of the pre-registered rule would leave the arm-B runs formally unconfirmed,
+  while the gate event at 62237 establishes the arm was live immediately before task 1. The rule as
+  written was pre-registered, so both readings are recorded rather than one being retired post hoc.
 - **The arms are different sessions**, so prior context differs between them.
 - **Tier difficulty is not comparable**; aggregate percentages across tiers are meaningless.
 - **`contextFiles` injected to the worker are not governed by `sourceReadEgress`**, so the architect's
@@ -306,6 +316,26 @@ nothing.
   from earlier work). A liveness check that greps the whole file will therefore pass against Arm A.
   Arm B's gate must confirm a **new** event after the pre-read line count, not merely that the pattern
   appears anywhere.
+- **The one-shot `--patch` route does not exist on this machine.** An attempt was made to run the arm-A
+  baseline as an isolated subprocess (`dsh --profile tauri --patch experiments/egress-benchmark/arm-a-overlay.yml "<prompt>"`),
+  which would have resolved both open threats — a fresh session and an exact wall clock — without touching
+  the live profile. It cannot work, for three independently blocking reasons:
+  1. **`--patch` replaces an entry's `config`; it does not deep-merge.** Verified with `--dump-config`: a
+     one-key overlay composed `local-router` down to `sourceReadEgress: source` alone, silently dropping
+     `guardAskPaths`, `dlpAction`, `leadTier`, `coherenceVerification` and both provider entries. A
+     one-key overlay therefore measures a *different harness*, not the same harness with egress off.
+     `arm-a-overlay.yml` was rewritten to repeat the full entry so the two arms differ in exactly one key.
+  2. **The tauri profile accepts no arguments**, so it cannot host a one-shot run: passing a prompt fails
+     with `too many arguments. Expected 0 arguments but got 1`. The only one-shot form the CLI documents is
+     `dsh --profile headless`, and no `headless` profile is installed (`~/.dsh/profiles` contains only
+     `default`, `tauri`, `web`). The `web` app is a GUI server, not a prompt-and-exit runner.
+  3. **Preparing any profile writes outside the benchmark workspace.** Booting a profile composes
+     `~/.dsh/profiles/<name>/cordis.yml`, which a confined session cannot write (`EPERM`), so each
+     invocation would need escalated file permissions.
+  Consequence: the arm-A baseline cannot be taken from inside a session, and the claim under **Who can run
+  this** — that the run requires a human operator with a session launcher — is empirically confirmed rather
+  than merely asserted. `arm-a-overlay.yml` is retained so an operator on the host can take that baseline
+  in one command once the profile is flipped.
 
 ### Arm B — first attempt, voided, superseded by the run tabulated above
 
