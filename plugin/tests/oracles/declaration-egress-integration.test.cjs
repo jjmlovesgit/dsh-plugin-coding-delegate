@@ -104,3 +104,12 @@ test("control: a tool that is not a read, search or shell is unaffected", async 
   const decision = await dispatch("delegate_worker", { taskName: "x", instruction: "y" });
   assert.ok(!replacedContent(decision), "an unrelated tool is not an egress route");
 });
+
+test("control: cat is a READ tool, so it is routed by path and not by command", async () => {
+  // cat is a member of READ_TOOLS, not SHELL_TOOLS. A dispatch named 'cat' carrying a `command` field is
+  // therefore classified as a read whose target is arguments.path, which is absent -- so nothing is
+  // refused. This control pins that classification, because a wiring that reached the shell branch here
+  // would be reading the wrong argument field, and that is the defect that would hide a real block.
+  const decision = await dispatch("cat", { command: "Get-Content src/guard.ts" });
+  assert.ok(!replacedContent(decision), "cat must be classified as a read, not a shell command");
+});

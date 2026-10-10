@@ -338,18 +338,15 @@ What exists for the fixed findings:
 | 6 (`gc`) | `plugin/tests/oracles/control-bypass.test.cjs` | asserts listing/testing commands are **not** gated |
 | 8, 10 (`read`) | `plugin/tests/oracles/egress-guard.test.cjs` | mapping, pass-through, staleness refusal, no implementation statements |
 | 8, 10 (search, shell) | `plugin/tests/oracles/declaration-egress-scope.test.cjs` | 14 assertions over the pure decision, 5 of them controls so the gate cannot pass by refusing everything |
-| 8, 10 (wiring) | `plugin/tests/oracles/declaration-egress-integration.test.cjs` | 6 assertions driven through the real `tools/post-execute` listener: 3 defect cases, 3 controls |
+| 8, 10 (wiring) | `plugin/tests/oracles/declaration-egress-integration.test.cjs` | 7 assertions driven through the real `tools/post-execute` listener: 3 defect cases, 4 controls |
+| 19 (sink) | `plugin/tests/oracles/security-review-2-regressions.test.cjs` case B | drives the real `trace()` in a temp data directory and asserts a synthetic token is absent from the log |
+| 19 (shape) | `plugin/tests/oracles/trace-redaction-pure.test.cjs` | 7 assertions on `redactTracePayload` directly: length marker, other fields preserved, no caller mutation, non-object and non-string inputs |
 
 What does **not** exist, and is the largest gap this document exposes:
 
 - No test for **scope-free** search gating (6/9 second half). The defect is known and unasserted.
 - No test for eviction at `DELEGATED_PATH_LIMIT` (18). `durable-registry.test.cjs` covers pruning of
   deleted files only.
-- No test for log redaction (19). The behaviour is asserted indirectly — redaction lives in
-  `redactTracePayload` inside `trace()`, and a test exercising that function directly does not yet exist.
-- No test pinning the `cat` classification on the new hook. `cat` is a `READ_TOOLS` member, so a `cat`
-  dispatch carrying `command` is classified as a read and allowed; the wiring handles this correctly but
-  nothing asserts it.
 - No test for the context-budget **ordering** (7/12). A budget refusal *is* asserted —
   `plugin/tests/oracles/context-injection.test.cjs:92`, "exceeding the byte budget is refused and
   reported, never silently truncated", including that an over-budget injection is not partially applied.
