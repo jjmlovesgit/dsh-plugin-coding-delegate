@@ -33,6 +33,28 @@ stays on the local machine; what travels back is the failure *structure*, with s
 > [What this control does not cover](#what-this-control-does-not-cover). Read that section before deciding
 > whether it fits your situation.
 
+```text
+  CLOUD  (metered, holds the design conversation)          LOCAL  (your box, your GPU)
+  +------------------------------------------------+       +-------------------------------+
+  |  ARCHITECT                                     |       |  WORKER                       |
+  |    •  no write        (pre-execute, rule 2)    |       |    •  fresh context per unit  |
+  |    •  no shell        (pre-execute, rule 5)    |       |    •  ephemeral, then discarded|
+  |    •  reads served as .d.ts stubs (when active)|       |    •  workspace root enforced |
+  |                                                |       |    •  verification: subprocess|
+  +------------------------------------------------+       +-------------------------------+
+            |                                                        ^
+            |  1. CONTRACT                                           |  2. VERDICT
+            |     instruction, declared paths,                       |     pass/fail counts
+            |     the verification command                           |     redacted failure shape
+            |                                                        |     names of files written
+            v                                                        |
+  ==============================[ SUBPROCESS BOUNDARY ]==============================
+                          human approval before it runs  (rule 6)
+
+  What the channel does NOT carry:
+    no design conversation   no other units   no code (either direction)
+```
+    
 ## What it does
 
 Five things, in the order they act:
