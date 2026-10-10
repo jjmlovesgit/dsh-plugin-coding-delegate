@@ -23,7 +23,7 @@ of 9 causes would triple the document and hide that the same defect was counted 
 | Caller-selected `workspaceDir` defeats containment | 3 | high | **Fixed** |
 | Delegated read guard misses `gc` and scope-free searches | 6, 9 | medium | **Half fixed** — `gc` fixed, scope-free open |
 | Context budget checked after whole-file read | 7, 12 | medium | **Confirmed, not fixed** |
-| Declarations mode serves raw source by other routes | 8, 10 | medium | **Split** — `read` bypass fixed, search/shell open |
+| Declarations mode serves raw source by other routes | 8, 10 | medium | **Fixed** |
 | Shell guard misses runtime-computed source paths | 11, 14 | medium | **Confirmed, not fixed** — by design |
 | Request DLP omits host-assembled content | 13, 15 | medium | **Confirmed, not fixable here** |
 | Verification allowlist matches basename, runs full command | 16, 17 | medium | **Confirmed, not fixed** — documented trade |
@@ -102,7 +102,8 @@ source. This half is implemented and asserted by
 `plugin/tests/oracles/egress-guard.test.cjs` (mapping, pass-through of non-source reads, staleness
 refusal, and an assertion that no implementation statement appears in the served artifact).
 
-The second half is **not** fixed — see below.
+Both halves are now fixed. The first is described immediately above; the second — the search and shell
+routes — is recorded under "Fixed in the current tree" below.
 
 ## Not fixed, and why
 
@@ -148,17 +149,46 @@ not, and the existing test cannot detect a regression in it.
 
 ### Findings 8 and 10, second half — search, shell and non-TypeScript routes
 
-The declarations redirect is registered on `tools/post-execute` and applies to `READ_TOOLS` only
+The declarations redirect was registered on `tools/post-execute` and applied to `READ_TOOLS` only
 (`plugin/src/index.ts:1407`). A `grep`, `rg`, `Select-String` or shell `Get-Content` reaching the same
-file is not redirected, so with declarations mode on, the file's **source body** is still what comes
-back through those routes. The option's own documentation is explicit that it governs reads of `.ts`
-files served as declarations and that a source file with no declaration is refused; it does not claim to
-cover content-returning shell commands, and it does not.
+file was not redirected, so with declarations mode on, the file's **source body** was still what came
+back through those routes. There were two distinct holes:
 
-Not fixed. Fixing it means extending the same redirect to content-returning shell output, which is a
-different problem from serving a `.d.ts`: the post-execute seam would have to attribute a slice of
-command output to a source file, and it has no reliable way to do that for `grep` output that may quote
-several files.
+- **Search and shell returned before the filter ran at all**, because `if (!READ_TOOLS.has(name)) return
+  decision` exits for any other tool.
+- **Consumable extensions outside the TypeScript set were served raw.** `declarationPathFor`
+  (`guard.ts:571-588`) returns `null` for anything outside `.ts/.tsx/.js/.jsx`, and the old caller read
+  `null` as *"not a source file: nothing to strip"*. `CODE_EXTENSIONS` (`paths.ts:38`) lists about thirty
+  extensions, so the gap between the two sets was exactly the leak.
+
+**Fixed**, in five commits. The decision is now a pure function with no host dependency, the wiring is a
+two-line call site, and neither touches the read path:
+
+| commit | what it does |
+| --- | --- |
+| `cda4830` | `plugin/src/declaration-egress.ts` — `evaluateDeclarationEgress`, a pure decision over tool kind, target, mode and injected helpers. Returns `allow`, `serve-declaration` or `block` with a reason |
+| `0f36f14` | `plugin/tests/oracles/declaration-egress-integration.test.cjs` — the red integration oracle, which mounts the real plugin and drives mock dispatches through the real `tools/post-execute` listener |
+| `04d3b21` | exports `SHELL_TOOLS` and `longestCodeReference` from `guard.ts`, so the wiring reuses the existing vocabularies rather than defining a second one; corrects the oracle's shell case, since `cat` is a `READ_TOOLS` member and never reaches the shell branch |
+| `0ac0b09` | `plugin/src/declaration-egress-hook.ts` — `handleDeclarationPostExecute`, holding classification, argument extraction and dispatch. `declarationPathFor`'s second parameter became optional, because the evaluator types it `(filePath, root?)` and a required parameter is not assignable |
+| `04d222c` | the call site in `index.ts`, 7 lines |
+
+**What the fix deliberately does not do.** `handleDeclarationPostExecute` returns `null` for reads, so
+direct reads continue into the branch that already handled them. That branch is the only place the
+**staleness check** (`staleDeclarationReason`) runs and the only place the *"SERVED AS TYPE
+DECLARATIONS, NOT SOURCE"* banner is emitted, and both are pinned by `egress-guard.test.cjs`. Serving
+reads from the new module would have replaced a tested control with an untested one. The hook therefore
+handles precisely the two routes that can act on nothing except by refusing:
+
+- **Search** — a search returns matched *lines*, so there is no whole file to substitute a skeleton for.
+  The scope decides: a search confined to a non-code path is allowed, and an unstated scope is refused
+  because it cannot be shown to avoid source.
+- **Shell** — refused when the command both reads content and names a source path. A listing or existence
+  test reads no bytes and is allowed through. When either inspector is missing the branch **blocks**,
+  because an egress filter that cannot evaluate must not wave the read through.
+
+Fail-closed on unmappable code extensions is retained: under declarations mode a `.py`, `.go`, `.rs` or
+`.sh` read is **refused**, since no build can produce a skeleton for it and serving the body is the leak
+the setting exists to prevent. The reason string says so and points at the two remedies.
 
 ### Findings 11 and 14 — shell write guard misses runtime-computed paths
 
@@ -307,13 +337,19 @@ What exists for the fixed findings:
 | 3 | `plugin/tests/oracles/workspace-containment.test.cjs` | 11 behavioural, 5 structural |
 | 6 (`gc`) | `plugin/tests/oracles/control-bypass.test.cjs` | asserts listing/testing commands are **not** gated |
 | 8, 10 (`read`) | `plugin/tests/oracles/egress-guard.test.cjs` | mapping, pass-through, staleness refusal, no implementation statements |
+| 8, 10 (search, shell) | `plugin/tests/oracles/declaration-egress-scope.test.cjs` | 14 assertions over the pure decision, 5 of them controls so the gate cannot pass by refusing everything |
+| 8, 10 (wiring) | `plugin/tests/oracles/declaration-egress-integration.test.cjs` | 6 assertions driven through the real `tools/post-execute` listener: 3 defect cases, 3 controls |
 
 What does **not** exist, and is the largest gap this document exposes:
 
 - No test for **scope-free** search gating (6/9 second half). The defect is known and unasserted.
 - No test for eviction at `DELEGATED_PATH_LIMIT` (18). `durable-registry.test.cjs` covers pruning of
   deleted files only.
-- No test for log redaction (19).
+- No test for log redaction (19). The behaviour is asserted indirectly — redaction lives in
+  `redactTracePayload` inside `trace()`, and a test exercising that function directly does not yet exist.
+- No test pinning the `cat` classification on the new hook. `cat` is a `READ_TOOLS` member, so a `cat`
+  dispatch carrying `command` is classified as a read and allowed; the wiring handles this correctly but
+  nothing asserts it.
 - No test for the context-budget **ordering** (7/12). A budget refusal *is* asserted —
   `plugin/tests/oracles/context-injection.test.cjs:92`, "exceeding the byte budget is refused and
   reported, never silently truncated", including that an over-budget injection is not partially applied.
