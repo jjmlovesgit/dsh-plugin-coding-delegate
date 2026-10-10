@@ -34,6 +34,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.resolveDataDir = resolveDataDir;
+exports.redactTracePayload = redactTracePayload;
 exports.trace = trace;
 const fs = __importStar(require("fs"));
 const os = __importStar(require("os"));
@@ -55,9 +56,32 @@ function resolveDataDir() {
     return path.join(os.homedir(), '.dsh', 'local-router');
 }
 const LOG_FILE = path.join(resolveDataDir(), 'router-debug.log');
+/**
+ * Remove prompt text from a trace payload before it is written to disk.
+ *
+ * A debug log outlives the session, and call sites pass a prompt slice into it. No prompt content may
+ * be persisted, so the value is replaced with its length rather than scanned for secrets: pattern
+ * detection has false negatives, and a replacement is a guarantee where a pattern is a probability.
+ * Every other field is preserved, because redaction that succeeds by writing nothing removes the
+ * diagnostic value the log exists for.
+ *
+ * Pure and exported so it is testable directly. The caller's object is not mutated.
+ */
+function redactTracePayload(data) {
+    if (!data || typeof data !== 'object' || Array.isArray(data))
+        return data;
+    const copy = { ...data };
+    if (typeof copy.prompt === 'string') {
+        copy.prompt = 'prompt suppressed (' + copy.prompt.length + ' chars)';
+    }
+    return copy;
+}
 function trace(event, data) {
     const timestamp = new Date().toISOString();
-    const entry = `\n[${timestamp}] === ${event} ===\n${typeof data === 'string' ? data : JSON.stringify(data, null, 2)}\n`;
+    const payload = redactTracePayload(data);
+    const entry = '\n[' + timestamp + '] === ' + event + ' ===\n' +
+        (typeof payload === 'string' ? payload : JSON.stringify(payload, null, 2)) +
+        '\n';
     try {
         fs.mkdirSync(path.dirname(LOG_FILE), { recursive: true });
         fs.appendFileSync(LOG_FILE, entry, 'utf8');

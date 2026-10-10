@@ -67,6 +67,22 @@ export function resolveContextFiles(
       continue
     }
 
+    const declaresRange = request.startLine !== undefined || request.endLine !== undefined
+    if (!declaresRange) {
+      try {
+        const fileSize = fs.statSync(resolvedPath).size
+        if (fileSize > maxBytes - totalBytes) {
+          errors.push(
+            `context injection would exceed its ${maxBytes}-byte budget (${totalBytes + fileSize} bytes declared). ` +
+              `Narrow the line ranges or declare fewer files.`
+          )
+          continue
+        }
+      } catch {
+        // stat failed; fall through to the read attempt so the existing error path reports it
+      }
+    }
+
     let raw: string
     try {
       raw = fs.readFileSync(resolvedPath, 'utf8')
