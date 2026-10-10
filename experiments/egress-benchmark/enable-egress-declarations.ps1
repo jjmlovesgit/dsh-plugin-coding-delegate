@@ -59,14 +59,17 @@ if (-not (Test-Path $pluginDir))   { Fail "plugin directory not found: $pluginDi
 $otherName = 'web'
 if ($Profile -eq 'web') { $otherName = 'tauri' }
 $otherFile = Join-Path $env:USERPROFILE ".dsh\profiles\$otherName\cordis.patch.yml"
-if ((Test-Path $otherFile) -and (Select-String -Path $otherFile -Pattern 'sourceReadEgress' -Quiet)) {
+if ((Test-Path $otherFile) -and (Select-String -Path $otherFile -Pattern '^\s*sourceReadEgress:' -Quiet)) {
   Write-Host "WARNING: the '$otherName' profile already sets sourceReadEgress." -ForegroundColor Yellow
   Write-Host "         Two patched profiles make the arm ambiguous. Revert one first." -ForegroundColor Yellow
   Write-Host ""
 }
 
 # ---------------------------------------------------------------- idempotence
-if (Select-String -Path $profileFile -Pattern 'sourceReadEgress' -Quiet) {
+# Anchored to an ACTIVE key. A bare 'sourceReadEgress' match also hits a COMMENTED-OUT
+# line, which is how the arm-A shape is parked -- matching that would report "already
+# patched" and silently refuse to re-arm, leaving a later run measuring the wrong arm.
+if (Select-String -Path $profileFile -Pattern '^\s*sourceReadEgress:' -Quiet) {
   Write-Host "already patched - no change made." -ForegroundColor Yellow
   Select-String -Path $profileFile -Pattern 'sourceReadEgress|declarationRoot' |
     ForEach-Object { Write-Host ("  L{0}: {1}" -f $_.LineNumber, $_.Line.Trim()) }
