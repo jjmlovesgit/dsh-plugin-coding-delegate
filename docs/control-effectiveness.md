@@ -406,19 +406,25 @@ any delegation that touches the file**, and anyone treating one as a permanent c
 model. The alternative — letting a stale human claim outlive its content — is the failure this verdict
 exists to prevent.
 
-## Two containment layers, and only one of them is unconditional
+## Two containment layers, and neither of them is unconditional
 
 Stated because a summary that says "the worker writes only within its declared boundary" reads as five
-unconditional perimeters, and the unit boundary is not one of them.
+unconditional perimeters, and neither of these is one.
 
 | layer | mechanism | invariant |
 | --- | --- | --- |
-| **workspace boundary** | `workspaceDir` + `emitAllowlist` roots | **unconditional** — the worker cannot write outside these roots, on any dispatch |
+| **workspace boundary** | `workspaceDir` + `emitAllowlist` roots | **policy-gated base, unconditional inside it** — the worker cannot write outside these roots on any dispatch, but a *caller-supplied* `workspaceDir` is trusted only when it is the session root or an allowlisted one; anything else prompts, and is refused when no approval service is reachable |
 | **task unit scope** | `targetFiles`, with `unitScope: 'enforce'` by default | **conditional** — a write to a path the unit did not declare is refused, but **a unit that declares nothing is unrestricted across the workspace** |
+
+The first was unconditional in the wrong sense for as long as it existed. Containment of the emitted
+files was always sound: both sides are canonicalised, so a symlink or a `..` cannot escape the base. What
+went unexamined is that the base was a **model-visible argument**, so naming a directory outside the
+session workspace made every later check true by construction. That is the difference between a boundary
+and a boundary the subject gets to place, and it is why the base is now decided by policy.
 
 The second is an opt-in contract property, not a perimeter. The plugin's own documentation says so twice — in
 `plugin/README.md` and in the `targetFiles` schema — and both say it plainly: *"Omit the field to leave the
-unit unrestricted."* So the accurate claim is **contained to the workspace unconditionally, and to the
+unit unrestricted."* So the accurate claim is **contained to the chosen workspace unconditionally, and to the
 declared unit scope when one was declared**, and nothing forces an architect to declare one.
 
 That distinction is worth keeping in view for the same reason the others in this file are: a boundary count

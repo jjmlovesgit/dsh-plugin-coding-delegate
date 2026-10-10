@@ -349,10 +349,26 @@ nothing decides which files a unit needs, and nothing checks that two units agre
 
 ### Where the files go
 
-- **`workspaceDir`** selects the destination explicitly. Pass it. Automatic resolution
+- **`workspaceDir`** selects the destination explicitly. Automatic resolution
   cannot see the DSH session workspace (the Cordis `Agent` exposes only an id, and the path
   lives in session metadata behind a store the plugin cannot reach), so omitting it resolves
   to the server's working directory and says so in `summary`.
+
+  Because the argument is model-visible, it **replaces the base directory for every containment
+  check**, so it is gated by policy rather than taken on trust:
+
+  | destination | policy |
+  | --- | --- |
+  | omitted | trusted — the session workspace |
+  | inside the session workspace | trusted |
+  | outside it, but under an `emitAllowlist` root | trusted — the operator's explicit grant |
+  | outside it and not allowlisted | **operator prompt**; refused when no approval service is reachable |
+
+  So passing an unconfigured external directory now **asks** rather than writing silently. A refusal
+  is a `CONTEXT_REFUSED` verdict and the worker is never called. Auto-resolved directories are gated on
+  the same four rows: resolution reads environment variables and context services, and a compromise
+  there should not widen containment either. The allowlist is the way to authorise a directory once
+  instead of approving it every time.
 - **File emission** is driven by fenced code blocks whose header names the target, e.g.
   ```` ```ts file="src/thing.ts" ```` or a `// FILE: src/thing.ts` first line.
 - **Safety**: output that does not look like source code is refused rather than written. That check exists

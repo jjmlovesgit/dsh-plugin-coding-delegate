@@ -112,13 +112,18 @@ every item is the kind of boundary it claims to be.
 | --- | --- | --- | --- |
 | 1 | **Mutation integrity** | `tools/pre-execute` blocks cloud writes and shell execution | the planning tier physically cannot write or run on the host |
 | 2 | **Egress privacy** | `tools/post-execute` serves `.d.ts` stubs via `sourceReadEgress: 'declarations'` | a read is refused if the declaration is **absent or older than its source** |
-| 3a | **Workspace root** | `workspaceDir` + `emitAllowlist` | **unconditional** — the worker cannot escape the sandbox directory |
+| 3a | **Workspace root** | `workspaceDir` + `emitAllowlist` | **policy-gated** — the worker cannot escape the sandbox directory, and the *base* directory is trusted only when it is the session root or an allowlisted one |
 | 3b | **Task unit scope** | `targetFiles`, `unitScope: 'enforce'` | **conditional** — refused for undeclared paths, but **a unit that declares nothing is unrestricted across the workspace** |
 | 4 | **Flakiness containment** | `runVerification` runs 3 passes by default | non-deterministic drift records `UNIT_FLAKY` and halts promotion |
 | 5 | **Promotion socket** | `scripts/check-promotion.cjs` | any post-verdict edit flips the exit code to 1 |
 
-Three of those are qualified and the qualifications matter more than the rows:
+Four of those are qualified and the qualifications matter more than the rows:
 
+- **Row 3a is policy-gated, not merely declared.** Containment of the emitted files is sound — both sides
+  are canonicalised, so a symlink or a `..` cannot escape the base. What the base *is* was a model-visible
+  argument, so naming a directory outside the session workspace used to make every later check true by
+  construction. The base is now trusted only when it is the session workspace, a path inside it, or under
+  an `emitAllowlist` root; anything else prompts, and is refused when no approval service is reachable.
 - **Row 3b is opt-in.** The workspace root is a hard perimeter; the *unit* boundary exists only when the
   architect declared one, and nothing forces it to. Confusing the two is how a table reads as five
   unconditional boundaries when one is a contract property.
@@ -145,9 +150,12 @@ is blocked from file mutation and shell execution at `tools/pre-execute` — acr
 [`control-bypass.test.cjs`](plugin/tests/oracles/control-bypass.test.cjs), four refused outright and eleven
 held for approval, none reaching source without a grant. Mutation authority sits with a local worker inside
 a bounded workspace.
-*The limit:* the workspace root is an unconditional boundary, but **the per-file `targetFiles` restriction
-is conditional on declaration** — a unit that declares nothing is unrestricted across the workspace. A
-policy that forces declaration is a reasonable ask and is not built.
+*The limits:* containment **inside a chosen base** is unconditional — a symlink or a `..` cannot escape it
+— but the **base itself is policy-gated**, because `workspaceDir` is a model-visible argument: the session
+workspace and allowlisted roots are trusted, anything else prompts, and is refused when no approval service
+is reachable. Beyond that, **the per-file `targetFiles` restriction is conditional on declaration** — a unit
+that declares nothing is unrestricted across the workspace. A policy that forces declaration is a reasonable
+ask and is not built.
 
 **2. Promotion is tamper-evident rather than a vibe check.** Git shows commits; it does not show whether a
 remote model or a certified local unit produced the bytes. The promotion socket binds a file to a SHA-256
