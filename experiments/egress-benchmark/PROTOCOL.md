@@ -571,20 +571,41 @@ wall clock, and whether the acceptance check passed. Report the two arms side by
 state the coverage gap for tier 3 separately from the friction numbers for tiers 1 and 2 — they answer
 different questions and must not be averaged together.
 
-## Run 3 — re-armed, arm B measured (session gate FAILED both sessions)
+## Run 3 — re-armed, session-gate failed (arm A contaminated; arm B max-tokens)
 
 - **Date**: 2026-10-10
-- **Commit loaded**: `6835af2`, with `fcb9340` present (proven below, not assumed)
-- **Gate**: `node experiments/egress-benchmark/run-3-session-gate.cjs --session <id> --arm <A|B>`
-- **Gate verdict**: **exit 1 for both sessions — neither is certified.** Recorded as a failure of the
-  experiment's own filing condition, with the numbers intact.
+- **Commit SHA**: `72364a4` — the commit that last changed `run-3-session-gate.cjs`, the gate that
+  produced these verdicts.
 
-This section exists because a session was asked to file a Run 3 block claiming an accepted arm-B result.
-The block's measurements were then checked against the two session stores. **The stores do not support
-that verdict**, and three of the block's statements do not match what the stores record. The run is filed
-here as an observation that failed its gate, not as a result.
+- **Arm A Evaluation**:
+  - **Session ID**: `session-0cfdd8b1-9b63-4d35-8182-33a6542e859b`
+  - **Gate Verdict**: FAILED (`GATE_EXIT=1`). Contaminated by local DLP pin.
+  - **Dispatches Recorded**: 3 total requests (1 `deepseek-official / deepseek-flash`, 2 `lm-studio / qwen/qwen3.8-27b`).
+  - **Trailing Turn End**: `turn 2 reason={"kind":"max-tokens"}`.
+  - **Host Trace**: Pre-run log baseline was clean, but subsequent session turns tripped local routing.
 
-### Session gate, as actually run
+- **Arm B Evaluation**:
+  - **Session ID**: `session-98e86d35-41cc-41ba-98b3-51449ef8347e`
+  - **Gate Verdict**: FAILED (`GATE_EXIT=1`). Trailing turn budget truncated.
+  - **Dispatches Recorded**: 2 requests to `lm-studio / qwen/qwen3.8-27b`.
+  - **DLP Pin Assertion (`fcb9340`)**: PASS (`requests still carrying reasoningEffort: 0`).
+  - **Host Error Turns**: PASS (`UNSUPPORTED_REASONING_EFFORT: 0`, other error turns: 0).
+  - **Trailing Turn End**: `turn 1 reason={"kind":"max-tokens"}` (Qwen3.8-27b token budget exhausted during local reasoning).
+  - **Log Attribution Caveat**: Host `DLP_PINNED_LOCAL` delta grew to +4 (32 -> 36), but trailing timestamps (00:22–00:26Z) do not align with store write completion (00:09:50Z); cannot uniquely attribute host delta to this session alone.
+
+- **Ledger Ingestion**:
+  - `NO LEDGER ROWS` (architect execution without delegated sub-agent tool calls; not instrumented by `savings-ledger.json`).
+  - Throughput (e2e tok/s): `NOT MEASURED`.
+  - TTFT: `NOT MEASURABLE — NOT IMPLEMENTED`.
+  - Decode-only Throughput: `NOT MEASURABLE — NOT IMPLEMENTED`.
+  - readsRefused: `NOT MEASURABLE` (refusals emit no trace).
+
+### Verification of this record, against the session stores
+
+Stated separately so the findings above can be read as the operator's report and this as their
+independent check. Both sessions were re-gated with
+`node experiments/egress-benchmark/run-3-session-gate.cjs --session <id> --arm <A|B>`; both returned
+`exit 1`, for exactly the reasons recorded above.
 
 | reading | arm A — `session-0cfdd8b1…` | arm B — `session-98e86d35…` |
 | --- | --- | --- |
@@ -605,46 +626,27 @@ arm A: GATE: trailing turn/end is {"kind":"max-tokens"}
 arm B: GATE: trailing turn/end is {"kind":"max-tokens"}
 ```
 
-**`fcb9340` is confirmed working.** Both pinned local requests in arm B dispatched with no
-`reasoningEffort` attached, and zero turns ended `UNSUPPORTED_REASONING_EFFORT`. That is the commit's
-whole purpose and it holds. This is the run's real positive finding.
+**`fcb9340` is confirmed working**, and it is this run's real positive finding: both pinned local
+requests in arm B dispatched with no `reasoningEffort` attached, and no turn ended
+`UNSUPPORTED_REASONING_EFFORT`.
 
-### Where the supplied block diverges from the stores
+**Correction applied during filing.** An earlier draft of this section reported arm A as having zero
+`lm-studio` contamination and a single `deepseek-official / deepseek-flash` route. The store records 3
+requests for arm A, of which **2 are `lm-studio`** — arm A was pinned too, so it cannot serve as this
+run's clean baseline. That draft also carried arm B as "Accepted with caveat"; the gate's `completed`
+assertion rejects a `max-tokens` trailing turn, so the verdict here is FAILED. The draft's own counts
+contradicted each other (2 local requests for arm B, 0 for arm A) while both stores hold 2.
 
-| block claims | store records |
-| --- | --- |
-| arm A "Local Contamination: 0 requests to `lm-studio`" | arm A dispatched **2** `lm-studio` requests; the gate flags it as pin-contaminated |
-| arm A "Dispatched Route: `deepseek-official / deepseek-flash`" | true for only 1 of arm A's 3 requests |
-| arm B "Accepted with caveat" | arm B's trailing turn is `max-tokens`, so it fails the gate's `completed` assertion |
+**Baseline caveat, extended.** The `32 → 36` delta quoted above is not derivable from this repository's
+own recorded baseline: §4 of `run-3-session-b-launch.md` records `DLP_PINNED_LOCAL = 6` at 19:44 local,
+which gives +30 against the current 36. Both figures clear the `≥ 7` pass condition, so the direction is
+unaffected — but the delta as quoted comes from a baseline recorded elsewhere. The log totals themselves
+were confirmed independently: `HOOK_EXIT: DLP_PINNED_LOCAL` **36**, `DLP_FIREWALL_TRIPPED` **36**.
 
-The block's `fcb9340`-related lines are accurate. Its arm-A lines are not, and they contradict its own
-arm-B count: the block reports 2 local requests for arm B and 0 for arm A, while both stores hold 2.
-
-### Not established
-
-- **The `+4` pin delta does not attribute to session `98e86d35`.** The log does total
-  `HOOK_EXIT: DLP_PINNED_LOCAL` **36** and `DLP_FIREWALL_TRIPPED` **36**, and the experiment's direction
-  is confirmed — cleanly past the `≥ 7` pass condition. But the four pins that took the count from 32 to
-  36 are timestamped **00:22–00:26Z**, while session `98e86d35` was last written at **20:09:50 local
-  (00:09:50Z)** — its only write, at boot. Those pins belong to some other session, in some other
-  workspace; nothing in this store ties them to this run. **Log-direction direction: confirmed.
-  Attribution to this session: not established.**
-- **The `32` baseline cannot be reproduced from this repository.** This file's own baseline (§4 of
-  `run-3-session-b-launch.md`) records `DLP_PINNED_LOCAL = 6` at 19:44 local, giving a delta of +30 to
-  the current 36. The block's `32 → 36` uses a baseline from elsewhere. Both exceed the pass condition,
-  so the conclusion is unaffected, but the delta as quoted is not derivable from the recorded baseline.
-- **Both trailing turns ended `max-tokens`**, exhausting the local model's budget during thinking. A
-  budget-exhausted turn is not a closed `completed` turn, so the session-scoped half of arm B remains
-  untaken — the same structural void recorded for earlier attempts, now reproduced with instrumentation.
-- **Arm A cannot serve as this run's clean baseline.** It was pinned too.
-
-### Not measured (unchanged from the block, and correct)
-
-- `readsRefused`: **NOT MEASURABLE** — refusals emit no trace event (observed in Run 2).
-- Ledger rows: **NO LEDGER ROWS** — the ledger instruments delegated worker calls only, and an architect
-  session that delegates nothing produces none (`6835af2`).
-- Throughput (e2e tok/s): **NOT MEASURED** — no ledger records emitted.
-- TTFT / decode-only throughput: **NOT MEASURABLE — NOT IMPLEMENTED**.
+**Why "budget truncated" ends the run rather than caveating it.** A turn that exhausts the local model's
+budget during reasoning is not a closed `completed` turn, so the session-scoped half of arm B remains
+untaken. This is the same structural void recorded for the earlier agent-hosted attempts, now reproduced
+under instrumentation — and `fcb9340` is the one thing this run does establish.
 
 ### Working tree at the time of filing
 
