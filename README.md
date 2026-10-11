@@ -256,12 +256,21 @@ attesting an arbitrary readable path from a delegation that wrote nothing — th
 review over an untouched file. What it does not close is a caller **naming a person**, which no amount of
 gating inside this process can establish. That is tamper-evidence, not cryptographic non-repudiation.
 
-**3. Egress is bounded by build provenance.** With `sourceReadEgress: 'declarations'`, reads of `.ts` files
-are answered with compiler-emitted `.d.ts` stubs, so the architect gets types and signatures without
-ingesting implementation bodies. Measured on this repository: **zero** `for`/`while`, `if`/`switch` and
-`fs.` calls in the served declarations, against 16, 80 and 2 in the sources.
-*The limits:* the build is **trusted, not verified** — staleness is checked by `mtime`, which a `touch`, a
-checkout or clock skew defeats; and the option is **off by default** and needs a plugin restart.
+**3. The planning tier receives API surface, not implementation.** With `sourceReadEgress: 'declarations'`,
+a read of a covered source file is answered with the compiler-emitted `.d.ts` stub, so the architect plans,
+decomposes tasks, designs contracts and specifies tests against exported types and signatures rather than
+against bodies. That is a **boundary rather than an instruction**: it does not rely on the model choosing to
+respect module limits, and unlike a prompt it cannot be argued with. Measured on this repository: **zero**
+`for`/`while`, `if`/`switch` and `fs.` calls in the served declarations, against 16, 80 and 2 in the sources.
+*The limits:* coverage is exactly four extensions — `.ts`, `.tsx`, `.js`, `.jsx` — and every other file
+(`.json`, `.cjs`, `.mjs`, `.md`, `.yml`, `.py`, `.go`, `.sh`, `.ps1`, `.sql`) is served **raw in both
+modes**, so this bounds one read path rather than "the model cannot see source"; `contextFiles` injected to
+a worker, and the outbound payload the host assembles after these hooks run, sit outside it entirely. The
+build is **trusted, not verified** — staleness is checked by `mtime`, which a `touch`, a checkout or clock
+skew defeats — the option is **off by default** and needs a plugin restart, and the worker that implements
+is not governed by it at all. **It is a structural control, not a savings claim**: this plugin's cost and
+privacy claims were measured and retired — see [Retired claims](#retired-claims-and-why) — and nothing here
+changes those numbers.
 
 ### What an enterprise review will find missing
 
