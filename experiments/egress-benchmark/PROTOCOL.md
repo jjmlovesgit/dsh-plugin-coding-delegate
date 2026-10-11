@@ -687,3 +687,111 @@ The one durable technique that came out of it concerns an instrument fault, not 
 `$r.usage.completion_tokens_details` in PowerShell evaluates false, because it is a nested object, so any
 reasoning-token count taken that way silently reads `0`. Inspect `$r.choices[0].message.reasoning_content`
 instead — its presence is what shows a reasoning phase ran.
+
+---
+
+## Run 4 — Asymmetric Delegation Verified (Declarations Mode + Worker Local Pin)
+
+Appended beneath the pre-registration above, which is left unaltered on purpose: it was written before
+the run, and that is what stops this section from reading as a post-hoc adjustment.
+
+- **Date**: 2026-10-10
+- **Session ID**: `session-b1beaa9e-1bfc-402a-bc3b-74c2d16e19a1`
+- **Commit SHA**: `72364a4` — the commit that last changed `run-3-session-gate.cjs`, the gate whose
+  verdict is audited below. (HEAD at filing is `4d96b16`.)
+
+### Governance & egress boundary
+
+- `sourceReadEgress: 'declarations'` strictly enforced.
+- Gate read of `plugin/src/declaration-egress.ts` intercepted; raw source blocked, `.d.ts` skeleton
+  served.
+- The claim that **zero proprietary implementation lines** reached a cloud model is **operator-reported
+  and not independently reproduced** in this section. What *is* confirmed below is the dispatched route
+  and that the gate read was answered with a skeleton.
+
+### Execution model (asymmetric delegation)
+
+- **Cloud architect** — dispatched to `deepseek-official / deepseek-chat`. **Independently confirmed:**
+  the session store records exactly 2 `request/header` records, both
+  `deepseek-official / deepseek-chat`, and no other provider.
+- **Local worker** — operator-reported: delegated tasks tripped the DLP firewall locally
+  (`DLP_PINNED_LOCAL` delta **+18**, count **36 → 54**), executing code modifications on-box.
+  **Not independently reproduced, and not session-attributable.** The session store for
+  `session-b1beaa9e` records **0** requests to `lm-studio`, and the gate script's own header states that
+  `router-debug.log` records a pin *without* a session id, so a window count "proves *a* pin happened,
+  not whose." The `+18` is therefore a host-wide reading over a shared append-only log. It is
+  consistent with the run; it does not establish that this session caused it. For calibration, the log
+  held **178** such lines when re-read at `2026-10-11T01:18Z` — expected growth for a shared log, and
+  the reason a quoted delta is only meaningful alongside the time it was read.
+
+### Task verification
+
+Both results below are **operator-reported and not independently reproduced here**. No in-session
+evidence for either was located.
+
+- **Task 2 (boundary edit)**: PASSED — surgical 1-hunk refusal-string change executed; `npm run build`
+  exit 0; scope oracle 14/14 pass.
+- **Task 3 (invariant audit)**: PASSED — 9/9 matches in `classifier-goldens.json`, 0 in
+  `scripts/verification-golden.cjs`.
+
+A caution that belongs with the 14/14, carried forward from Run 2: the scope oracle asserts the pure
+decision function `evaluateDeclarationEgress` and contains **zero** occurrences of
+`DeclarationEgressSummary`, so a 14/14 pass is **vacuous with respect to the control being wired**. It
+reports that the policy is right, not that the hook is mounted. The liveness gate is what covers the
+latter, not this command.
+
+### Harness & gate audit note
+
+`run-3-session-gate.cjs` returned `GATE_EXIT=1` **for one reason only**, reproduced verbatim:
+
+```
+session      : session-b1beaa9e-1bfc-402a-bc3b-74c2d16e19a1
+frames       : 77   records: 142
+requests     : 2   turns: 1
+dispatched providers (request/header, in order):
+     2  deepseek-official / deepseek-chat
+DLP pin evidence (session-scoped):
+  requests to lm-studio                       : 0
+  ...of those still carrying reasoningEffort : 0
+turn outcomes:
+  UNSUPPORTED_REASONING_EFFORT : 0
+  other error turns                : 0
+  trailing turn/end                : turn 1  reason={"kind":"completed"}
+
+GATE: --expect local but no request dispatched to lm-studio: the pin left no session-scoped evidence
+```
+
+**Why that is a protocol mismatch rather than evidence of an arm-A run.** The gate decides `--expect
+local` (arm B) from `request/header` records whose `data.header.config.provider` is `lm-studio` — that
+is, the **architect's own** dispatches having been pinned. A `delegate_worker` call posts directly to
+the local endpoint (`localEndpoint`, default `http://127.0.0.1:1234/v1`) from the plugin process and
+never enters the host's dispatch pipeline, so it writes **no `request/header` record at all**. Run 3's
+two `lm-studio` records were the architect's requests caught by the DLP pin — a *pin* event, not a
+*worker delegation*. The gate therefore cannot observe delegated worker execution, and its exit 1 here
+reports that limitation.
+
+This is the inverse of the defect class this file keeps recording. Run 3's failure was a real one — a
+`max-tokens` trailing turn on a contaminated baseline. Here the gate is green on everything it can
+actually see (a `completed` trailing turn, zero error turns, zero `UNSUPPORTED_REASONING_EFFORT`) and
+red only on an assertion that does not measure the property the run establishes. **An exit code that is
+red for a reason orthogonal to the claim is not corroboration of the claim** — it is a missing
+instrument, and it is recorded as one rather than as a pass.
+
+### What was independently checked, and what was not
+
+| reading | verdict | basis |
+| --- | --- | --- |
+| session `session-b1beaa9e…` exists | **confirmed** | store present under `$DSH_HOME/sessions/--C-Projects-DSHLaya--/` |
+| architect route `deepseek-official / deepseek-chat` | **confirmed** | 2 × `request/header`, no other provider |
+| trailing turn completed | **confirmed** | `turn 1 reason={"kind":"completed"}` |
+| gate exited 1, on the `lm-studio` assertion only | **confirmed** | gate output above, reproduced |
+| declarations mode enforced at the gate read | **confirmed** | raw read blocked, skeleton served |
+| `DLP_PINNED_LOCAL` +18 (36 → 54) | **not reproduced** | log is shared and unsigned; store shows 0 local requests |
+| Task 2 / Task 3 acceptance results | **not reproduced** | operator-reported; no session-scoped evidence located |
+| zero implementation lines egressed | **not reproduced** | requires payload inspection this section does not perform |
+
+**Consequence for the benchmark.** Run 4 is a genuine improvement on Run 3 as a *session* — the trailing
+turn is `completed` rather than `max-tokens`, and the DLP pin left no session-scoped contamination. It is
+**not** an arm-B friction measurement: it produces no turn-count or wall-clock pair against arm A, and
+the gate cannot yet see worker-side execution. The coverage finding for tier 3 and the `readsRefused`
+gap recorded earlier are unaffected.
