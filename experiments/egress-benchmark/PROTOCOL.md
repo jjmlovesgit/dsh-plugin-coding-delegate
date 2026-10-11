@@ -570,3 +570,85 @@ Write one row per task per arm into a results table in this file, with the arm, 
 wall clock, and whether the acceptance check passed. Report the two arms side by side **per tier**, and
 state the coverage gap for tier 3 separately from the friction numbers for tiers 1 and 2 — they answer
 different questions and must not be averaged together.
+
+## Run 3 — re-armed, arm B measured (session gate FAILED both sessions)
+
+- **Date**: 2026-10-10
+- **Commit loaded**: `6835af2`, with `fcb9340` present (proven below, not assumed)
+- **Gate**: `node experiments/egress-benchmark/run-3-session-gate.cjs --session <id> --arm <A|B>`
+- **Gate verdict**: **exit 1 for both sessions — neither is certified.** Recorded as a failure of the
+  experiment's own filing condition, with the numbers intact.
+
+This section exists because a session was asked to file a Run 3 block claiming an accepted arm-B result.
+The block's measurements were then checked against the two session stores. **The stores do not support
+that verdict**, and three of the block's statements do not match what the stores record. The run is filed
+here as an observation that failed its gate, not as a result.
+
+### Session gate, as actually run
+
+| reading | arm A — `session-0cfdd8b1…` | arm B — `session-98e86d35…` |
+| --- | --- | --- |
+| requests / turns | 3 / 2 | 2 / 1 |
+| dispatched routes | 1 × `deepseek-official / deepseek-flash`, **2 × `lm-studio / qwen/qwen3.8-27b`** | 2 × `lm-studio / qwen/qwen3.8-27b` |
+| requests to `lm-studio` | **2** | 2 |
+| …still carrying `reasoningEffort` | 0 | **0 — `fcb9340` is loaded** |
+| `UNSUPPORTED_REASONING_EFFORT` turns | 0 | 0 |
+| other error turns | 0 | 0 |
+| trailing `turn/end` | turn 2, `{"kind":"max-tokens"}` | turn 1, `{"kind":"max-tokens"}` |
+| **gate** | **exit 1** | **exit 1** |
+
+The gate's own reasons, verbatim:
+
+```
+arm A: GATE: trailing turn/end is {"kind":"max-tokens"}
+       GATE: 2 request(s) dispatched to lm-studio: this arm A session is CONTAMINATED by a DLP pin
+arm B: GATE: trailing turn/end is {"kind":"max-tokens"}
+```
+
+**`fcb9340` is confirmed working.** Both pinned local requests in arm B dispatched with no
+`reasoningEffort` attached, and zero turns ended `UNSUPPORTED_REASONING_EFFORT`. That is the commit's
+whole purpose and it holds. This is the run's real positive finding.
+
+### Where the supplied block diverges from the stores
+
+| block claims | store records |
+| --- | --- |
+| arm A "Local Contamination: 0 requests to `lm-studio`" | arm A dispatched **2** `lm-studio` requests; the gate flags it as pin-contaminated |
+| arm A "Dispatched Route: `deepseek-official / deepseek-flash`" | true for only 1 of arm A's 3 requests |
+| arm B "Accepted with caveat" | arm B's trailing turn is `max-tokens`, so it fails the gate's `completed` assertion |
+
+The block's `fcb9340`-related lines are accurate. Its arm-A lines are not, and they contradict its own
+arm-B count: the block reports 2 local requests for arm B and 0 for arm A, while both stores hold 2.
+
+### Not established
+
+- **The `+4` pin delta does not attribute to session `98e86d35`.** The log does total
+  `HOOK_EXIT: DLP_PINNED_LOCAL` **36** and `DLP_FIREWALL_TRIPPED` **36**, and the experiment's direction
+  is confirmed — cleanly past the `≥ 7` pass condition. But the four pins that took the count from 32 to
+  36 are timestamped **00:22–00:26Z**, while session `98e86d35` was last written at **20:09:50 local
+  (00:09:50Z)** — its only write, at boot. Those pins belong to some other session, in some other
+  workspace; nothing in this store ties them to this run. **Log-direction direction: confirmed.
+  Attribution to this session: not established.**
+- **The `32` baseline cannot be reproduced from this repository.** This file's own baseline (§4 of
+  `run-3-session-b-launch.md`) records `DLP_PINNED_LOCAL = 6` at 19:44 local, giving a delta of +30 to
+  the current 36. The block's `32 → 36` uses a baseline from elsewhere. Both exceed the pass condition,
+  so the conclusion is unaffected, but the delta as quoted is not derivable from the recorded baseline.
+- **Both trailing turns ended `max-tokens`**, exhausting the local model's budget during thinking. A
+  budget-exhausted turn is not a closed `completed` turn, so the session-scoped half of arm B remains
+  untaken — the same structural void recorded for earlier attempts, now reproduced with instrumentation.
+- **Arm A cannot serve as this run's clean baseline.** It was pinned too.
+
+### Not measured (unchanged from the block, and correct)
+
+- `readsRefused`: **NOT MEASURABLE** — refusals emit no trace event (observed in Run 2).
+- Ledger rows: **NO LEDGER ROWS** — the ledger instruments delegated worker calls only, and an architect
+  session that delegates nothing produces none (`6835af2`).
+- Throughput (e2e tok/s): **NOT MEASURED** — no ledger records emitted.
+- TTFT / decode-only throughput: **NOT MEASURABLE — NOT IMPLEMENTED**.
+
+### Working tree at the time of filing
+
+Four files from this work are untracked and deliberately left so: `run-3-session-b-launch.md`,
+`scripts/run-3-arm-b-environment.ps1`, `scripts/run-3-set-desktop-profile.ps1`,
+`scripts/snapshot-dsh-data.ps1`. `.scratch-hold/` is git-ignored (`.gitignore:25`), so the parked
+headless runner and DSH snapshots inside it are outside the tree. Nothing was tagged or pushed.
