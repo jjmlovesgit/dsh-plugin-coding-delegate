@@ -655,6 +655,12 @@ Four files from this work are untracked and deliberately left so: `run-3-session
 `scripts/snapshot-dsh-data.ps1`. `.scratch-hold/` is git-ignored (`.gitignore:25`), so the parked
 headless runner and DSH snapshots inside it are outside the tree. Nothing was tagged or pushed.
 
+**Correction, added 2026-10-11.** All four of those files have since been deleted from the working
+tree, and none of them was ever committed — so they exist in no repository state and this run cannot
+be reproduced from them. The paragraph above is left as written rather than rewritten, because it is
+what was true when the run was filed and the difference is itself part of the record. `.scratch-hold/`
+is still present and still git-ignored at the line quoted above.
+
 ## Run 4 — environment prerequisite, recorded before any Run 4 data exists
 
 Written ahead of the run so it cannot be mistaken for a post-hoc adjustment of the numbers.
