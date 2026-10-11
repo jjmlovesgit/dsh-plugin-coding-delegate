@@ -654,3 +654,36 @@ Four files from this work are untracked and deliberately left so: `run-3-session
 `scripts/run-3-arm-b-environment.ps1`, `scripts/run-3-set-desktop-profile.ps1`,
 `scripts/snapshot-dsh-data.ps1`. `.scratch-hold/` is git-ignored (`.gitignore:25`), so the parked
 headless runner and DSH snapshots inside it are outside the tree. Nothing was tagged or pushed.
+
+## Run 4 — environment prerequisite, recorded before any Run 4 data exists
+
+Written ahead of the run so it cannot be mistaken for a post-hoc adjustment of the numbers.
+
+Run 3's arm-B turn ended `{"kind":"max-tokens"}`: the local dispatch was issued with the host's
+`maxTokens: 16384` ceiling and exhausted it. A turn that never completes is not a closed turn, which is
+why Run 3 failed its gate. The prerequisite for Run 4 is therefore that the local model does not spend the
+budget before answering.
+
+**The model load profile in LM Studio is `DSH 27b no thinking`**, for `qwen/qwen3.8-27b`, with
+`reasoning_effort: 'none'` and a zero reasoning budget set **inside LM Studio, on the model load
+profile.**
+
+**That placement is the material fact, and it is why nothing else changes.** Because the setting is
+applied by the local runtime at model load rather than being sent by the host:
+
+- no `reasoningEffort` field is added to the dispatch, so Run 3's arm-B assertion —
+  `requests still carrying reasoningEffort: 0` — retains **exactly** its previous meaning;
+- `fcb9340` is neither exercised differently nor regressed; the check is unchanged and must still hold;
+- the prerequisite is satisfied without any change to host config, plugin options, or the arm.
+
+Run 4 is therefore gated the same way as Run 3: cold boot, liveness gate, tasks, then the session gate.
+Nothing needs configuring first.
+
+**Disclosure.** While establishing this, the operator's preset was overridden by direct probe requests
+that supplied their own `enable_thinking` / `reasoning_effort` values. Results from those requests
+describe a configuration the operator had not chosen and are **void as evidence about this host**; they
+are not cited anywhere above. The probe also risked forcing a model reload, which the operator stopped.
+The one durable technique that came out of it concerns an instrument fault, not the model: reading
+`$r.usage.completion_tokens_details` in PowerShell evaluates false, because it is a nested object, so any
+reasoning-token count taken that way silently reads `0`. Inspect `$r.choices[0].message.reasoning_content`
+instead — its presence is what shows a reasoning phase ran.
