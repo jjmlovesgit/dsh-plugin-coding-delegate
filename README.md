@@ -141,7 +141,7 @@ every item is the kind of boundary it claims to be.
 | # | boundary | enforced by | fails closed how |
 | --- | --- | --- | --- |
 | 1 | **Mutation integrity** | `tools/pre-execute` blocks cloud writes and shell execution | the planning tier physically cannot write or run on the host |
-| 2 | **Egress privacy** | `tools/post-execute` serves `.d.ts` stubs via `sourceReadEgress: 'declarations'` | a read is refused if the declaration is **absent or older than its source** |
+| 2 | **Egress privacy** | `tools/post-execute` serves `.d.ts` stubs via `sourceReadEgress: 'declarations'`, for `.ts`/`.tsx`/`.js`/`.jsx` only | a read is refused if the declaration is **absent or older than its source**; every other extension is served raw |
 | 3a | **Workspace root** | `workspaceDir` + `emitAllowlist` | **policy-gated** — the worker cannot escape the sandbox directory, and the *base* directory is trusted only when it is the session root or an allowlisted one |
 | 3b | **Task unit scope** | `targetFiles`, `unitScope: 'enforce'` | **conditional** — refused for undeclared paths, but **a unit that declares nothing is unrestricted across the workspace** |
 | 4 | **Flakiness containment** | `runVerification` runs 3 passes by default | non-deterministic drift records `UNIT_FLAKY` and halts promotion |
@@ -164,6 +164,60 @@ Four of those are qualified and the qualifications matter more than the rows:
   and two self-reported strings. Editing the file flips the socket to 1, but nothing verifies that the named
   operator did the reviewing. That is **tamper-evidence, not cryptographic non-repudiation** — there is no
   key, no signature, and no third party.
+
+### Declarations mode: what the read control actually does
+
+`sourceReadEgress: 'declarations'` is **opt-in**; the default is `'source'`, under which a read returns the
+file. Arming it changes what a read of a *covered* file returns. Five facts bound what that means, each
+stated at the level it is enforced — describing this control by its intent rather than its mechanism is
+how it gets quoted for properties it does not have.
+
+**1. The substitution happens on the tool-return payload, after the read.** The mechanism is registered on
+**`tools/post-execute`**. The tool execution layer reads the file from disk exactly as it otherwise would;
+the hook then replaces the returned payload with the compiled declaration before it enters the model's
+context. Body bytes are withheld from the **model**, not from the **filesystem** — any process on the
+host, including this plugin's own worker, can still read the file. Blocking mutation is a separate
+mechanism (`tools/pre-execute`); this one is egress only.
+
+**2. A refusal names the condition, and there are three of them.** When no declaration can be served the
+read is refused rather than silently falling back to source:
+
+| condition | what the reader is told |
+| --- | --- |
+| no skeleton was emitted for the path | *"…was refused: sourceEgress is 'declarations' and no type skeleton exists at '…'"* |
+| the skeleton is older than its source | *"…its type skeleton at '…' is OLDER than the source, so it may describe a signature that has since changed"* |
+| a code extension no build can map (`.py`, `.go`, `.rs`, …) | *"…was refused: sourceReadEgress is 'declarations' and no type skeleton can be produced for …"* |
+
+Staleness is decided on **file mtime**, not on content. It is evidence that a rebuild happened after an
+edit, and it is defeated by a `touch`, a `git checkout` or clock skew: it closes the common case —
+planning without building — and does not prove the declaration matches the source. This is **provenance,
+not verification**. The first message above names `sourceEgress` while the option governing a file read is
+`sourceReadEgress`; it is quoted as emitted rather than corrected here.
+
+**3. Coverage is exactly four extensions.** `declarationPathFor` returns a path for `.ts`, `.tsx`, `.js`
+and `.jsx`, and `null` for everything else, so reads of `.json`, `.cjs`, `.mjs`, `.md`, `.yml`, `.py`,
+`.go`, `.sh`, `.ps1`, `.sql` — or any other extension — are **served raw, in both modes**. The control
+stops at the four, and the benchmark record measures it: the fixture-audit task returns the same nine
+matches in both arms precisely because both of its files are outside the covered set.
+
+**4. The substitution does not prompt; the controls around it do.** The post-execute redirect is
+deterministic and non-interactive — no *allow this read?* dialog appears for a covered source file. That
+holds for *this hook only*. Around it, `delegateReadPolicy: 'ask'` (the default) prompts when reading back
+a file a worker wrote, `guardMode: 'ask'` and `guardAskPaths` downgrade a deny to an approval prompt, and
+the approval seam fails closed when no answerer is reachable.
+
+**5. Three egress paths sit outside this hook.** It filters tool *result* payloads, so it never sees:
+
+- **`contextFiles` injected into a worker's prompt** — governed by containment and credential checks, not
+  by `sourceReadEgress`, and the architect receives a record of what was injected rather than contents;
+- **files outside the four extensions** (point 3) — returned whole;
+- **the outbound payload the desktop host assembles** — the host builds and dispatches the final request
+  *after* this plugin's hooks have run, so assistant output and tool results are not inspected here.
+
+**Bottom line, as a bound rather than a slogan.** With the control armed, a read of a covered `.ts`,
+`.tsx`, `.js` or `.jsx` file returns the compiled type declaration or is refused; it does not return the
+body. That is not the claim that the model cannot reach source — it is the claim that *this read path, for
+these four extensions*, does not carry it.
 
 ## For an enterprise review
 
