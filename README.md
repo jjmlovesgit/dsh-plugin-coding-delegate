@@ -184,15 +184,14 @@ read is refused rather than silently falling back to source:
 
 | condition | what the reader is told |
 | --- | --- |
-| no skeleton was emitted for the path | *"…was refused: sourceEgress is 'declarations' and no type skeleton exists at '…'"* |
+| no skeleton was emitted for the path | *"…was refused: sourceReadEgress is 'declarations' and no type skeleton exists at '…'"* |
 | the skeleton is older than its source | *"…its type skeleton at '…' is OLDER than the source, so it may describe a signature that has since changed"* |
 | a code extension no build can map (`.py`, `.go`, `.rs`, …) | *"…was refused: sourceReadEgress is 'declarations' and no type skeleton can be produced for …"* |
 
 Staleness is decided on **file mtime**, not on content. It is evidence that a rebuild happened after an
 edit, and it is defeated by a `touch`, a `git checkout` or clock skew: it closes the common case —
 planning without building — and does not prove the declaration matches the source. This is **provenance,
-not verification**. The first message above names `sourceEgress` while the option governing a file read is
-`sourceReadEgress`; it is quoted as emitted rather than corrected here.
+not verification**.
 
 **3. Coverage is exactly four extensions.** `declarationPathFor` returns a path for `.ts`, `.tsx`, `.js`
 and `.jsx`, and `null` for everything else, so reads of `.json`, `.cjs`, `.mjs`, `.md`, `.yml`, `.py`,

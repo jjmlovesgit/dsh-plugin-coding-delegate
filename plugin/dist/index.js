@@ -1029,7 +1029,7 @@ function apply(ctx, options = {}) {
                                     type: 'text',
                                     text: "Reading '" +
                                         target +
-                                        "' was refused: sourceEgress is 'declarations' and no type skeleton exists at '" +
+                                        "' was refused: sourceReadEgress is 'declarations' and no type skeleton exists at '" +
                                         skeleton +
                                         ". " +
                                         // A TEST FILE HAS NO DECLARATION BY CONSTRUCTION. tsconfig.json sets rootDir ./src and
