@@ -44,7 +44,9 @@ const SECRET = 'password: "hunter2hunter2"';
 // ---------------------------------------------------------------------------
 test("F1: verification defaults to requiring approval, not silent execution", () => {
   assert.equal(DEFAULT_VERIFICATION_POLICY.mode, "ask");
-  assert.equal(DEFAULT_VERIFICATION_POLICY.allowInProcessFallback, false);
+  // The in-process fallback was removed outright, so the policy carries no such field at all.
+  // Asserting its absence is stronger than asserting a default of false.
+  assert.equal("allowInProcessFallback" in DEFAULT_VERIFICATION_POLICY, false);
 
   const decision = evaluateVerificationPolicy("node tests/x.test.cjs");
   assert.equal(decision.kind, "ask", "an unapproved command must not be permitted");
@@ -53,20 +55,20 @@ test("F1: verification defaults to requiring approval, not silent execution", ()
 
 test("F1: an operator can still permit verification explicitly", () => {
   assert.equal(
-    evaluateVerificationPolicy("node x.test.cjs", { mode: "allow", allowlist: [], allowInProcessFallback: false }).kind,
+    evaluateVerificationPolicy("node x.test.cjs", { mode: "allow", allowlist: [] }).kind,
     "allow"
   );
   assert.equal(
-    evaluateVerificationPolicy("node x.test.cjs", { mode: "deny", allowlist: [], allowInProcessFallback: false }).kind,
+    evaluateVerificationPolicy("node x.test.cjs", { mode: "deny", allowlist: [] }).kind,
     "deny"
   );
   // The allowlist matches the program only, which is why it is documented as weak.
   assert.equal(
-    evaluateVerificationPolicy("node -e \"whatever\"", { mode: "ask", allowlist: ["node"], allowInProcessFallback: false }).kind,
+    evaluateVerificationPolicy("node -e \"whatever\"", { mode: "ask", allowlist: ["node"] }).kind,
     "allow"
   );
   assert.equal(
-    evaluateVerificationPolicy("node x.test.cjs", { mode: "ask", allowlist: ["npm"], allowInProcessFallback: false }).kind,
+    evaluateVerificationPolicy("node x.test.cjs", { mode: "ask", allowlist: ["npm"] }).kind,
     "ask"
   );
 });

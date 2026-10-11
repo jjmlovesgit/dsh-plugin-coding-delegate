@@ -532,7 +532,6 @@ async function delegateWorker(params = {}, tracker) {
                 const first = (0, verification_1.runSandboxVerification)(params.runVerification, workspaceBase, {
                     redact: params.redactVerification ?? process.env.DSH_LOCAL_ROUTER_RAW_VERIFICATION !== '1',
                     rawLogPath: path.join((0, logging_1.resolveDataDir)(), 'last-verification.log'),
-                    allowInProcessFallback: policy.allowInProcessFallback,
                     timeoutMs: policy.timeoutMs,
                 });
                 testResults = first;
@@ -542,7 +541,6 @@ async function delegateWorker(params = {}, tracker) {
                     const next = (0, verification_1.runSandboxVerification)(params.runVerification, workspaceBase, {
                         redact: params.redactVerification ?? process.env.DSH_LOCAL_ROUTER_RAW_VERIFICATION !== '1',
                         rawLogPath: path.join((0, logging_1.resolveDataDir)(), 'last-verification.log'),
-                        allowInProcessFallback: policy.allowInProcessFallback,
                         timeoutMs: policy.timeoutMs,
                     });
                     attempts++;

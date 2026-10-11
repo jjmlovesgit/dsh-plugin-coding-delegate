@@ -124,7 +124,7 @@ the answer is no.
 | 2 | The architect may not author or delete source | code guard: denied, or approval-gated |
 | 3 | The architect may not read back what it delegated | the **settled rule**: a file a passing unit left unchanged reads silently, and failed, unverified and since-edited ones ask; `delegateReadPolicy: 'allow'` relaxes all of it, for every agent, and says so |
 | 4 | The worker may not write outside the workspace | containment on every emitted path |
-| 5 | The worker's code may not run inside the server | subprocess only; in-process fallback off |
+| 5 | The worker's code may not run inside the server | subprocess only; the in-process fallback was removed |
 | 6 | A command the architect proposes may not run unchecked | approval seam |
 | 7 | A delegated result is a verdict, not a claim | files written without verification report `UNVERIFIED` |
 | 8 | Source may not reach the cloud | cloud-bound requests carrying fenced source are refused by default; `sourceEgress` decides |

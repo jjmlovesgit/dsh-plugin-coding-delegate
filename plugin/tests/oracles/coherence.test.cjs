@@ -194,7 +194,6 @@ test("the project check runs and its failure voids an otherwise passing unit", a
     verificationPolicy: {
       mode: "allow",
       allowlist: [],
-      allowInProcessFallback: false,
       timeoutMs: 30000,
       coherenceVerification: FAIL,
     },
@@ -217,7 +216,6 @@ test("the project check passing leaves a passing unit alone", async () => {
     verificationPolicy: {
       mode: "allow",
       allowlist: [],
-      allowInProcessFallback: false,
       timeoutMs: 30000,
       coherenceVerification: PASS,
     },
@@ -240,7 +238,6 @@ test("a unit that wrote no files does not pay for a project check", async () => 
     verificationPolicy: {
       mode: "allow",
       allowlist: [],
-      allowInProcessFallback: false,
       timeoutMs: 30000,
       coherenceVerification: FAIL,
     },

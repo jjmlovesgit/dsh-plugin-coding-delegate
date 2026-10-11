@@ -42,7 +42,7 @@ cannot be evaluated, or the approval service cannot be reached, the answer is no
 | 2 | The architect may not author or delete source | code guard on `tools/pre-execute`; denied, or approval-gated |
 | 3 | The architect may not read back what it delegated | the **settled rule**: a file a passing unit left unchanged reads silently, and failed, unverified and since-edited ones ask. `delegateReadPolicy: 'allow'` relaxes all of it |
 | 4 | The worker may not write outside the workspace | containment on every emitted path, symlinks included |
-| 5 | The worker's code may not run inside the server | subprocess only; the in-process fallback is off |
+| 5 | The worker's code may not run inside the server | subprocess only; the in-process fallback was removed |
 | 6 | A command the architect proposes may not run unchecked | approval seam via `verificationApproval` |
 | 7 | A delegated result is a verdict, not a claim | files written without verification report `UNVERIFIED`, never `SUCCESS` |
 | 8 | Source may not reach the cloud | cloud-bound requests carrying fenced source are refused by default; `sourceEgress` decides |
@@ -63,8 +63,8 @@ the guard is a deterrent at the tool layer, not an airtight boundary.
 - A local OpenAI-compatible server if you want local routing or `delegate_worker`
 - A cloud API key (e.g. `DEEPSEEK_API_KEY`) if you route to a cloud provider
 
-No container runtime is required. Verification runs as an ordinary child process, and the
-in-process fallback is off by default; a container is optional hardening, not a prerequisite.
+No container runtime is required. Verification runs as an ordinary child process, and there is
+no in-process path at all; a container is optional hardening, not a prerequisite.
 
 ## Install
 
@@ -268,7 +268,6 @@ When you call `predictRoute` directly, its decision output is
 | `unitScope` | `'enforce'` | Whether a unit's declared `targetFiles` is a boundary. `'enforce'` refuses a write to any path the unit did not declare — a declared directory covers its subtree, and a unit that declares nothing is unrestricted. `'off'` restores the permissive behaviour. Enforced by default because it is what makes an `INCOHERENT` verdict attributable to a unit |
 | `retryContext` | `'auto'` | Whether a failed unit's failure locations are read back and offered to the next attempt in the same workspace as context. `'auto'` adds one window per file the failure named, consumed once and cleared by any unit that then passes; `'off'` disables it. The ordinary cause of a unit that failed "for no visible reason" is that the worker was never shown the code it had to change, and the failure already names the file. Best-effort by construction: the widened injection replaces the declared one only if it resolves cleanly, so it can never turn a runnable delegation into `CONTEXT_REFUSED`. The code goes to the **worker**; the architect is told which files were added, never their contents |
 | `emitAllowlist` | `[]` | Extra directories a delegated worker may write into besides the workspace |
-| `allowInProcessFallback` | `false` | Run a denied spawn's verification module inside the server process |
 | `leadProviders` | `[]` | Provider ids that are **not** the architect. Their requests are left exactly as configured |
 | `leadTier` | `false` | Derive `leadProviders` from the `LEAD` profile instead of naming providers |
 | `delegateReadPolicy` | `'ask'` | `ask`, `allow` or `deny` for reading a file a worker wrote. `allow` weakens rule 3 |
@@ -506,19 +505,21 @@ every signal.
 `runVerification` is executed as a command string with the authority of the DSH process, and the
 code under test is written by the local model.
 
-**By default it runs as an ordinary child process, and no container is required.** Output is
-captured through file descriptors rather than pipes, because DSH's confined sandbox modes refuse
-a piped spawn outright (`spawn EPERM`). That refusal used to make the subprocess path unusable in
-the default configuration, leaving the in-process fallback as the only one that worked — the
-wrong trade in every direction, since that fallback runs model-written code inside the server.
-Descriptor capture means verification needs no opt-in and no runtime.
+**It always runs as an ordinary child process, and no container is required.** Output is captured
+through file descriptors rather than pipes, because DSH's confined sandbox modes refuse a piped
+spawn outright (`spawn EPERM`). That refusal used to make the subprocess path unusable in the
+default configuration, leaving an in-process fallback as the only one that worked — the wrong
+trade in every direction, since that fallback ran model-written code inside the server. Descriptor
+capture means verification needs no opt-in and no runtime.
 
-`allowInProcessFallback` stays `false`, and enabling it is worse, not better: the failures seen in
-practice were ordinary, not crafted — a fixture calling `process.exit()` terminated the host
-running the tests, and `process.exitCode` corrupted the server's own exit code, so ten tests
-passed while the runner exited 1. Both are now isolated, but an infinite loop still hangs the
-server and in-process code can still mutate globals. **In-process execution cannot be made safe;
-it can only be made less bad.**
+**The in-process fallback has been removed**, not merely disabled. It resolved a module path out of
+the model-supplied command and `require()`d it into the DSH **server** process — a dynamic load of
+model-influenced code into the host, so a host that denied the sandbox was answered by removing the
+sandbox. A spawn refusal is now a hard refusal. The failures seen while it existed were ordinary
+rather than crafted: a fixture calling `process.exit()` terminated the host running the tests, and
+`process.exitCode` corrupted the server's own exit code, so ten tests passed while the runner
+exited 1. An infinite loop still hung the server. **In-process execution could not be made safe, so
+it is gone rather than guarded.**
 
 A child process is bounded by your user account rather than by the plugin — the files it can
 write, the network it can reach. The approval prompt is the practical control. To bound it more
@@ -752,10 +753,10 @@ resolved workspace — an absolute path, a `..` segment, or a symlink pointing o
 refused and reported in `errors` instead of being written. `emitAllowlist` extends the permitted
 roots explicitly.
 
-**`allowInProcessFallback`** (default `false`) decides what happens when the sandbox refuses a
-piped spawn. Off, verification fails closed. On, the target module is `require`d inside the DSH
-**server** process, running model-influenced code with full host authority — it can terminate
-the server. Enable it only where the spawn restriction cannot be lifted, and prefer a container.
+**A sandbox that refuses a piped spawn now fails closed.** There is no in-process fallback: the one
+that existed `require`d the target module inside the DSH **server** process with full host authority
+and could terminate the server, so it was removed rather than guarded. Where the spawn restriction
+cannot be lifted, prefer a container.
 
 ## State
 

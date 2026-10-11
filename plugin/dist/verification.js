@@ -40,7 +40,6 @@ exports.parseTestOutput = parseTestOutput;
 exports.resolveVerificationTimeoutMs = resolveVerificationTimeoutMs;
 exports.commandProgram = commandProgram;
 exports.evaluateVerificationPolicy = evaluateVerificationPolicy;
-exports.runInProcessFallback = runInProcessFallback;
 exports.runSandboxVerification = runSandboxVerification;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
@@ -326,7 +325,6 @@ function resolveVerificationTimeoutMs(value) {
 exports.DEFAULT_VERIFICATION_POLICY = {
     mode: 'ask',
     allowlist: [],
-    allowInProcessFallback: false,
     timeoutMs: exports.DEFAULT_VERIFICATION_TIMEOUT_MS,
 };
 /** The program a shell command would run, normalised for allowlist comparison. */
@@ -377,63 +375,6 @@ function evaluateVerificationPolicy(command, policy = exports.DEFAULT_VERIFICATI
             'and is not confined to the workspace',
     };
 }
-function runInProcessFallback(cmd, workspaceDir) {
-    // Identify a real module path in the command, ignoring flags: the previous regex
-    // captured "--test", "-e" and "--version" as if they were file paths, then
-    // reported a bogus "target test file not found" failure for them.
-    const candidates = cmd
-        .split(/\s+/)
-        .map((token) => token.replace(/^["']|["']$/g, ''))
-        .filter((token) => token && !token.startsWith('-') && /\.(?:[cm]?[jt]sx?)$/i.test(token));
-    const targetFile = candidates.find((token) => fs.existsSync(path.isAbsolute(token) ? token : path.resolve(workspaceDir, token))) ?? null;
-    if (!targetFile) {
-        // Fail closed: with no identifiable target module there is nothing to verify,
-        // and claiming success here would report an unverified command as passing.
-        return ('not ok 1 - In-process verification fallback could not identify a target module in command ' +
-            "'" + cmd + "'. Refusing to report success.");
-    }
-    const resolvedPath = path.isAbsolute(targetFile) ? targetFile : path.resolve(workspaceDir, targetFile);
-    if (!fs.existsSync(resolvedPath)) {
-        return "not ok 1 - Target test file '" + targetFile + "' not found at '" + resolvedPath + "'.";
-    }
-    let capturedOutput = '';
-    const originalLog = console.log;
-    const originalError = console.error;
-    const originalExit = process.exit;
-    const originalExitCode = process.exitCode;
-    try {
-        console.log = (...args) => {
-            capturedOutput += args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ') + '\n';
-            originalLog(...args);
-        };
-        console.error = (...args) => {
-            capturedOutput += args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ') + '\n';
-            originalError(...args);
-        };
-        process.exit = (code) => {
-            throw new Error('test code called process.exit(' + (code ?? 0) + '); refusing to terminate the host process');
-        };
-        // The module signals failure through captured TAP text, so its exit code is noise
-        // here -- and leaving it set would misreport the HOST's own result.
-        process.exitCode = undefined;
-        delete require.cache[require.resolve(resolvedPath)];
-        require(resolvedPath);
-        capturedOutput =
-            capturedOutput || 'ok 1 - Executed ' + path.basename(resolvedPath) + ' in-process successfully.';
-    }
-    catch (err) {
-        capturedOutput +=
-            'not ok 1 - In-Process Test Failure in ' + path.basename(resolvedPath) + '\n  ' +
-                (err?.stack || err?.message || String(err)) + '\n';
-    }
-    finally {
-        console.log = originalLog;
-        console.error = originalError;
-        process.exit = originalExit;
-        process.exitCode = originalExitCode;
-    }
-    return capturedOutput;
-}
 /**
  * Run a verification command and capture its output.
  *
@@ -442,7 +383,8 @@ function runInProcessFallback(cmd, workspaceDir) {
  * subprocess path unusable in the default configuration and left the in-process fallback as the
  * only path that worked -- the wrong trade in every direction, since that fallback executes
  * model-influenced code inside the server. A descriptor avoids the pipe, so verification runs
- * as an ordinary child process for everyone, and the fallback is not needed at all.
+ * as an ordinary child process for everyone. The fallback has since been removed outright; see
+ * the refusal in `runSandboxVerification`, which is now the only answer to a spawn denial.
  */
 function captureCommandOutput(cmd, workspaceDir, timeoutMs) {
     const dir = (0, logging_1.resolveDataDir)();
@@ -520,18 +462,13 @@ function runSandboxVerification(verificationCommand, workspaceDir = process.cwd(
             String(spawnError).includes('EPERM') ||
             String(spawnError).includes('spawn EPERM'))) {
         // Even a descriptor spawn was refused, so this host blocks verification entirely. The
-        // in-process fallback still exists, but it re-runs model-influenced code inside the
-        // SERVER process, so it is opt-in only: answering a denial by removing the sandbox
-        // inverts the control. Fail closed.
-        if (options.allowInProcessFallback === true) {
-            output = runInProcessFallback(cmd, workspaceDir);
-            return parseTestOutput(output, undefined, {
-                redact: options.redact,
-                rawOutputPath: persistRaw(output, options.rawLogPath),
-            });
-        }
-        const refusal = 'not ok 1 - the sandbox refused to spawn the verification command (EPERM) and the ' +
-            'in-process fallback is disabled by default. Refusing to report success.\n' + output;
+        // in-process fallback that used to answer this was REMOVED: it resolved a module path out
+        // of the model-supplied command and `require()`d it inside the SERVER process, so denying
+        // the sandbox was answered by removing the sandbox. A host that cannot spawn now gets a
+        // hard refusal, which is the fail-closed direction.
+        const refusal = 'not ok 1 - the sandbox refused to spawn the verification command (EPERM), and the ' +
+            'in-process fallback was removed because it loaded model-supplied code into the DSH ' +
+            'server process. Refusing to report success.\n' + output;
         return parseTestOutput(refusal, exitCode, {
             redact: options.redact,
             rawOutputPath: persistRaw(refusal, options.rawLogPath),

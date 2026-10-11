@@ -152,11 +152,10 @@ test("end to end: a failing command returns structure and keeps the raw text loc
   );
 
   const rawLog = path.join(dir, "last-verification.log");
-  // The in-process fallback is opt-in now (it runs worker-authored code inside the server
-  // process), so a sandboxed host needs it enabled to exercise redaction end to end.
+  // Verification runs as a child process. A host whose sandbox refuses to spawn cannot exercise
+  // redaction end to end at all: with the in-process fallback removed it fails closed.
   const result = runSandboxVerification(`node ${script}`, dir, {
     rawLogPath: rawLog,
-    allowInProcessFallback: true,
   });
 
   assert.equal(result.failed, 1);
@@ -173,9 +172,11 @@ test("end to end: a failing command returns structure and keeps the raw text loc
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test("test code calling process.exit cannot kill the host process", () => {
-  // The in-process fallback requires the module into the SERVER process, so a
-  // process.exit() in worker-authored test code used to take the harness down.
+test("worker-authored test code cannot kill the host process", () => {
+  // This test used to guard the in-process fallback, which required worker-authored test code
+  // into the SERVER process -- so a process.exit() in that code took the harness down. The
+  // fallback has been removed and verification is always a child process now, which is the
+  // stronger property: the exit below should kill the child and leave this process running.
   // Reaching the end of this test is itself the assertion that the host survived.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "redact-exit-"));
   const script = path.join(dir, "exits.test.cjs");
@@ -185,19 +186,20 @@ test("test code calling process.exit cannot kill the host process", () => {
   const result = runSandboxVerification(`node ${script}`, dir, {
     redact: false,
     rawLogPath: rawLog,
-    allowInProcessFallback: true,
   });
 
   const captured = String(result.output) + (fs.existsSync(rawLog) ? fs.readFileSync(rawLog, "utf8") : "");
-  const usedFallback = /refusing to terminate the host process|In-Process Test Failure/.test(captured);
-
-  assert.ok(result.passed + result.failed > 0, "a result must be produced either way");
-  if (usedFallback) {
-    assert.match(captured, /refusing to terminate the host process/, "the exit must be blocked, not obeyed");
-  } else {
-    // Unsandboxed host: the child process exited and its status is authoritative.
-    assert.equal(result.failed >= 1, true, "a non-zero child exit is a failure");
+  assert.doesNotMatch(
+    captured,
+    /refusing to terminate the host process|In-Process Test Failure/,
+    "the in-process path must not exist any more"
+  );
+  if (result.failed === 0 && result.passed === 0) {
+    // A host that refuses to spawn produces neither; that is the documented fail-closed path.
+    fs.rmSync(dir, { recursive: true, force: true });
+    return;
   }
+  assert.equal(result.failed >= 1, true, "a non-zero child exit is a failure of the unit, not the host");
 
   fs.rmSync(dir, { recursive: true, force: true });
 });

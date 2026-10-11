@@ -16,7 +16,7 @@ export { DELETE_PRIMITIVES, evaluateCodeWriteGuard, evaluateDelegatedReadPolicy,
 export { AGENT_ROLE_LIMIT, DEFAULT_SOURCE_EGRESS_MIN_LINES, agentLineageRole, applyAgentRole, applyArchitectConfig, describeSourceRead, detectSourceEgress, evaluateSourceEgress, rememberAgentRole, resetAgentRoles, resolveAgentRole, resolveLeadProviders, roleForAgent, roleFromLineage, } from './roles';
 export { ContextInjection, ContextRequest, ContextResolution, DEFAULT_CONTEXT_MAX_BYTES, resolveContextFiles, } from './context';
 export { contractFileHashes, contractViolations, loadDelegatedRegistry, mergeDelegatedRecords, parseDelegatedRegistry, pruneDelegatedRecords, rememberDelegated, recordOperatorAttestation, resolveContractFiles, resolveDelegatedRegistryPath, saveDelegatedRegistry, sha256File, } from './contracts';
-export { DEFAULT_VERIFICATION_POLICY, DEFAULT_VERIFICATION_TIMEOUT_MS, commandProgram, describeFailures, evaluateVerificationPolicy, parseTestOutput, redactVerificationOutput, resolveVerificationTimeoutMs, runInProcessFallback, runSandboxVerification, } from './verification';
+export { DEFAULT_VERIFICATION_POLICY, DEFAULT_VERIFICATION_TIMEOUT_MS, commandProgram, describeFailures, evaluateVerificationPolicy, parseTestOutput, redactVerificationOutput, resolveVerificationTimeoutMs, runSandboxVerification, } from './verification';
 export { ContextQuality, EMPTY_CONTEXT_QUALITY, describeContextQuality, foldContextQuality, } from './context-quality';
 export { DELEGATE_WORKER_OPENAI_SCHEMA, DELEGATE_WORKER_SCHEMA, DELEGATE_WORKER_SCHEMA_COVERS_EVERY_PARAMETER, DEFAULT_LOCAL_ENDPOINT, MIN_SEARCH_CHARS, applySearchReplaceBlocks, delegateWorker, estimateTokenCount, extractPromptText, parseSearchReplaceBlocks, resolveChatCompletionsUrl, resolveDelegateStatus, resolveVerificationRepeats, } from './delegation';
 export { FailureLocation, RETRY_CONTEXT_WINDOW_LINES, parseFailureLocations, retryContextRequests, } from './retry-context';
@@ -156,12 +156,6 @@ export interface PluginConfig {
      * refused and reported rather than written.
      */
     emitAllowlist?: string[];
-    /**
-     * Run the verification module inside the DSH server process when the sandbox denies
-     * a piped spawn (default false). That fallback executes model-influenced code with
-     * full host authority and can kill the server, so it is opt-in only.
-     */
-    allowInProcessFallback?: boolean;
     /**
      * Base URL of the local OpenAI-compatible server that `delegate_worker` posts to — for
      * example `http://127.0.0.1:11434/v1` for Ollama, or a vLLM/llama.cpp port. A full

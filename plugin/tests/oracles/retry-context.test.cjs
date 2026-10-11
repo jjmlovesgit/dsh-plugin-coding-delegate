@@ -49,7 +49,6 @@ const emitted = (name) => '```ts file="' + name + '"\nexport const made = 1\n```
 const ALLOW = {
   mode: "allow",
   allowlist: [],
-  allowInProcessFallback: false,
   timeoutMs: 30000,
 };
 

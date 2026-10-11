@@ -30,7 +30,7 @@ const REGISTRY = path.join(DATA_DIR, "delegated-registry.json");
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "dsh-flaky-"));
 const emitted = (name) => "```ts file=\"" + name + "\"\nexport const made = 1\n```\n";
-const ALLOW = { mode: "allow", allowlist: [], allowInProcessFallback: false, timeoutMs: 30000 };
+const ALLOW = { mode: "allow", allowlist: [], timeoutMs: 30000 };
 
 /** A command that passes or fails depending on how many times it has been run. */
 function alternatingOracle() {

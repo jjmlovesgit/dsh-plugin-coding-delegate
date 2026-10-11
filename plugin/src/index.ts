@@ -161,7 +161,6 @@ export {
   parseTestOutput,
   redactVerificationOutput,
   resolveVerificationTimeoutMs,
-  runInProcessFallback,
   runSandboxVerification,
 } from './verification'
 export {
@@ -329,12 +328,6 @@ export interface PluginConfig {
    * refused and reported rather than written.
    */
   emitAllowlist?: string[]
-  /**
-   * Run the verification module inside the DSH server process when the sandbox denies
-   * a piped spawn (default false). That fallback executes model-influenced code with
-   * full host authority and can kill the server, so it is opt-in only.
-   */
-  allowInProcessFallback?: boolean
   /**
    * Base URL of the local OpenAI-compatible server that `delegate_worker` posts to — for
    * example `http://127.0.0.1:11434/v1` for Ollama, or a vLLM/llama.cpp port. A full
@@ -986,7 +979,6 @@ export function resolveVerificationPolicy(options: PluginConfig = {}): Verificat
   return {
     mode: options.verificationApproval ?? 'ask',
     allowlist: Array.isArray(options.verificationAllowlist) ? options.verificationAllowlist : [],
-    allowInProcessFallback: options.allowInProcessFallback === true,
     timeoutMs: resolveVerificationTimeoutMs(options.verificationTimeoutMs),
     ...(coherence ? { coherenceVerification: coherence } : {}),
   }

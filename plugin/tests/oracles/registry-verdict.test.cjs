@@ -39,7 +39,7 @@ function write(dir, name, body) {
   return file;
 }
 
-const ALLOW = { mode: 'allow', allowlist: [], allowInProcessFallback: false, timeoutMs: 30000 };
+const ALLOW = { mode: 'allow', allowlist: [], timeoutMs: 30000 };
 
 /** A runner that prints one TAP failure, so the unit fails verification. */
 const FAILING = [

@@ -35,7 +35,6 @@ function write(dir, name, body) {
 const ALLOW = {
   mode: 'allow',
   allowlist: [],
-  allowInProcessFallback: false,
   timeoutMs: 30000,
 };
 

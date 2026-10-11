@@ -73,7 +73,6 @@ const NAMED_EXPORTS = [
   "resolveLeadProviders",
   "resolveVerificationPolicy",
   "roleForAgent",
-  "runInProcessFallback",
   "runSandboxVerification",
   "saveDelegatedRegistry",
   "scanDLP",

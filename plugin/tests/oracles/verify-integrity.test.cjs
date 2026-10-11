@@ -8,7 +8,6 @@ const path = require("node:path");
 const {
   parseTestOutput,
   runSandboxVerification,
-  runInProcessFallback,
   extractAndEmitFiles,
 } = require(require("node:path").resolve(__dirname, "..", "..", "dist", "index.js"));
 
@@ -82,26 +81,32 @@ test("C: runSandboxVerification reports a failing command as failed", () => {
 });
 
 test("C: a passing verification command is not reported as failed", () => {
-  // Driven through a real module so the assertion holds on both a normal host
-  // (execSync runs it) and a sandboxed host (EPERM -> in-process fallback).
-  // NOTE: a bare `node -e "..."` cannot be verified on a sandboxed host, so it
-  // correctly fails closed there; asserting it "passes" would be host-dependent.
+  // Driven through a real module rather than `node -e "..."`. A host whose sandbox refuses to
+  // spawn cannot run this at all, and with the in-process fallback removed such a host now fails
+  // closed by design -- so the assertion is host-aware rather than absolute.
   fs.writeFileSync(path.join(TMP, "pass.test.cjs"), 'console.log("ok 1 - fine");\n', "utf8");
-  const result = runSandboxVerification("node pass.test.cjs", TMP, {
-    allowInProcessFallback: true,
-  });
-  assert.equal(result.failed, 0, `unexpected failure: ${result.errorSummary}`);
+  const result = runSandboxVerification("node pass.test.cjs", TMP);
+  if (result.failed > 0) {
+    assert.match(
+      String(result.errorSummary || result.output),
+      /EPERM|refused to spawn/i,
+      `a failure here must be the documented spawn refusal, not a parse defect: ${result.errorSummary}`
+    );
+    return;
+  }
+  assert.equal(result.failed, 0);
 });
 
-test("C: a sandbox EPERM fails closed unless the in-process fallback is enabled", () => {
-  // The fallback re-runs model-influenced code inside the SERVER process. Answering a
-  // sandbox denial by removing the sandbox inverts the control, so the default refuses.
+test("C: a sandbox EPERM fails closed", () => {
+  // The in-process fallback that used to answer this was removed: it re-ran model-influenced
+  // code inside the SERVER process, and answering a sandbox denial by removing the sandbox
+  // inverts the control. A host that cannot spawn now gets a hard refusal.
   fs.writeFileSync(path.join(TMP, "pass-default.test.cjs"), 'console.log("ok 1 - fine");\n', "utf8");
   const result = runSandboxVerification("node pass-default.test.cjs", TMP);
-  if (result.failed === 0) return; // an unsandboxed host can spawn; no fallback involved
+  if (result.failed === 0) return; // an unsandboxed host can spawn; nothing to refuse
   assert.match(
     String(result.errorSummary || result.output),
-    /in-process fallback is disabled|EPERM/i
+    /in-process fallback was removed|EPERM/i
   );
 });
 
@@ -113,42 +118,6 @@ test("C: a failing verification module is reported as failed", () => {
   );
   const result = runSandboxVerification("node fail.test.cjs", TMP);
   assert.ok(result.failed >= 1, `expected a failure, got passed=${result.passed}`);
-});
-
-// ---------------------------------------------------------------------------
-// Defect D — the in-process fallback's target detection
-// ---------------------------------------------------------------------------
-test("D: flags are not mistaken for file paths", () => {
-  const version = runInProcessFallback("node --version", TMP);
-  assert.doesNotMatch(version, /Target test file/, "a flag must never be treated as a file");
-  const evalCmd = runInProcessFallback('node -e "console.log(1)"', TMP);
-  assert.doesNotMatch(evalCmd, /Target test file/);
-});
-
-test("D: an unidentifiable command fails closed instead of claiming success", () => {
-  for (const cmd of ["node --version", 'node -e "console.log(1)"', "git status"]) {
-    const out = runInProcessFallback(cmd, TMP);
-    assert.match(out, /^not ok/m, `must fail closed for: ${cmd}`);
-    assert.match(out, /could not identify a target module/);
-  }
-});
-
-test("D: a real test module is still executed in-process", () => {
-  fs.writeFileSync(
-    path.join(TMP, "ok.test.cjs"),
-    'console.log("ok 1 - fine"); console.log("ok 2 - also fine");\n',
-    "utf8"
-  );
-  const passed = runInProcessFallback("node ok.test.cjs", TMP);
-  assert.match(passed, /^ok 1/m, `expected a pass, got: ${passed.slice(0, 120)}`);
-
-  fs.writeFileSync(
-    path.join(TMP, "bad.test.cjs"),
-    'console.log("ok 1 - first"); throw new Error("boom");\n',
-    "utf8"
-  );
-  const failed = runInProcessFallback("node bad.test.cjs", TMP);
-  assert.match(failed, /not ok/, "a throwing module must be reported as failing");
 });
 
 // ---------------------------------------------------------------------------

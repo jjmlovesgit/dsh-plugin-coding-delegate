@@ -59,7 +59,6 @@ export declare function resolveVerificationTimeoutMs(value: unknown): number;
 export interface VerificationPolicy {
     mode: 'ask' | 'allow' | 'deny';
     allowlist: string[];
-    allowInProcessFallback: boolean;
     /**
      * How long the verification command may run. Never absent: there is always a bound, because the
      * alternative is a command that never returns.
@@ -94,11 +93,9 @@ export declare function evaluateVerificationPolicy(command: string, policy?: Ver
     program: string;
     reason: string;
 };
-export declare function runInProcessFallback(cmd: string, workspaceDir: string): string;
 export declare function runSandboxVerification(verificationCommand: string, workspaceDir?: string, options?: {
     redact?: boolean;
     rawLogPath?: string;
-    allowInProcessFallback?: boolean;
     /** Overrides the default bound; an unusable value falls back to it rather than removing it. */
     timeoutMs?: number;
 }): TestResults;
