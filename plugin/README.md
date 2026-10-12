@@ -526,7 +526,10 @@ it is gone rather than guarded.**
 A child process is bounded by your user account rather than by the plugin — the files it can
 write, the network it can reach. The approval prompt is the practical control. To bound it more
 tightly, run the verification inside a **container**: optional hardening for those who have a
-runtime, not a prerequisite. Pass the container command as `runVerification` (it is a
+runtime, not a prerequisite — **except when an attestation key is readable by that same user**, where
+it is no longer optional but the difference between a record that can be forged and one that cannot
+(see [the threat model](../docs/governance.md#3-the-subprocess-verification-boundary)). Pass the
+container command as `runVerification` (it is a
 `delegate_worker` argument, not a plugin config key, so the caller supplies it per delegation):
 
 ```js
@@ -788,6 +791,12 @@ never holds a key and could not demonstrate one. This is **key-attributed tamper
 third-party non-repudiation. Closing that gap needs the private key under the operator's sole control,
 in a hardware token or an OS keystore this process cannot read, rather than a file it can.
 
+**The worker never holding a key does not put the key out of reach.** Verification runs out of process
+as the operator's own OS user and is not confined to the workspace, so code it executes — including a
+test file the worker just authored under an innocuous approved command — can read any file that user
+can. Custody is the boundary: keep the key outside the workspace on a user-only ACL, and run
+verification that executes model-authored code in a container that cannot see it.
+
 **It is withheld rather than weakened.** If the key cannot be read, if the workspace is not on a
 readable git commit, or if no verification process ran, nothing is signed and the verdict carries
 `attestationSkipped` with the reason. An envelope anchored to a guessed commit would verify perfectly
@@ -799,7 +808,10 @@ from a caller, for the same reason the registry re-hashes files instead of trust
 output, because the raw log stays local by design, so it binds what was reported rather than the
 evidence behind it. An unobserved exit status is recorded as `-1`, never `0`, so a verification that
 never ran cannot be read as a clean one. And the record describes an out-of-process run, which is why
-it pairs with the subprocess isolation above rather than replacing it.
+it pairs with the containment question above rather than replacing it.
+
+For the complete threat model, key containment invariants, and CI verification mechanics, see
+[`docs/governance.md`](../docs/governance.md).
 
 **This is a provenance record, not a compliance claim.** It hands a pipeline something checkable; what
 any particular regulatory regime requires of that something is a question for the people answerable

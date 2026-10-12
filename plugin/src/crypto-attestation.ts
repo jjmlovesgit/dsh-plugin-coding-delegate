@@ -52,9 +52,11 @@ export interface AttestationPayload {
 }
 
 /**
- * A signed payload as it travels. `payload` is the CANONICAL serialization, not the original object:
- * a verifier re-canonicalizes what it parses, and if the two disagree the signature fails, which is
- * the property that makes the envelope tamper-evident rather than merely signed.
+ * A signed payload as it travels. `payload` is the CANONICAL serialization, not the original object,
+ * and the signature is over the UTF-8 bytes of that string. A verifier therefore checks the carried
+ * bytes directly and re-serializes nothing, which is what keeps a signature check clear of
+ * canonicalization disagreement. Comparing two records is the operation that needs a canonicalizer;
+ * checking one is not.
  */
 export interface SignedEnvelope {
   payload: string

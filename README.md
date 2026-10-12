@@ -380,6 +380,11 @@ and the worker never holds one. Call it **key-attributed tamper-evidence**, neve
 the gap closes only when the private key is under the operator's sole control, in a hardware token or
 an OS keystore this process cannot read.
 
+**The worker not holding a key is not the key being out of reach.** Verification runs out of process
+as your own OS user, so a test file the worker wrote and a command you approved can read whatever you
+can. Keep the key outside the workspace on a user-only ACL, and run verification that touches
+model-authored code in a container that cannot see it.
+
 **It is withheld rather than weakened.** No readable key, no readable base commit, or no verification
 process, and nothing is signed — the verdict says so in `attestationSkipped`. The base commit is read
 from the workspace, never accepted from a caller, for the same reason the registry re-hashes files
@@ -392,6 +397,9 @@ against the anchored commit. This is Git-anchored metadata storage, not an appen
 it without an explicit refspec (`git push origin refs/notes/delegations:refs/notes/delegations`). What
 makes a record tamper-evident is the signature, not the ref. The plugin never pushes, and a failed write
 is reported in `attestationNotesStatus` beside an intact verdict rather than failing the unit.
+
+For the complete threat model, key containment invariants, and CI verification mechanics, see
+[`docs/governance.md`](docs/governance.md).
 
 This is a provenance record, not a compliance claim. It gives a security or audit pipeline a
 machine-checkable statement of what was produced and what checked it; what any given regime requires
