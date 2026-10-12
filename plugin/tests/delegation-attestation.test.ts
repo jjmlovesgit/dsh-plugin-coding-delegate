@@ -5,6 +5,7 @@ import * as os from 'node:os'
 import * as path from 'node:path'
 import { SavingsTracker, delegateWorker } from '../src/index'
 import { generateWorkerKeyPair, verifyEnvelope } from '../src/crypto-attestation'
+import { canonicalizeJson } from '../src/canonical-json'
 
 /**
  * `execFileSync` is replaced by a spy that still DELEGATES to the real implementation: behaviour is
@@ -306,6 +307,146 @@ describe('delegation integration: attestation signed', () => {
 
     expect(verifyEnvelope(res.attestation)).toBe(true)
     expect(JSON.parse(res.attestation.payload).baseCommit).toBe(second)
+
+    fs.rmSync(tmpDir, { recursive: true, force: true })
+  })
+})
+
+describe('delegation integration: git-anchored storage', () => {
+  const NOTES_REF = 'refs/notes/delegations'
+  const FILE = '```typescript file="src/ok.ts"\nexport const ok = 1\n```'
+
+  /**
+   * Every execFileSync call that is a `git notes add`, i.e. a WRITE.
+   *
+   * Filtered on `add` rather than on `notes` because these tests read the note back with
+   * `git notes show`, which is also an execFileSync. The first version of this helper matched both,
+   * and the failure it produced -- 2 where 1 was expected -- was the instrument measuring itself.
+   */
+  const noteWrites = () =>
+    execSpy.mock.calls.filter(
+      (call) => Array.isArray(call[1]) && call[1].includes('notes') && call[1].includes('add')
+    )
+
+  async function delegate(tmpDir: string, extra: Record<string, unknown>) {
+    return (await delegateWorker(
+      {
+        taskName: 'Notes',
+        instruction: 'write it',
+        targetFiles: ['src/ok.ts'],
+        workspaceDir: tmpDir,
+        runVerification: 'node --version',
+        verificationPolicy: ALLOW,
+        ...extra,
+      },
+      new SavingsTracker(tmpDir)
+    )) as any
+  }
+
+  it('writes nothing when no notes ref is configured', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(workerReply(FILE)))
+    const tmpDir = makeTempWorkspace('lr-notes-unset')
+    initRepo(tmpDir)
+    const key = writeKey(tmpDir)
+
+    // Cleared after initRepo, which shells out to git itself: leaving those calls in would make the
+    // assertion below unfalsifiable for reasons unrelated to the attestation.
+    execSpy.mockClear()
+
+    const res = await delegate(tmpDir, { attestationPrivateKeyPath: key.path })
+
+    // Signed -- the key IS configured -- so the envelope exists, and the only reason no note was
+    // written is that no ref was named. This is the distinction the two separate options exist for.
+    expect(verifyEnvelope(res.attestation)).toBe(true)
+    expect(res.attestationNotesStatus).toBeUndefined()
+    expect(noteWrites()).toEqual([])
+
+    fs.rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  it('stores the canonical envelope as a note and reads it back unchanged', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(workerReply(FILE)))
+    const tmpDir = makeTempWorkspace('lr-notes-happy')
+    const head = initRepo(tmpDir)
+    const key = writeKey(tmpDir)
+
+    execSpy.mockClear()
+    const res = await delegate(tmpDir, {
+      attestationPrivateKeyPath: key.path,
+      attestationNotesRef: NOTES_REF,
+    })
+
+    expect(res.attestationNotesStatus).toEqual({ written: true })
+    expect(verifyEnvelope(res.attestation)).toBe(true)
+
+    // Read back through git itself rather than trusting the call we think we made.
+    const note = git(tmpDir, ['notes', '--ref=' + NOTES_REF, 'show', head]).trim()
+    expect(note).toBe(canonicalizeJson(res.attestation))
+    // The record round-trips: what came out of the notes tree verifies as the same signed record.
+    expect(verifyEnvelope(JSON.parse(note))).toBe(true)
+
+    // The exact invocation rather than a count: a count cannot distinguish a write to the configured
+    // ref from a write somewhere else.
+    const writes = noteWrites()
+    expect(writes).toHaveLength(1)
+    // ANTI-VACUITY for the case above: this spy DOES observe a write when a ref is named, so the empty
+    // result there is an observation rather than a dead instrument.
+    const args = writes[0][1] as string[]
+    expect(args).toContain('--ref=' + NOTES_REF)
+    expect(args).toContain('-f')
+    expect(args[args.length - 1]).toBe(head)
+    expect(args[args.indexOf('-m') + 1]).toBe(canonicalizeJson(res.attestation))
+
+    fs.rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  it('reports a failed write without failing a verified unit', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(workerReply(FILE)))
+    const tmpDir = makeTempWorkspace('lr-notes-locked')
+    const head = initRepo(tmpDir)
+    const key = writeKey(tmpDir)
+
+    // A stale ref lock is the contention the design names by hand: git cannot take the ref, and the
+    // failure belongs beside the verdict rather than in place of it. Real git, real error.
+    const lockDir = path.join(tmpDir, '.git', 'refs', 'notes')
+    fs.mkdirSync(lockDir, { recursive: true })
+    fs.writeFileSync(path.join(lockDir, 'delegations.lock'), '', 'utf8')
+
+    execSpy.mockClear()
+    const res = await delegate(tmpDir, {
+      attestationPrivateKeyPath: key.path,
+      attestationNotesRef: NOTES_REF,
+    })
+
+    // The unit is unaffected: it was verified and signed before storage ran, and failing its
+    // promotion because a receipt could not be filed would conflate the artifact with the ledger.
+    expect(res.status).toBe('SUCCESS')
+    expect(res.attestation).toBeDefined()
+    expect(verifyEnvelope(res.attestation)).toBe(true)
+
+    // And the failure is reported rather than swallowed.
+    expect(res.attestationNotesStatus.written).toBe(false)
+    expect(res.attestationNotesStatus.reason.length).toBeGreaterThan(0)
+    expect(noteWrites()).toHaveLength(1)
+    expect(() => git(tmpDir, ['notes', '--ref=' + NOTES_REF, 'show', head])).toThrow()
+
+    fs.rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  it('reports a notes ref configured with no signing key, rather than no-oping silently', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(workerReply(FILE)))
+    const tmpDir = makeTempWorkspace('lr-notes-nokey')
+    initRepo(tmpDir)
+
+    execSpy.mockClear()
+    const res = await delegate(tmpDir, { attestationNotesRef: NOTES_REF })
+
+    // A misconfiguration, named. There is no envelope to store, so nothing was written and the
+    // status says why -- the alternative is an operator believing records are being filed.
+    expect(res.attestation).toBeUndefined()
+    expect(res.attestationNotesStatus.written).toBe(false)
+    expect(res.attestationNotesStatus.reason).toMatch(/signing key/i)
+    expect(noteWrites()).toEqual([])
 
     fs.rmSync(tmpDir, { recursive: true, force: true })
   })

@@ -386,6 +386,13 @@ from the workspace, never accepted from a caller, for the same reason the regist
 instead of trusting a supplied hash. Two further limits: `stdoutHash` covers the **redacted** output,
 because the raw log stays local, and an unobserved exit status is recorded as `-1`, never `0`.
 
+**Storage is a second and independent opt-in.** `attestationNotesRef` writes the envelope as a git note
+against the anchored commit. This is Git-anchored metadata storage, not an append-only ledger:
+`refs/notes/*` can be rewritten or deleted, `-f` overwrites a re-run, and git neither fetches nor pushes
+it without an explicit refspec (`git push origin refs/notes/delegations:refs/notes/delegations`). What
+makes a record tamper-evident is the signature, not the ref. The plugin never pushes, and a failed write
+is reported in `attestationNotesStatus` beside an intact verdict rather than failing the unit.
+
 This is a provenance record, not a compliance claim. It gives a security or audit pipeline a
 machine-checkable statement of what was produced and what checked it; what any given regime requires
 of that statement is for the people answerable for the regime, not for this file.

@@ -171,6 +171,20 @@ export interface PluginConfig {
      */
     attestationPrivateKeyPath?: string;
     /**
+     * A full `refs/notes/...` path. When set, the signed generation record is also stored as a git
+     * note against the commit it anchors to, and the outcome is reported in `attestationNotesStatus`.
+     * Left unset — the default — the envelope is returned in memory only and no ref is written.
+     *
+     * **The plugin never pushes.** Publishing the ref is the operator's or CI's job, run as:
+     *
+     *     git push origin refs/notes/delegations:refs/notes/delegations
+     *
+     * A failed write is reported beside the verdict and never fails a verified unit: the code was
+     * verified and signed before storage ran, so conflating the artifact with its receipt would fail a
+     * promotion over metadata.
+     */
+    attestationNotesRef?: string;
+    /**
      * Base URL of the local OpenAI-compatible server that `delegate_worker` posts to — for
      * example `http://127.0.0.1:11434/v1` for Ollama, or a vLLM/llama.cpp port. A full
      * `/chat/completions` URL is also accepted. Defaults to `http://127.0.0.1:1234/v1`.

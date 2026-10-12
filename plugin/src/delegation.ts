@@ -33,12 +33,14 @@ import type { DelegateWorkerParameter } from './contracts'
 import { scanDLP } from './index'
 import type { LLMSession } from './index'
 import { canonicalisePath } from './paths'
+import { canonicalizeJson } from './canonical-json'
 import {
   SignedEnvelope,
   buildAttestationPlan,
   publicKeyFromPrivate,
   signManifest,
 } from './crypto-attestation'
+import { buildNotesCommand } from './attestation-notes'
 
 /**
  * The commit the delegation's workspace is actually on, or null.
@@ -65,6 +67,43 @@ function readBaseCommit(workspaceDir: string): string | null {
     return trimmed || null
   } catch {
     return null
+  }
+}
+
+/**
+ * Store a signed record as a note against the commit it anchors to.
+ *
+ * NON-BLOCKING BY DESIGN. The code was verified and signed before this runs, so failing its promotion
+ * because metadata storage failed would conflate the work artifact with the ledger receipt. Every
+ * failure -- a lock held by another git process, a corrupt notes tree, a permission error -- comes
+ * back as `{ written: false, reason }` beside an otherwise intact verdict.
+ *
+ * THE PLUGIN DOES NOT PUSH. Publishing the ref is the operator's or CI's call, run as the refspec the
+ * README documents. Initiating a network operation here would break the egress posture and presume a
+ * remote and credentials that a local or air-gapped host need not have.
+ */
+function writeDelegationNote(
+  workspaceDir: string,
+  notesRef: string,
+  commit: string,
+  envelope: SignedEnvelope
+): { written: boolean; reason?: string } {
+  const command = buildNotesCommand({ commit, notesRef, body: canonicalizeJson(envelope) })
+  if (!command.ok) return { written: false, reason: command.reason }
+
+  try {
+    child_process.execFileSync('git', ['-C', workspaceDir, ...command.args], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    return { written: true }
+  } catch (err: any) {
+    // git puts the useful part on stderr. The first line names the failure without turning a status
+    // field into a transcript.
+    const detail = String(err?.stderr || err?.message || err)
+      .trim()
+      .split('\n')[0]
+    return { written: false, reason: detail.slice(0, 300) || 'git notes failed' }
   }
 }
 
@@ -268,6 +307,15 @@ export interface DelegateWorkerParams {
    * key the operator never chose.
    */
   attestationPrivateKeyPath?: string
+  /**
+   * A full `refs/notes/...` path. When set, the signed envelope is ALSO stored as a git note against
+   * the commit it anchors to, and the outcome is reported in `attestationNotesStatus`. Left unset,
+   * the envelope is returned in-memory only and the plugin touches no ref at all.
+   *
+   * Separate from the key on purpose: signing is a computation, while writing a ref mutates the
+   * repository being governed, and an operator may reasonably want the first without the second.
+   */
+  attestationNotesRef?: string
   /**
    * What to do when the worker writes a file the unit did not declare in `targetFiles`. `'enforce'`
    * (the default) refuses it and reports why; `'off'` restores the permissive behaviour that predates
@@ -992,6 +1040,8 @@ export async function delegateWorker(
     // existed -- worse than an absent record, because it looks like a complete one.
     let attestation: SignedEnvelope | undefined
     let attestationSkipped: string | undefined
+    /** The commit the envelope anchors to, kept so the note write does not re-parse the payload. */
+    let attestedCommit: string | undefined
     {
       // Gathering is this caller's half; deciding is `buildAttestationPlan`'s. That function is pure
       // and tested without a repository, a key file or a subprocess, which is what makes the withheld
@@ -1041,8 +1091,29 @@ export async function delegateWorker(
 
       if (plan.action === 'sign' && privateKeyPem) {
         attestation = signManifest(plan.payload, privateKeyPem, publicKeyFromPrivate(privateKeyPem))
+        attestedCommit = plan.payload.baseCommit
       } else if (plan.action === 'withheld') {
         attestationSkipped = plan.reason
+      }
+    }
+
+    // Storing the record is a SEPARATE opt-in from signing it. A notes ref configured with no record
+    // to store is a misconfiguration, and naming it beats a silent no-op.
+    let attestationNotesStatus: { written: boolean; reason?: string } | undefined
+    if (params.attestationNotesRef) {
+      if (!attestation || !attestedCommit) {
+        attestationNotesStatus = {
+          written: false,
+          reason:
+            'no envelope was produced, so there was nothing to store. Storing a record requires a signing key.',
+        }
+      } else {
+        attestationNotesStatus = writeDelegationNote(
+          workspaceBase,
+          params.attestationNotesRef,
+          attestedCommit,
+          attestation
+        )
       }
     }
 
@@ -1098,6 +1169,7 @@ export async function delegateWorker(
       // rather than silent: a configured key that never signs is a failure the caller cannot see.
       ...(attestation ? { attestation } : {}),
       ...(attestationSkipped ? { attestationSkipped } : {}),
+      ...(attestationNotesStatus ? { attestationNotesStatus } : {}),
       tokens: {
         prompt: promptTokens,
         completion: completionTokens,

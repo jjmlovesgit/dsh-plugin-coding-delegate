@@ -269,6 +269,7 @@ When you call `predictRoute` directly, its decision output is
 | `retryContext` | `'auto'` | Whether a failed unit's failure locations are read back and offered to the next attempt in the same workspace as context. `'auto'` adds one window per file the failure named, consumed once and cleared by any unit that then passes; `'off'` disables it. The ordinary cause of a unit that failed "for no visible reason" is that the worker was never shown the code it had to change, and the failure already names the file. Best-effort by construction: the widened injection replaces the declared one only if it resolves cleanly, so it can never turn a runnable delegation into `CONTEXT_REFUSED`. The code goes to the **worker**; the architect is told which files were added, never their contents |
 | `emitAllowlist` | `[]` | Extra directories a delegated worker may write into besides the workspace |
 | `attestationPrivateKeyPath` | — | Path to a PKCS#8 Ed25519 private key. When set, each resolved unit is signed into a canonical JSON generation record and the envelope is returned in the verdict. Off by default. The public half is derived from the private key, so one file is provisioned rather than a pair that can disagree silently. See [Technical auditability and provenance](#technical-auditability-and-provenance) for exactly what a signature establishes, which is narrower than "non-repudiation" |
+| `attestationNotesRef` | — | A full `refs/notes/...` path. When set, the signed record is **also** stored as a git note against the commit it anchors to, and `attestationNotesStatus` reports whether the write succeeded. Off by default, and independent of the key: signing is a computation, while writing a ref mutates the repository being governed. **The plugin never pushes** — see [Storing the record](#storing-the-record) |
 | `leadProviders` | `[]` | Provider ids that are **not** the architect. Their requests are left exactly as configured |
 | `leadTier` | `false` | Derive `leadProviders` from the `LEAD` profile instead of naming providers |
 | `delegateReadPolicy` | `'ask'` | `ask`, `allow` or `deny` for reading a file a worker wrote. `allow` weakens rule 3 |
@@ -803,6 +804,31 @@ it pairs with the subprocess isolation above rather than replacing it.
 **This is a provenance record, not a compliance claim.** It hands a pipeline something checkable; what
 any particular regulatory regime requires of that something is a question for the people answerable
 for the regime, not for this file.
+
+### Storing the record
+
+`attestationNotesRef` is a second and independent opt-in. Set it to a full `refs/notes/...` path and
+the signed envelope is also written as a git note against the commit it anchors to; leave it unset and
+the envelope is returned in memory only, with no ref touched.
+
+**This is Git-anchored metadata storage, not an append-only ledger.** `refs/notes/*` is a ref that any
+writer can rewrite or delete, that `-f` deliberately overwrites on a re-run, and that git neither
+fetches nor pushes without an explicit refspec. What makes a record tamper-*evident* is the signature
+over its canonical bytes together with the hashes inside it; the ref is where the record is kept, not
+what protects it. Genuine append-only properties need a WORM sink or a transparency log such as
+Sigstore Rekor, and saying so is cheaper than being asked.
+
+**The plugin never pushes.** Publishing the ref is the operator's or CI's call, run as:
+
+```
+git push origin refs/notes/delegations:refs/notes/delegations
+```
+
+**A failed write never fails a unit.** The code was verified and signed before storage ran, so
+conflating the artifact with its receipt would fail a promotion over metadata. The verdict keeps its
+envelope and reports `attestationNotesStatus` — `{ written: true }`, or `{ written: false, reason }`
+naming a held lock, a corrupt notes tree or a permission error. A notes ref configured without a
+signing key is a misconfiguration and is named as one rather than passing silently.
 
 ## State
 

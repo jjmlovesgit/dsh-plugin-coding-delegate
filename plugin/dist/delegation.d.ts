@@ -261,6 +261,15 @@ export interface DelegateWorkerParams {
      */
     attestationPrivateKeyPath?: string;
     /**
+     * A full `refs/notes/...` path. When set, the signed envelope is ALSO stored as a git note against
+     * the commit it anchors to, and the outcome is reported in `attestationNotesStatus`. Left unset,
+     * the envelope is returned in-memory only and the plugin touches no ref at all.
+     *
+     * Separate from the key on purpose: signing is a computation, while writing a ref mutates the
+     * repository being governed, and an operator may reasonably want the first without the second.
+     */
+    attestationNotesRef?: string;
+    /**
      * What to do when the worker writes a file the unit did not declare in `targetFiles`. `'enforce'`
      * (the default) refuses it and reports why; `'off'` restores the permissive behaviour that predates
      * the boundary.
