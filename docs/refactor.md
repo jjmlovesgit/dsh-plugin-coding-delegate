@@ -105,13 +105,19 @@ The predicted eighth pass for `LocalRouter` / routing and the DLP rules in `inde
 
   The artifact step is not redundant with the build. `plugin/dist` is versioned, so the suite is green
   whether or not the rebuilt artifact was *staged*, and a fix has already been committed with its
-  `dist/guard.js` left dirty. `scripts/check-dist-in-sync.cjs` compares the working tree against the
-  **index**, which is the question a pre-commit gate can act on: is every rebuilt artifact staged? It
-  compared against `HEAD` at first, and that is unsatisfiable before the commit — a correctly rebuilt dist
-  always differs from `HEAD` until it is committed — so it failed the first time it was run in this order.
-  It also resolves the repository root from its own location rather than trusting the cwd, because run from
-  `plugin/` it used to resolve `plugin/dist` to `plugin/plugin/dist`, match nothing, and report success for
-  a tree it had never looked at: a gate that passes by looking at nothing is worse than no gate.
+  `dist/guard.js` left dirty. `scripts/check-dist-in-sync.cjs` now **runs the build itself** and then
+  compares the working tree against the **index**, which is the question a pre-commit gate can act on: is
+  every rebuilt artifact staged? It compared against `HEAD` at first, and that is unsatisfiable before the
+  commit — a correctly rebuilt dist always differs from `HEAD` until it is committed — so it failed the
+  first time it was run in this order. It left the build to the operator for longer than that, and the gap
+  was not theoretical: a source doc comment was corrected and committed with no rebuild, so dist matched
+  both `HEAD` and the index, and the gate was green about an artifact that did not match its source — which
+  reached a release candidate. Building inside the gate is what closes it, because after a build an
+  unstaged difference is either a rebuild nobody staged or a source change nobody rebuilt, and both are the
+  same failure. It also resolves the repository root from its own location rather than trusting the cwd,
+  because run from `plugin/` it used to resolve `plugin/dist` to `plugin/plugin/dist`, match nothing, and
+  report success for a tree it had never looked at: a gate that passes by looking at nothing is worse than
+  no gate.
 - **A `runVerification` string runs under `cmd.exe`, not PowerShell.** The block above is what *you* run in the
   session shell. A verification string handed to `delegate_worker` goes to the plugin's runner, and the
   runner's shell is `cmd.exe`, so a PowerShell-flavoured string fails without running: `Select-Object` is not a

@@ -452,10 +452,11 @@ dsh plugin --profile <name> add ./plugin
 ### From a pinned tag, for a restricted or air-gapped host
 
 ```bash
-dsh plugin --profile web add github:jjmlovesgit/dsh-plugin-coding-delegate#v0.3.0
+dsh plugin --profile web add github:jjmlovesgit/dsh-plugin-coding-delegate#v0.4.0
 ```
 
-`v0.3.0` predates signed generation records — see
+`v0.4.0` is the release that adds signed generation records. Pin an earlier tag only to run the
+control without them — see
 [Technical auditability and provenance](plugin/README.md#technical-auditability-and-provenance).
 
 ### Confirm it loaded
@@ -636,7 +637,7 @@ At the repository root:
 
 ```powershell
 node scripts/check-readme-consistency.cjs   # the two policy tables must agree
-node scripts/check-dist-in-sync.cjs         # rebuilt dist must be staged
+node scripts/check-dist-in-sync.cjs         # builds, then requires dist to be staged
 node scripts/check-contract.cjs --spec      # specification-conformance suite
 ```
 

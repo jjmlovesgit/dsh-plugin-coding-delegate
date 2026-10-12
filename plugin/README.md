@@ -95,10 +95,10 @@ dsh plugin --profile <name> add dsh-plugin-coding-delegate
 ### From a pinned tag
 
 ```bash
-dsh plugin --profile web add github:jjmlovesgit/dsh-plugin-coding-delegate#v0.3.0
+dsh plugin --profile web add github:jjmlovesgit/dsh-plugin-coding-delegate#v0.4.0
 ```
 
-`v0.3.0` predates signed generation records; see
+`v0.4.0` is the release that adds signed generation records; see
 [Technical auditability and provenance](#technical-auditability-and-provenance).
 
 ### Confirm it loaded
