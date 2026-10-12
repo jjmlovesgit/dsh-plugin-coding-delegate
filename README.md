@@ -31,7 +31,7 @@ needs — nothing else — writes the code, and is discarded. A fresh context pe
 The verification command runs as an ordinary subprocess, with the operator's approval. Its raw output
 stays on the local machine; what travels back is the failure *structure*, with source stripped out.
 
-> **Status: 0.2.1,** The mechanisms work and are tested. Its **limits are documented
+> **Status: 0.4.0.** The mechanisms work and are tested. Its **limits are documented
 > rather than glossed**, including two that cannot be closed from inside the process — see
 > [What this control does not cover](#what-this-control-does-not-cover). Read that section before deciding
 > whether it fits your situation.
@@ -418,20 +418,61 @@ is optional hardening — see [Verification](plugin/README.md#verification-runs-
 
 ## Install
 
-The plugin lives in `plugin/`. DSH loads a profile bundle, so register it into the profile you use:
+DSH does not read plugins from a config file — **there is no `config.json` and no `plugins` array
+to edit.** A DSH install is one or more **profiles**, each a directory at `$DSH_HOME/profiles/<name>`
+holding a `package.json` and a `cordis.patch.yml`, and installing a plugin means adding it to the
+profile you boot.
+
+### From npm
+
+```bash
+dsh plugin --profile web add dsh-plugin-coding-delegate
+```
+
+`dsh plugin` forwards its remaining arguments to pnpm inside the profile directory, so this is a
+`pnpm add` underneath. Substitute whichever profile you actually boot — `web` for the CLI, `tauri`
+for the desktop app, `headless`, or one of your own.
+
+### From this checkout
 
 ```powershell
 # The CLI profile is `web`; the desktop app boots `tauri`.
 .\scripts\register-plugin.ps1 -Profile web
 ```
 
-Or by hand, which is all the script does:
+The script installs `plugin/` into the profile, adds the bundle to `dsh.profile.bundles`, and merges
+the plugin config and provider entries into that profile's `cordis.patch.yml`. By hand, that is:
 
 ```bash
 dsh plugin --profile <name> add ./plugin
 # then add "dsh-plugin-coding-delegate" to dsh.profile.bundles in
 # ~/.dsh/profiles/<name>/package.json
 ```
+
+### From a pinned tag, for a restricted or air-gapped host
+
+```bash
+dsh plugin --profile web add github:jjmlovesgit/dsh-plugin-coding-delegate#v0.3.0
+```
+
+`v0.3.0` predates signed generation records — see
+[Technical auditability and provenance](plugin/README.md#technical-auditability-and-provenance).
+
+### Confirm it loaded
+
+```bash
+dsh --profile web --dump-config
+```
+
+The plugin's row id **`local-router`** appears in the composed tree. It will not fail silently
+instead: a bundle that does not resolve fails startup loudly rather than booting without the control.
+
+### What is not an install
+
+`npm install -g dsh-plugin-coding-delegate` places files on the machine and registers nothing — no
+profile lists the plugin, so the runtime never loads it. A `plugins` array in `~/.dsh/config.json` is
+read by nothing in the runtime; an earlier version of this repository's own registration script wrote
+one, reported success, and now deliberately does not.
 
 ## Configure
 

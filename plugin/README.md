@@ -68,9 +68,50 @@ no in-process path at all; a container is optional hardening, not a prerequisite
 
 ## Install
 
+DSH does not read plugins from a config file — **there is no `config.json` and no `plugins` array
+to edit.** A DSH install is one or more **profiles**, each a directory at `$DSH_HOME/profiles/<name>`
+holding a `package.json` and a `cordis.patch.yml`, and installing a plugin means adding it to the
+profile you boot.
+
+### From npm
+
 ```bash
-npm install dsh-plugin-coding-delegate
+dsh plugin --profile web add dsh-plugin-coding-delegate
 ```
+
+`dsh plugin` forwards its remaining arguments to pnpm inside the profile directory, so this is a
+`pnpm add` underneath. Substitute whichever profile you boot — `web` for the CLI, `tauri` for the
+desktop app. The plugin registers under the row id **`local-router`** and starts on its built-in
+defaults with no `config:` block.
+
+### By hand
+
+```bash
+dsh plugin --profile <name> add dsh-plugin-coding-delegate
+# then add "dsh-plugin-coding-delegate" to dsh.profile.bundles in
+# ~/.dsh/profiles/<name>/package.json
+```
+
+### From a pinned tag
+
+```bash
+dsh plugin --profile web add github:jjmlovesgit/dsh-plugin-coding-delegate#v0.3.0
+```
+
+`v0.3.0` predates signed generation records; see
+[Technical auditability and provenance](#technical-auditability-and-provenance).
+
+### Confirm it loaded
+
+```bash
+dsh --profile web --dump-config
+```
+
+`local-router` appears in the composed tree. A bundle that does not resolve fails startup loudly
+rather than booting without the control.
+
+`npm install -g dsh-plugin-coding-delegate` is **not** an install for DSH: it places files on the
+machine and registers nothing, so no profile lists the plugin and the runtime never loads it.
 
 The package has **no runtime dependencies**: routing, credential detection, the code guard
 and `delegate_worker` all run in-process against the host's `ctx`.
@@ -84,8 +125,11 @@ reachable under the ids you set in `localProvider` / `cloudProvider` (and the ma
 
 ### Option 1 — local worker plus cloud (the default)
 
-A local LM Studio server plus DeepSeek Cloud. Copy `cordis.patch.example.yml` into your
-profile, or add the equivalent to `~/.dsh/settings.yaml`:
+A local LM Studio server plus DeepSeek Cloud. The **plugin's own options** must go in your profile's
+`cordis.patch.yml`: a `local-router:` section in `~/.dsh/settings.yaml` looks like configuration and
+is never merged into them. The **provider** entries can go in either place. `cordis.patch.example.yml`
+is a complete worked example of both; the provider half is what this expands to in
+`~/.dsh/settings.yaml`:
 
 ```yaml
 llm-pi-ai:
