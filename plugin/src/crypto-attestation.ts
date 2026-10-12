@@ -1,4 +1,4 @@
-import { createHash, generateKeyPairSync, sign, verify } from 'node:crypto'
+import { createHash, createPublicKey, generateKeyPairSync, sign, verify } from 'node:crypto'
 import { canonicalizeJson } from './canonical-json'
 
 /**
@@ -86,6 +86,17 @@ export function generateWorkerKeyPair(): WorkerKeyPair {
 }
 
 /**
+ * Derive the SPKI public key from a PKCS#8 private key.
+ *
+ * This exists so an operator provisions ONE secret rather than a matched pair. Two files that must
+ * agree is a configuration that can be wrong silently: sign with one, publish the other, and every
+ * verification fails for a reason indistinguishable from tampering.
+ */
+export function publicKeyFromPrivate(privateKeyPem: string): string {
+  return String(createPublicKey(privateKeyPem).export({ type: 'spki', format: 'pem' }))
+}
+
+/**
  * Canonicalize the payload and sign it.
  *
  * `algorithm` is null because Ed25519 does not take a digest parameter -- it hashes internally, and
@@ -134,4 +145,131 @@ export function verifyEnvelope(envelope: SignedEnvelope): boolean {
 /** sha256, lowercase hex. The digest form the registry already uses for file content. */
 export function hashBuffer(buffer: Buffer | string): string {
   return createHash('sha256').update(buffer).digest('hex')
+}
+
+/** One file of the contract that judged the unit, relative to the workspace. */
+export interface AttestationContractRef {
+  path: string
+  sha256: string | null
+}
+
+/** One file the unit wrote. `sha256` is read from disk by the caller, not taken from a record. */
+export interface AttestationArtifactRef {
+  path: string
+  sha256: string | null
+}
+
+/**
+ * Everything the decision depends on, as plain data.
+ *
+ * Every environment question has already been answered by the caller: the commit was read, the key
+ * was read, the verification ran or did not. That is what makes the function below testable without
+ * a repository, a key file or a subprocess -- the failures worth testing are otherwise the ones that
+ * are hardest to arrange.
+ */
+export interface AttestationInputs {
+  /** The operator's configured key path. Absent means the feature was never opted into. */
+  privateKeyPath?: string
+  /** Whether that key was readable. Ignored when `privateKeyPath` is absent. */
+  privateKeyReadable: boolean
+  runId: string
+  /** The commit the workspace is on, as READ from git. Null when it could not be read. */
+  baseCommit: string | null
+  modelIdentifier: string
+  contracts: AttestationContractRef[]
+  artifacts: AttestationArtifactRef[]
+  verification: {
+    command: string
+    /** Whether a verification process was actually attempted. */
+    executed: boolean
+    /** The OBSERVED child status, or null when none was observed. Never defaulted here. */
+    exitCode: number | null
+    /** The REDACTED output; the raw log stays local by design. */
+    output: string
+    failed: number
+  }
+}
+
+/**
+ * What to do about signing, decided as a value rather than as control flow.
+ *
+ * Three states, because "not opted in" and "opted in but could not attest" are different facts and
+ * collapsing them would hide a misconfiguration behind a normal-looking silence:
+ *
+ *   none      the operator never configured a key. Nothing to report; no behaviour change.
+ *   withheld  opted in, but a mandatory input did not resolve. Reported as a reason, and NOTHING is
+ *             signed. An envelope anchored to a guessed commit would verify perfectly while
+ *             attesting to a tree that never existed -- worse than an absent record, because it
+ *             looks like a complete one.
+ *   sign      every input resolved; here is the payload to sign.
+ *
+ * The payload is built but not signed here: signing needs the private key, and keeping key material
+ * out of the decision is what lets this be tested without one.
+ */
+export type AttestationPlan =
+  | { action: 'none' }
+  | { action: 'withheld'; reason: string }
+  | { action: 'sign'; payload: AttestationPayload }
+
+export function buildAttestationPlan(input: AttestationInputs): AttestationPlan {
+  if (!input.privateKeyPath) return { action: 'none' }
+
+  if (!input.privateKeyReadable) {
+    return {
+      action: 'withheld',
+      reason:
+        'the attestation private key at ' +
+        input.privateKeyPath +
+        ' could not be read, so nothing was signed.',
+    }
+  }
+
+  if (!input.baseCommit || !input.baseCommit.trim()) {
+    return {
+      action: 'withheld',
+      reason:
+        'the workspace is not on a readable git commit, so the record would have no tree to ' +
+        'anchor to. Nothing was signed.',
+    }
+  }
+
+  if (!input.verification.executed) {
+    return {
+      action: 'withheld',
+      reason:
+        'no verification process ran for this unit, so there is no checked contract to attest to. ' +
+        'A record of an unchecked delegation is a claim about nothing. Nothing was signed.',
+    }
+  }
+
+  // Sorted here rather than by the caller: the digest must not depend on the order a caller happened
+  // to build the list in, and that is a property worth holding inside the pure function.
+  const contracts = [...input.contracts].sort((a, b) =>
+    a.path < b.path ? -1 : a.path > b.path ? 1 : 0
+  )
+
+  return {
+    action: 'sign',
+    payload: {
+      specVersion: '1.0',
+      runId: input.runId,
+      contractHash: hashBuffer(canonicalizeJson(contracts)),
+      baseCommit: input.baseCommit,
+      modelIdentifier: input.modelIdentifier,
+      artifacts: input.artifacts.map((artifact) => ({
+        path: artifact.path,
+        // An unreadable artifact becomes an empty string rather than being dropped: the record must
+        // still name the file the unit wrote, even when its bytes could not be hashed.
+        sha256: artifact.sha256 ?? '',
+      })),
+      verification: {
+        command: input.verification.command,
+        // `-1` means "no status was observed", and it is carried rather than coerced. Defaulting it
+        // to 0 would record a clean exit no process returned.
+        exitCode: input.verification.exitCode ?? -1,
+        stdoutHash: hashBuffer(input.verification.output),
+        passed: input.verification.failed === 0,
+      },
+    },
+  }
 }

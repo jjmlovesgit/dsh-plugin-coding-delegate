@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest'
+import { createHash } from 'node:crypto'
 import { canonicalizeJson } from '../src/canonical-json'
 import {
   ATTESTATION_PAYLOAD_TYPE,
+  AttestationInputs,
   AttestationPayload,
+  AttestationPlan,
+  buildAttestationPlan,
   generateWorkerKeyPair,
   hashBuffer,
   signManifest,
@@ -245,5 +249,233 @@ describe('Ed25519 delegation attestation', () => {
     expect(hashBuffer('')).toBe(
       'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
     )
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The plan: gathering inputs is the caller's half, deciding is this one's
+// ---------------------------------------------------------------------------
+
+const KEY_PATH = '/configured/delegation-signer.pem'
+
+function inputs(overrides: Partial<AttestationInputs> = {}): AttestationInputs {
+  return {
+    privateKeyPath: KEY_PATH,
+    privateKeyReadable: true,
+    runId: 'turn-7-contract-first-probe',
+    baseCommit: '166ff33dfb601b0a60cc40c798c42b9c986285dc',
+    modelIdentifier: 'Qwen 3.8 27B Local',
+    contracts: [{ path: 'tests/unit.test.cjs', sha256: 'aa11' }],
+    artifacts: [{ path: 'plugin/src/thing.ts', sha256: 'bb22' }],
+    verification: {
+      command: 'node tests/unit.test.cjs',
+      executed: true,
+      exitCode: 0,
+      output: 'ok 1 - fine\n',
+      failed: 0,
+    },
+    ...overrides,
+  }
+}
+
+/** Narrow a plan to its payload, failing loudly rather than silently skipping the assertions. */
+function payloadOf(plan: AttestationPlan): AttestationPayload {
+  if (plan.action !== 'sign') throw new Error('expected a sign plan, got ' + plan.action)
+  return plan.payload
+}
+
+describe('attestation plan: opt-in and withheld states', () => {
+  it('is a silent no-op when no key is configured', () => {
+    // The opt-in path, and deliberately NOT "withheld": nothing was configured to withhold from, so
+    // a host that never opted in must see no envelope and no warning.
+    const plan = buildAttestationPlan(
+      inputs({ privateKeyPath: undefined, privateKeyReadable: false })
+    )
+    expect(plan).toEqual({ action: 'none' })
+  })
+
+  it('withholds, naming the path, when the configured key cannot be read', () => {
+    const plan = buildAttestationPlan(inputs({ privateKeyReadable: false }))
+    expect(plan.action).toBe('withheld')
+    if (plan.action !== 'withheld') return
+    expect(plan.reason).toContain(KEY_PATH)
+    expect(plan.reason).toMatch(/nothing was signed/i)
+  })
+
+  it('withholds when the workspace is not on a readable commit', () => {
+    for (const baseCommit of [null, '', '   ']) {
+      const plan = buildAttestationPlan(inputs({ baseCommit }))
+      expect(plan.action).toBe('withheld')
+      if (plan.action !== 'withheld') continue
+      expect(plan.reason).toMatch(/git commit/i)
+    }
+  })
+
+  it('withholds when no verification process ran', () => {
+    const plan = buildAttestationPlan(
+      inputs({
+        verification: { command: '', executed: false, exitCode: null, output: '', failed: 1 },
+      })
+    )
+    expect(plan.action).toBe('withheld')
+    if (plan.action !== 'withheld') return
+    expect(plan.reason).toMatch(/no verification process ran/i)
+  })
+
+  it('reports the first unresolved input, key before commit', () => {
+    const plan = buildAttestationPlan(inputs({ privateKeyReadable: false, baseCommit: null }))
+    expect(plan.action).toBe('withheld')
+    if (plan.action !== 'withheld') return
+    expect(plan.reason).toContain(KEY_PATH)
+  })
+})
+
+describe('attestation plan: the payload it builds', () => {
+  it('carries every resolved input through', () => {
+    const payload = payloadOf(buildAttestationPlan(inputs()))
+    expect(payload.specVersion).toBe('1.0')
+    expect(payload.runId).toBe('turn-7-contract-first-probe')
+    expect(payload.baseCommit).toBe('166ff33dfb601b0a60cc40c798c42b9c986285dc')
+    expect(payload.modelIdentifier).toBe('Qwen 3.8 27B Local')
+    expect(payload.artifacts).toEqual([{ path: 'plugin/src/thing.ts', sha256: 'bb22' }])
+    expect(payload.verification.command).toBe('node tests/unit.test.cjs')
+    expect(payload.verification.passed).toBe(true)
+  })
+
+  it('digests the contract SET independently of the order it was gathered in', () => {
+    const a = payloadOf(
+      buildAttestationPlan(
+        inputs({
+          contracts: [
+            { path: 'tests/a.test.cjs', sha256: '11' },
+            { path: 'tests/b.test.cjs', sha256: '22' },
+          ],
+        })
+      )
+    )
+    const b = payloadOf(
+      buildAttestationPlan(
+        inputs({
+          contracts: [
+            { path: 'tests/b.test.cjs', sha256: '22' },
+            { path: 'tests/a.test.cjs', sha256: '11' },
+          ],
+        })
+      )
+    )
+    expect(a.contractHash).toBe(b.contractHash)
+  })
+
+  it('digests a different contract set, or a changed hash, to a different value', () => {
+    const one = payloadOf(
+      buildAttestationPlan(inputs({ contracts: [{ path: 'tests/a.test.cjs', sha256: '11' }] }))
+    )
+    const changed = payloadOf(
+      buildAttestationPlan(inputs({ contracts: [{ path: 'tests/a.test.cjs', sha256: '99' }] }))
+    )
+    const none = payloadOf(buildAttestationPlan(inputs({ contracts: [] })))
+
+    expect(one.contractHash).not.toBe(changed.contractHash)
+    expect(one.contractHash).not.toBe(none.contractHash)
+    // Pinned so a change to the digest's SHAPE is a deliberate edit rather than a silent one.
+    expect(none.contractHash).toBe(hashBuffer(canonicalizeJson([])))
+  })
+
+  it('keeps an artifact it could not hash, rather than dropping the file', () => {
+    const payload = payloadOf(
+      buildAttestationPlan(
+        inputs({
+          artifacts: [
+            { path: 'plugin/src/gone.ts', sha256: null },
+            { path: 'plugin/src/here.ts', sha256: 'cc33' },
+          ],
+        })
+      )
+    )
+    expect(payload.artifacts).toEqual([
+      { path: 'plugin/src/gone.ts', sha256: '' },
+      { path: 'plugin/src/here.ts', sha256: 'cc33' },
+    ])
+  })
+
+  it('carries a non-zero exit code through unchanged', () => {
+    const payload = payloadOf(
+      buildAttestationPlan(
+        inputs({
+          verification: {
+            command: 'npm test',
+            executed: true,
+            exitCode: 3,
+            output: 'not ok 1 - boom\n',
+            failed: 1,
+          },
+        })
+      )
+    )
+    expect(payload.verification.exitCode).toBe(3)
+    expect(payload.verification.passed).toBe(false)
+  })
+
+  it('preserves the -1 sentinel for an unobserved status and never masks it as 0', () => {
+    const payload = payloadOf(
+      buildAttestationPlan(
+        inputs({
+          verification: { command: 'npm test', executed: true, exitCode: null, output: '', failed: 1 },
+        })
+      )
+    )
+    expect(payload.verification.exitCode).toBe(-1)
+    expect(payload.verification.exitCode).not.toBe(0)
+  })
+
+  it('keeps a genuine 0 distinct from the unobserved sentinel', () => {
+    const zero = payloadOf(
+      buildAttestationPlan(
+        inputs({
+          verification: { command: 'npm test', executed: true, exitCode: 0, output: 'ok 1 - fine\n', failed: 0 },
+        })
+      )
+    )
+    const unobserved = payloadOf(
+      buildAttestationPlan(
+        inputs({
+          verification: { command: 'npm test', executed: true, exitCode: null, output: '', failed: 0 },
+        })
+      )
+    )
+    expect(zero.verification.exitCode).toBe(0)
+    expect(unobserved.verification.exitCode).toBe(-1)
+    expect(zero.verification.exitCode).not.toBe(unobserved.verification.exitCode)
+  })
+
+  it('digests the REDACTED output byte-for-byte, and not the raw text behind it', () => {
+    const redacted = 'not ok 1 - totals must match\n  at [redacted] (src/totals.ts:41:12)\n'
+    const raw = 'not ok 1 - totals must match\n  at secretSauce (src/totals.ts:41:12)\n'
+    const payload = payloadOf(
+      buildAttestationPlan(
+        inputs({
+          verification: { command: 'npm test', executed: true, exitCode: 1, output: redacted, failed: 1 },
+        })
+      )
+    )
+
+    // Computed here independently of `hashBuffer`, so this asserts the digest really is sha256 over
+    // these exact bytes rather than merely self-consistent with the helper that produced it.
+    const independent = createHash('sha256').update(redacted, 'utf8').digest('hex')
+    expect(payload.verification.stdoutHash).toBe(independent)
+
+    // The limit this pins: the digest describes what was REPORTED. The raw log stays local by design,
+    // so the hash does not and cannot cover the evidence behind the summary.
+    expect(payload.verification.stdoutHash).not.toBe(hashBuffer(raw))
+  })
+
+  it('produces a payload that signs and verifies end to end', () => {
+    const keys = generateWorkerKeyPair()
+    const plan = buildAttestationPlan(inputs())
+    expect(plan.action).toBe('sign')
+    if (plan.action !== 'sign') return
+    const envelope = signManifest(plan.payload, keys.privateKeyPem, keys.publicKeyPem)
+    expect(verifyEnvelope(envelope)).toBe(true)
+    expect(envelope.payload).toBe(canonicalizeJson(plan.payload))
   })
 })

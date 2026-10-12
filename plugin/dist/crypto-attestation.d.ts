@@ -73,6 +73,14 @@ export interface WorkerKeyPair {
  */
 export declare function generateWorkerKeyPair(): WorkerKeyPair;
 /**
+ * Derive the SPKI public key from a PKCS#8 private key.
+ *
+ * This exists so an operator provisions ONE secret rather than a matched pair. Two files that must
+ * agree is a configuration that can be wrong silently: sign with one, publish the other, and every
+ * verification fails for a reason indistinguishable from tampering.
+ */
+export declare function publicKeyFromPrivate(privateKeyPem: string): string;
+/**
  * Canonicalize the payload and sign it.
  *
  * `algorithm` is null because Ed25519 does not take a digest parameter -- it hashes internally, and
@@ -94,3 +102,69 @@ export declare function signManifest(payload: AttestationPayload, privateKeyPem:
 export declare function verifyEnvelope(envelope: SignedEnvelope): boolean;
 /** sha256, lowercase hex. The digest form the registry already uses for file content. */
 export declare function hashBuffer(buffer: Buffer | string): string;
+/** One file of the contract that judged the unit, relative to the workspace. */
+export interface AttestationContractRef {
+    path: string;
+    sha256: string | null;
+}
+/** One file the unit wrote. `sha256` is read from disk by the caller, not taken from a record. */
+export interface AttestationArtifactRef {
+    path: string;
+    sha256: string | null;
+}
+/**
+ * Everything the decision depends on, as plain data.
+ *
+ * Every environment question has already been answered by the caller: the commit was read, the key
+ * was read, the verification ran or did not. That is what makes the function below testable without
+ * a repository, a key file or a subprocess -- the failures worth testing are otherwise the ones that
+ * are hardest to arrange.
+ */
+export interface AttestationInputs {
+    /** The operator's configured key path. Absent means the feature was never opted into. */
+    privateKeyPath?: string;
+    /** Whether that key was readable. Ignored when `privateKeyPath` is absent. */
+    privateKeyReadable: boolean;
+    runId: string;
+    /** The commit the workspace is on, as READ from git. Null when it could not be read. */
+    baseCommit: string | null;
+    modelIdentifier: string;
+    contracts: AttestationContractRef[];
+    artifacts: AttestationArtifactRef[];
+    verification: {
+        command: string;
+        /** Whether a verification process was actually attempted. */
+        executed: boolean;
+        /** The OBSERVED child status, or null when none was observed. Never defaulted here. */
+        exitCode: number | null;
+        /** The REDACTED output; the raw log stays local by design. */
+        output: string;
+        failed: number;
+    };
+}
+/**
+ * What to do about signing, decided as a value rather than as control flow.
+ *
+ * Three states, because "not opted in" and "opted in but could not attest" are different facts and
+ * collapsing them would hide a misconfiguration behind a normal-looking silence:
+ *
+ *   none      the operator never configured a key. Nothing to report; no behaviour change.
+ *   withheld  opted in, but a mandatory input did not resolve. Reported as a reason, and NOTHING is
+ *             signed. An envelope anchored to a guessed commit would verify perfectly while
+ *             attesting to a tree that never existed -- worse than an absent record, because it
+ *             looks like a complete one.
+ *   sign      every input resolved; here is the payload to sign.
+ *
+ * The payload is built but not signed here: signing needs the private key, and keeping key material
+ * out of the decision is what lets this be tested without one.
+ */
+export type AttestationPlan = {
+    action: 'none';
+} | {
+    action: 'withheld';
+    reason: string;
+} | {
+    action: 'sign';
+    payload: AttestationPayload;
+};
+export declare function buildAttestationPlan(input: AttestationInputs): AttestationPlan;

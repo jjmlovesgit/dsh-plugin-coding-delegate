@@ -737,6 +737,7 @@ function apply(ctx, options = {}) {
                         workspaceSource: explicitDir ? 'caller-supplied workspaceDir' : resolved.source,
                         verificationPolicy: policy,
                         emitAllowlist: options?.emitAllowlist,
+                        attestationPrivateKeyPath: options?.attestationPrivateKeyPath,
                         // Operator setting, placed after the caller args for the same reason as `unitScope` below:
                         // a caller must not be able to switch this off, and an operator who has switched it off must
                         // not have it switched back on by a caller.

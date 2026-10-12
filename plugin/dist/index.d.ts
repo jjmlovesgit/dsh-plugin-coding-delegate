@@ -157,6 +157,20 @@ export interface PluginConfig {
      */
     emitAllowlist?: string[];
     /**
+     * Path to a PKCS#8 Ed25519 private key. When set, every resolved delegation is signed into a
+     * canonical JSON generation record, and the envelope is returned in the verdict; when absent,
+     * nothing on the delegation path changes.
+     *
+     * Operator configuration, not a tool argument: a caller able to supply a key could sign a record
+     * attributing work to a key the operator never chose. The public half is derived from the private
+     * key, so this is one file to provision rather than a pair that can silently disagree.
+     *
+     * What the signature establishes is narrower than "non-repudiation" and is stated in full in
+     * `crypto-attestation.ts`: the key lives in this process, so the record is evidence against anyone
+     * who does not hold it and no evidence at all against anyone who does.
+     */
+    attestationPrivateKeyPath?: string;
+    /**
      * Base URL of the local OpenAI-compatible server that `delegate_worker` posts to — for
      * example `http://127.0.0.1:11434/v1` for Ollama, or a vLLM/llama.cpp port. A full
      * `/chat/completions` URL is also accepted. Defaults to `http://127.0.0.1:1234/v1`.

@@ -252,6 +252,15 @@ export interface DelegateWorkerParams {
     /** Extra roots the worker may write into beyond `workspaceDir`. */
     emitAllowlist?: string[];
     /**
+     * Path to a PKCS#8 Ed25519 private key. When set, a resolved unit is signed into a generation
+     * record; when absent, nothing on this path changes -- no key read, no subprocess, no field.
+     *
+     * Operator configuration rather than a caller argument, for the same reason as
+     * `verificationPolicy`: a caller able to supply a key could sign a record attributing work to a
+     * key the operator never chose.
+     */
+    attestationPrivateKeyPath?: string;
+    /**
      * What to do when the worker writes a file the unit did not declare in `targetFiles`. `'enforce'`
      * (the default) refuses it and reports why; `'off'` restores the permissive behaviour that predates
      * the boundary.

@@ -469,15 +469,21 @@ function runSandboxVerification(verificationCommand, workspaceDir = process.cwd(
         const refusal = 'not ok 1 - the sandbox refused to spawn the verification command (EPERM), and the ' +
             'in-process fallback was removed because it loaded model-supplied code into the DSH ' +
             'server process. Refusing to report success.\n' + output;
-        return parseTestOutput(refusal, exitCode, {
-            redact: options.redact,
-            rawOutputPath: persistRaw(refusal, options.rawLogPath),
-        });
+        return {
+            ...parseTestOutput(refusal, exitCode, {
+                redact: options.redact,
+                rawOutputPath: persistRaw(refusal, options.rawLogPath),
+            }),
+            exitCode,
+        };
     }
-    return parseTestOutput(output, exitCode, {
-        redact: options.redact,
-        rawOutputPath: persistRaw(output, options.rawLogPath),
-    });
+    return {
+        ...parseTestOutput(output, exitCode, {
+            redact: options.redact,
+            rawOutputPath: persistRaw(output, options.rawLogPath),
+        }),
+        exitCode,
+    };
 }
 /**
  * Keep the full verification output on the local machine. The redacted structure is what

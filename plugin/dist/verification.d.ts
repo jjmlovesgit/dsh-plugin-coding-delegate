@@ -24,6 +24,13 @@ export interface TestResults {
     redacted?: boolean;
     /** Where the FULL raw output was written locally, for the worker and the operator. */
     rawOutputPath?: string;
+    /**
+     * The child process's exit status, when one was observed. Recorded rather than derived: a caller
+     * that inferred `failed > 0 ? 1 : 0` would be reporting a code no process returned, and an
+     * attestation carrying an inferred value as if it were measured is this repository's recurring
+     * defect. Absent when the command never spawned or no status was available.
+     */
+    exitCode?: number;
 }
 /**
  * Reduce raw verification output to a source-free structure.

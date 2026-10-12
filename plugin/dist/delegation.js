@@ -42,6 +42,7 @@ exports.resolveDelegateStatus = resolveDelegateStatus;
 exports.delegateWorker = delegateWorker;
 exports.extractPromptText = extractPromptText;
 exports.estimateTokenCount = estimateTokenCount;
+const child_process = __importStar(require("child_process"));
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const profiles_1 = require("./profiles");
@@ -56,6 +57,35 @@ const contracts_1 = require("./contracts");
 // between two leaves. A cycle through the composition root is the shape that already works.
 const index_1 = require("./index");
 const paths_1 = require("./paths");
+const crypto_attestation_1 = require("./crypto-attestation");
+/**
+ * The commit the delegation's workspace is actually on, or null.
+ *
+ * READ, NEVER DECLARED. An operator-supplied `baseCommit` would be a claim about a tree, and this
+ * module's sibling already settled the principle: `recordOperatorAttestation` reads a file's hash
+ * from disk rather than accepting one, because "a caller-supplied hash would let an attestation be
+ * recorded for content that was never on disk". A commit is the same kind of fact and is read the
+ * same way -- and when it cannot be read, the attestation is withheld rather than anchored to
+ * whatever someone typed.
+ *
+ * Read-only and non-interactive. `-C` targets the delegation's own workspace rather than this
+ * process's cwd, which is not the same directory. A missing git, a non-repository workspace or any
+ * other failure returns null rather than throwing: the caller's job is to refuse, not to crash a
+ * delegation that was otherwise fine.
+ */
+function readBaseCommit(workspaceDir) {
+    try {
+        const out = child_process.execFileSync('git', ['-C', workspaceDir, 'rev-parse', 'HEAD'], {
+            encoding: 'utf8',
+            stdio: ['ignore', 'pipe', 'ignore'],
+        });
+        const trimmed = String(out).trim();
+        return trimmed || null;
+    }
+    catch {
+        return null;
+    }
+}
 /**
  * Locations from the last failed unit, per workspace, waiting to be offered to the next attempt.
  *
@@ -758,6 +788,73 @@ async function delegateWorker(params = {}, tracker) {
         if (filesWritten.length > 0) {
             (0, contracts_1.recordDelegatedOutcome)(filesWritten.map((f) => f.path), unitOutcome, unitSuccess);
         }
+        // A signed generation record, when the operator has provisioned a key. Opt-in, so an
+        // unconfigured host runs exactly the path it ran before: no key read, no subprocess, no field.
+        //
+        // WHAT THE SIGNATURE IS WORTH, restated where it is produced. It binds the artifacts and the
+        // verification result to a KEY, so it is evidence against anyone who does not hold that key and
+        // evidence of nothing against anyone who does. It is not third-party non-repudiation, and the
+        // local model never holds a key to sign with.
+        //
+        // WITHHELD RATHER THAN WEAKENED. If the key cannot be read, or the workspace is not a repository
+        // and the commit cannot be read, nothing is signed and the reason is reported. An envelope
+        // anchored to a guessed commit would verify perfectly while attesting to a tree that never
+        // existed -- worse than an absent record, because it looks like a complete one.
+        let attestation;
+        let attestationSkipped;
+        {
+            // Gathering is this caller's half; deciding is `buildAttestationPlan`'s. That function is pure
+            // and tested without a repository, a key file or a subprocess, which is what makes the withheld
+            // paths -- the ones that are hardest to arrange for real -- reachable by a test.
+            const privateKeyPath = params.attestationPrivateKeyPath;
+            let privateKeyPem = null;
+            if (privateKeyPath) {
+                try {
+                    privateKeyPem = fs.readFileSync(privateKeyPath, 'utf8');
+                }
+                catch {
+                    privateKeyPem = null;
+                }
+            }
+            const plan = (0, crypto_attestation_1.buildAttestationPlan)({
+                privateKeyPath,
+                privateKeyReadable: privateKeyPem !== null,
+                // A label for locating the record, not a security property: derived from what the delegation
+                // already knows, so the same unit is findable by the same id.
+                runId: 'turn-' + String(params.turnId ?? 0) + '-' + String(params.taskName || 'subtask'),
+                // Read only when the feature is in use: an unconfigured host must not pay for a git
+                // subprocess on every delegation, and must not acquire a git dependency it never asked for.
+                baseCommit: privateKeyPath ? readBaseCommit(workspaceBase) : null,
+                modelIdentifier: String(model || ''),
+                contracts: contractPaths.map((p) => ({
+                    path: path.relative(workspaceBase, p) || p,
+                    sha256: contractAfter[(0, paths_1.canonicalisePath)(p)] ?? null,
+                })),
+                artifacts: filesWritten.map((f) => ({
+                    path: f.relativeName || f.path,
+                    // Re-read from disk rather than trusting the emission record: the hash must describe the
+                    // bytes that are there now, which is the same reason the registry re-hashes on read.
+                    sha256: (0, contracts_1.sha256File)(f.path),
+                })),
+                verification: {
+                    command: String(params.runVerification || ''),
+                    executed: verificationAttempts > 0,
+                    // The observed status, or null when none was observed. The plan carries a null through as
+                    // -1; nothing on this path coerces it to 0.
+                    exitCode: testResults?.exitCode ?? null,
+                    // The digest binds what was REPORTED. The raw log deliberately stays local, so this is not
+                    // a digest of the evidence behind it -- a limit stated where the payload is built.
+                    output: testResults?.output ?? '',
+                    failed: testResults?.failed ?? 1,
+                },
+            });
+            if (plan.action === 'sign' && privateKeyPem) {
+                attestation = (0, crypto_attestation_1.signManifest)(plan.payload, privateKeyPem, (0, crypto_attestation_1.publicKeyFromPrivate)(privateKeyPem));
+            }
+            else if (plan.action === 'withheld') {
+                attestationSkipped = plan.reason;
+            }
+        }
         return {
             success: isSuccess,
             filesWritten: filesWritten.map((f) => f.path),
@@ -805,6 +902,10 @@ async function delegateWorker(params = {}, tracker) {
                     contractViolations: contractViolationsFound,
                 }
                 : {}),
+            // The signing record when one was produced, and the reason when one was withheld. Reported
+            // rather than silent: a configured key that never signs is a failure the caller cannot see.
+            ...(attestation ? { attestation } : {}),
+            ...(attestationSkipped ? { attestationSkipped } : {}),
             tokens: {
                 prompt: promptTokens,
                 completion: completionTokens,

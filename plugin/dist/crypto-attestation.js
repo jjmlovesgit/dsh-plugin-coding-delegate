@@ -2,9 +2,11 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ATTESTATION_PAYLOAD_TYPE = exports.ATTESTATION_SPEC_VERSION = void 0;
 exports.generateWorkerKeyPair = generateWorkerKeyPair;
+exports.publicKeyFromPrivate = publicKeyFromPrivate;
 exports.signManifest = signManifest;
 exports.verifyEnvelope = verifyEnvelope;
 exports.hashBuffer = hashBuffer;
+exports.buildAttestationPlan = buildAttestationPlan;
 const node_crypto_1 = require("node:crypto");
 const canonical_json_1 = require("./canonical-json");
 /**
@@ -48,6 +50,16 @@ function generateWorkerKeyPair() {
     return { publicKeyPem: String(publicKey), privateKeyPem: String(privateKey) };
 }
 /**
+ * Derive the SPKI public key from a PKCS#8 private key.
+ *
+ * This exists so an operator provisions ONE secret rather than a matched pair. Two files that must
+ * agree is a configuration that can be wrong silently: sign with one, publish the other, and every
+ * verification fails for a reason indistinguishable from tampering.
+ */
+function publicKeyFromPrivate(privateKeyPem) {
+    return String((0, node_crypto_1.createPublicKey)(privateKeyPem).export({ type: 'spki', format: 'pem' }));
+}
+/**
  * Canonicalize the payload and sign it.
  *
  * `algorithm` is null because Ed25519 does not take a digest parameter -- it hashes internally, and
@@ -86,4 +98,57 @@ function verifyEnvelope(envelope) {
 /** sha256, lowercase hex. The digest form the registry already uses for file content. */
 function hashBuffer(buffer) {
     return (0, node_crypto_1.createHash)('sha256').update(buffer).digest('hex');
+}
+function buildAttestationPlan(input) {
+    if (!input.privateKeyPath)
+        return { action: 'none' };
+    if (!input.privateKeyReadable) {
+        return {
+            action: 'withheld',
+            reason: 'the attestation private key at ' +
+                input.privateKeyPath +
+                ' could not be read, so nothing was signed.',
+        };
+    }
+    if (!input.baseCommit || !input.baseCommit.trim()) {
+        return {
+            action: 'withheld',
+            reason: 'the workspace is not on a readable git commit, so the record would have no tree to ' +
+                'anchor to. Nothing was signed.',
+        };
+    }
+    if (!input.verification.executed) {
+        return {
+            action: 'withheld',
+            reason: 'no verification process ran for this unit, so there is no checked contract to attest to. ' +
+                'A record of an unchecked delegation is a claim about nothing. Nothing was signed.',
+        };
+    }
+    // Sorted here rather than by the caller: the digest must not depend on the order a caller happened
+    // to build the list in, and that is a property worth holding inside the pure function.
+    const contracts = [...input.contracts].sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+    return {
+        action: 'sign',
+        payload: {
+            specVersion: '1.0',
+            runId: input.runId,
+            contractHash: hashBuffer((0, canonical_json_1.canonicalizeJson)(contracts)),
+            baseCommit: input.baseCommit,
+            modelIdentifier: input.modelIdentifier,
+            artifacts: input.artifacts.map((artifact) => ({
+                path: artifact.path,
+                // An unreadable artifact becomes an empty string rather than being dropped: the record must
+                // still name the file the unit wrote, even when its bytes could not be hashed.
+                sha256: artifact.sha256 ?? '',
+            })),
+            verification: {
+                command: input.verification.command,
+                // `-1` means "no status was observed", and it is carried rather than coerced. Defaulting it
+                // to 0 would record a clean exit no process returned.
+                exitCode: input.verification.exitCode ?? -1,
+                stdoutHash: hashBuffer(input.verification.output),
+                passed: input.verification.failed === 0,
+            },
+        },
+    };
 }
