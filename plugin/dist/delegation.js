@@ -834,6 +834,18 @@ async function delegateWorker(params = {}, tracker) {
         // and the commit cannot be read, nothing is signed and the reason is reported. An envelope
         // anchored to a guessed commit would verify perfectly while attesting to a tree that never
         // existed -- worse than an absent record, because it looks like a complete one.
+        // Resolved HERE rather than at the return, because the attestation needs it: a record of a unit
+        // that did not succeed is the one thing that must never be signed, and the status has to exist
+        // before the envelope is built to be able to refuse it. One expression feeds both, so the status a
+        // caller reads and the status the envelope was gated on cannot drift apart.
+        const delegateStatus = resolveDelegateStatus({
+            verificationGate,
+            unverified,
+            contractViolations: contractViolationsFound,
+            isSuccess: unitSuccess,
+            coherenceFailed,
+            flaky,
+        });
         let attestation;
         let attestationSkipped;
         /** The commit the envelope anchors to, kept so the note write does not re-parse the payload. */
@@ -862,6 +874,9 @@ async function delegateWorker(params = {}, tracker) {
                 // subprocess on every delegation, and must not acquire a git dependency it never asked for.
                 baseCommit: privateKeyPath ? readBaseCommit(workspaceBase) : null,
                 modelIdentifier: String(model || ''),
+                // The unit's own outcome. A record is only worth signing for work that landed, so this is the
+                // first thing `buildAttestationPlan` refuses on after the environment questions resolve.
+                status: delegateStatus,
                 contracts: contractPaths.map((p) => ({
                     path: path.relative(workspaceBase, p) || p,
                     sha256: contractAfter[(0, paths_1.canonicalisePath)(p)] ?? null,
@@ -964,14 +979,9 @@ async function delegateWorker(params = {}, tracker) {
             },
             ...(coherenceResults ? { coherenceResults } : {}),
             summary: summaryText,
-            status: resolveDelegateStatus({
-                verificationGate,
-                unverified,
-                contractViolations: contractViolationsFound,
-                isSuccess: unitSuccess,
-                coherenceFailed,
-                flaky,
-            }),
+            // Already resolved above, where the attestation was gated on it. Recomputing it here would give
+            // two call sites the chance to disagree about the same unit.
+            status: delegateStatus,
             taskName: params.taskName || 'Subtask',
             tokensUsed: totalTokens,
         };

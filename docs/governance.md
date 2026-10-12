@@ -174,6 +174,8 @@ Each state is asserted through the real delegation path by an integration test, 
 | a private key is configured **and readable** | there is nothing to sign with otherwise |
 | the workspace is on a **readable git commit** | `baseCommit` is the anchor. An envelope anchored to a guessed commit would verify perfectly while attesting to a tree that never existed — worse than an absent record, because it looks like a complete one |
 | a **verification process ran** | a record of an unchecked delegation is a claim about nothing |
+| the unit **succeeded** | a record of work that did not land attests nothing about the repository. This is what a unit whose write was refused looks like: it reports a non-`SUCCESS` status while its verification command can still exit 0, because that command ran against a tree a previous run had already committed |
+| the unit **wrote at least one artifact** | a passing verification over an empty artifact list is a green record over nothing, and at the point a consumer reads it there is nothing to distinguish it from a verified change |
 
 `baseCommit` is **read** from the workspace with a read-only `git rev-parse`, never accepted from a
 caller. The principle is already established elsewhere in this repository: `recordOperatorAttestation`

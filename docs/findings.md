@@ -812,7 +812,7 @@ a file written for two other, still-valid protections — refusal of content tha
 and of a fence that named no file — which is exactly how a threshold gets filed alongside rules and stops
 being questioned.
 
-## The attestation signs a unit that wrote nothing
+## The attestation signs a unit that wrote nothing — fixed
 
 A delegation whose target file already existed produced a signed generation record over an empty artifact
 list. The worker was refused — a whole-file emission may create a file and may not modify one, the rule the
@@ -839,7 +839,19 @@ The note was removed from the ref rather than left in place. A vacuous green rec
 worse than a gap, because at the point a consumer reads it there is nothing to distinguish it from the real
 thing.
 
-Fix, for the next release: gate signing on the unit having succeeded and having produced at least one
-artifact — `status === 'SUCCESS' && artifacts.length > 0 && verification.passed` — and where a delegation
-failed before writing, omit the envelope rather than sign an empty one.
+**Fixed.** `buildAttestationPlan` now withholds unless the unit's own `status` is `SUCCESS` and it wrote at
+least one artifact. The status is resolved once and feeds both the envelope gate and the verdict a caller
+reads, so the two cannot disagree about the same unit.
+
+`verification.passed` was **not** added as a third gate, and the reason sits in the code beside the other
+two. `resolveDelegateStatus` returns `SUCCESS` only when the unit's own result held, and that requires
+`failed === 0`, so the condition is a second name for something the status already carries. It also would
+not have caught this: the record that shipped read `passed: true`, so the vacuous green came from signing
+over an empty artifact list, not from signing a failure. Gating on it as well would leave the payload's
+`passed` field unable to ever be false and its three failure-path tests unreachable, in exchange for no
+protection the other two do not already give.
+
+Verified red-then-green: four new plan tests fail against the old gate and pass against the new one, 149 in
+the suite. Reaching this in the live delegation path needs a DSH restart — plugin options are read at
+registration and the module is loaded once, so a rebuilt `dist` is not what a running host executes.
 

@@ -842,7 +842,8 @@ can. Custody is the boundary: keep the key outside the workspace on a user-only 
 verification that executes model-authored code in a container that cannot see it.
 
 **It is withheld rather than weakened.** If the key cannot be read, if the workspace is not on a
-readable git commit, or if no verification process ran, nothing is signed and the verdict carries
+readable git commit, if no verification process ran, if the unit did not end `SUCCESS`, or if it wrote
+no files, nothing is signed and the verdict carries
 `attestationSkipped` with the reason. An envelope anchored to a guessed commit would verify perfectly
 while attesting to a tree that never existed — worse than an absent record, because it looks like a
 complete one. `baseCommit` is read from the workspace with a read-only `git rev-parse`, never accepted

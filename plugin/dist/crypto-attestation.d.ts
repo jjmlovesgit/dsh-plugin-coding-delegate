@@ -131,6 +131,12 @@ export interface AttestationInputs {
     /** The commit the workspace is on, as READ from git. Null when it could not be read. */
     baseCommit: string | null;
     modelIdentifier: string;
+    /**
+     * The delegation's own outcome, as `resolveDelegateStatus` resolved it. Required rather than
+     * optional, and compared against 'SUCCESS' rather than against a list of known failures: a status
+     * this function has never heard of must withhold rather than sign, so the default is closed.
+     */
+    status: string;
     contracts: AttestationContractRef[];
     artifacts: AttestationArtifactRef[];
     verification: {

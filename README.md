@@ -385,8 +385,12 @@ as your own OS user, so a test file the worker wrote and a command you approved 
 can. Keep the key outside the workspace on a user-only ACL, and run verification that touches
 model-authored code in a container that cannot see it.
 
-**It is withheld rather than weakened.** No readable key, no readable base commit, or no verification
-process, and nothing is signed — the verdict says so in `attestationSkipped`. The base commit is read
+**It is withheld rather than weakened.** No readable key, no readable base commit, no verification
+process, a unit that did not end `SUCCESS`, or a unit that wrote no files, and nothing is signed — the
+verdict says so in `attestationSkipped`. The last two are what stop a vacuous green record: a verification
+can pass because the tree was already correct, so a signed envelope over an empty artifact list would
+attest a passing check over nothing, and nothing downstream could tell it from a verified change. The base
+commit is read
 from the workspace, never accepted from a caller, for the same reason the registry re-hashes files
 instead of trusting a supplied hash. Two further limits: `stdoutHash` covers the **redacted** output,
 because the raw log stays local, and an unobserved exit status is recorded as `-1`, never `0`.

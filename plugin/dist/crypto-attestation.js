@@ -124,6 +124,36 @@ function buildAttestationPlan(input) {
                 'A record of an unchecked delegation is a claim about nothing. Nothing was signed.',
         };
     }
+    // THE THREE GATES BELOW ARE ONE FINDING, and `executed` above was never the question they ask.
+    // Measured: a delegation whose write was REFUSED still produced a signed envelope reading
+    // `"artifacts":[],"verification":{"exitCode":0,"passed":true}`, because the verification command ran
+    // against the tree a previous run had already committed and exited 0 over nothing. Every field in it
+    // was true and the record was worthless, and nothing downstream could tell it from a verified change.
+    // What was missing was not "did a process run" but "did this unit succeed, and did it produce
+    // anything" -- so those are asked explicitly, and each one refuses rather than qualifying.
+    if (input.status !== 'SUCCESS') {
+        return {
+            action: 'withheld',
+            reason: 'the unit did not succeed (status ' +
+                input.status +
+                '), so an envelope would attest work that did not land. Nothing was signed.',
+        };
+    }
+    if (input.artifacts.length === 0) {
+        return {
+            action: 'withheld',
+            reason: 'the unit wrote no artifacts, so a record would attest a passing verification over nothing, ' +
+                'and a green envelope with an empty artifact list cannot be told from a verified change. ' +
+                'Nothing was signed.',
+        };
+    }
+    // `verification.passed` is deliberately NOT a third gate. `resolveDelegateStatus` returns SUCCESS
+    // only when the unit's own result held, and that requires `failed === 0`, so a passing verification
+    // is already implied by the status above -- the condition would be a second name for the same fact.
+    // It is also not what closes the measured defect: the record that shipped read `passed: true`, so the
+    // vacuous green came from signing over an EMPTY ARTIFACT LIST, not from signing a failure. Gating on
+    // it too would leave the payload's `passed` field unable to ever be false and its failure-path tests
+    // unreachable, in exchange for no protection the two gates above do not already give.
     // Sorted here rather than by the caller: the digest must not depend on the order a caller happened
     // to build the list in, and that is a property worth holding inside the pure function.
     const contracts = [...input.contracts].sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);

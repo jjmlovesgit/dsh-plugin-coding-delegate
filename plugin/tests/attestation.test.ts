@@ -265,6 +265,7 @@ function inputs(overrides: Partial<AttestationInputs> = {}): AttestationInputs {
     runId: 'turn-7-contract-first-probe',
     baseCommit: '166ff33dfb601b0a60cc40c798c42b9c986285dc',
     modelIdentifier: 'Qwen 3.8 27B Local',
+    status: 'SUCCESS',
     contracts: [{ path: 'tests/unit.test.cjs', sha256: 'aa11' }],
     artifacts: [{ path: 'plugin/src/thing.ts', sha256: 'bb22' }],
     verification: {
@@ -327,6 +328,66 @@ describe('attestation plan: opt-in and withheld states', () => {
     expect(plan.action).toBe('withheld')
     if (plan.action !== 'withheld') return
     expect(plan.reason).toContain(KEY_PATH)
+  })
+
+  it('withholds when the unit did not succeed, even though a verification ran and exited 0', () => {
+    // Measured, not imagined. A delegation whose write was REFUSED reported VERIFICATION_FAILED
+    // while its verification command still exited 0, because that command ran against the tree the
+    // previous run had already committed. The record it produced was signed, and read
+    // `"artifacts":[],"verification":{"exitCode":0,"passed":true}` -- a green verification over
+    // nothing, indistinguishable at the point of consumption from a verified change.
+    const plan = buildAttestationPlan(inputs({ status: 'VERIFICATION_FAILED', artifacts: [] }))
+    expect(plan.action).toBe('withheld')
+    if (plan.action !== 'withheld') return
+    expect(plan.reason).toMatch(/did not succeed/i)
+    expect(plan.reason).toContain('VERIFICATION_FAILED')
+  })
+
+  it('withholds when the unit wrote no artifacts', () => {
+    // A passing verification over an empty artifact list records that a command succeeded, not that
+    // any work landed. The signed bytes cannot say which, so nothing is signed.
+    const plan = buildAttestationPlan(inputs({ artifacts: [] }))
+    expect(plan.action).toBe('withheld')
+    if (plan.action !== 'withheld') return
+    expect(plan.reason).toMatch(/no artifacts/i)
+  })
+
+  it('still builds a payload that records a failing verification, and says so', () => {
+    // The STATUS gate is what keeps a failed unit out of the notes ref; there is deliberately no
+    // second check on the payload. `passed` has to keep the ability to be false, or it becomes a
+    // field that can only ever read true -- and a record that cannot describe a failure is not a
+    // record. This pins that boundary rather than leaving it to be rediscovered as an accident.
+    const payload = payloadOf(
+      buildAttestationPlan(
+        inputs({
+          verification: {
+            command: 'node tests/unit.test.cjs',
+            executed: true,
+            exitCode: 1,
+            output: 'not ok 1 - boom\n',
+            failed: 1,
+          },
+        })
+      )
+    )
+    expect(payload.verification.passed).toBe(false)
+    expect(payload.verification.exitCode).toBe(1)
+  })
+
+  it('withholds for every status other than SUCCESS', () => {
+    // Fail closed on the whole vocabulary rather than on a list this test happens to know: an
+    // unrecognised status must not be a licence to sign.
+    for (const status of [
+      'VERIFICATION_FAILED',
+      'UNVERIFIED',
+      'FLAKY',
+      'INCOHERENT',
+      'VERIFICATION_NOT_APPROVED',
+      'ERROR',
+      'SOMETHING_NEW',
+    ]) {
+      expect(buildAttestationPlan(inputs({ status })).action).toBe('withheld')
+    }
   })
 })
 
