@@ -365,6 +365,32 @@ requires a decision. The loop short-circuits only on *disagreement*, because tha
 more cannot change — so a flaky unit costs two runs, and a clean pass or a clean failure costs all three.
 
 
+### Signed generation records
+
+A resolved delegation can be signed. With `attestationPrivateKeyPath` set to a PKCS#8 Ed25519 key, the
+verdict carries an `attestation` envelope whose payload is RFC 8785 canonical JSON binding the base
+commit, a digest of the contract set, the artifact paths and hashes, and the verification command with
+its observed exit status. Deterministic serialization is what makes that a signature over *bytes*
+rather than over an object whose property order varies between runs.
+
+**What it establishes, and what it does not.** It binds a payload to a key: the holder signed those
+bytes and nothing in them changed. It does not establish who holds the key. The key lives in this
+process, so the record is evidence against anyone without it and no evidence against anyone with it,
+and the worker never holds one. Call it **key-attributed tamper-evidence**, never non-repudiation:
+the gap closes only when the private key is under the operator's sole control, in a hardware token or
+an OS keystore this process cannot read.
+
+**It is withheld rather than weakened.** No readable key, no readable base commit, or no verification
+process, and nothing is signed — the verdict says so in `attestationSkipped`. The base commit is read
+from the workspace, never accepted from a caller, for the same reason the registry re-hashes files
+instead of trusting a supplied hash. Two further limits: `stdoutHash` covers the **redacted** output,
+because the raw log stays local, and an unobserved exit status is recorded as `-1`, never `0`.
+
+This is a provenance record, not a compliance claim. It gives a security or audit pipeline a
+machine-checkable statement of what was produced and what checked it; what any given regime requires
+of that statement is for the people answerable for the regime, not for this file.
+
+
 ## Requirements
 
 - **Node.js 22+**

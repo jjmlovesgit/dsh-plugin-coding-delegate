@@ -268,6 +268,7 @@ When you call `predictRoute` directly, its decision output is
 | `unitScope` | `'enforce'` | Whether a unit's declared `targetFiles` is a boundary. `'enforce'` refuses a write to any path the unit did not declare — a declared directory covers its subtree, and a unit that declares nothing is unrestricted. `'off'` restores the permissive behaviour. Enforced by default because it is what makes an `INCOHERENT` verdict attributable to a unit |
 | `retryContext` | `'auto'` | Whether a failed unit's failure locations are read back and offered to the next attempt in the same workspace as context. `'auto'` adds one window per file the failure named, consumed once and cleared by any unit that then passes; `'off'` disables it. The ordinary cause of a unit that failed "for no visible reason" is that the worker was never shown the code it had to change, and the failure already names the file. Best-effort by construction: the widened injection replaces the declared one only if it resolves cleanly, so it can never turn a runnable delegation into `CONTEXT_REFUSED`. The code goes to the **worker**; the architect is told which files were added, never their contents |
 | `emitAllowlist` | `[]` | Extra directories a delegated worker may write into besides the workspace |
+| `attestationPrivateKeyPath` | — | Path to a PKCS#8 Ed25519 private key. When set, each resolved unit is signed into a canonical JSON generation record and the envelope is returned in the verdict. Off by default. The public half is derived from the private key, so one file is provisioned rather than a pair that can disagree silently. See [Technical auditability and provenance](#technical-auditability-and-provenance) for exactly what a signature establishes, which is narrower than "non-repudiation" |
 | `leadProviders` | `[]` | Provider ids that are **not** the architect. Their requests are left exactly as configured |
 | `leadTier` | `false` | Derive `leadProviders` from the `LEAD` profile instead of naming providers |
 | `delegateReadPolicy` | `'ask'` | `ask`, `allow` or `deny` for reading a file a worker wrote. `allow` weakens rule 3 |
@@ -757,6 +758,51 @@ roots explicitly.
 that existed `require`d the target module inside the DSH **server** process with full host authority
 and could terminate the server, so it was removed rather than guarded. Where the spawn restriction
 cannot be lifted, prefer a container.
+
+## Technical auditability and provenance
+
+A delegation that resolves can be signed into a canonical JSON generation record, so a security or
+audit pipeline can ingest a machine-checkable statement of what was produced and what checked it.
+This is opt-in: with no `attestationPrivateKeyPath` configured, nothing on the delegation path
+changes — no key is read, no subprocess is spawned, and no field appears in the verdict.
+
+Set `attestationPrivateKeyPath` to a PKCS#8 Ed25519 private key and every resolved unit returns an
+`attestation` envelope beside its verdict:
+
+| field | what it carries |
+| --- | --- |
+| `payload` | RFC 8785 canonical JSON — deterministic bytes, so the same record always serializes identically |
+| `payloadType` | `application/vnd.dsh-delegation-attestation+json` |
+| `signature` | base64 Ed25519 over the UTF-8 bytes of `payload` |
+| `publicKeyPem` | the SPKI public key, **derived from the private key**, so one file is provisioned rather than a pair that can disagree |
+
+The payload binds the base commit, a digest of the whole contract set, the artifact paths and their
+hashes, and the verification command with its observed exit status and a digest of its output.
+
+**What a signature here establishes, stated plainly because it is easy to overstate.** It binds a
+payload to a KEY: the holder of that key signed these bytes and nothing in them changed. It does
+**not** establish who holds the key. The key lives in this process, so the record is evidence against
+anyone who does not have it and no evidence at all against anyone who does — and the local worker
+never holds a key and could not demonstrate one. This is **key-attributed tamper-evidence**, not
+third-party non-repudiation. Closing that gap needs the private key under the operator's sole control,
+in a hardware token or an OS keystore this process cannot read, rather than a file it can.
+
+**It is withheld rather than weakened.** If the key cannot be read, if the workspace is not on a
+readable git commit, or if no verification process ran, nothing is signed and the verdict carries
+`attestationSkipped` with the reason. An envelope anchored to a guessed commit would verify perfectly
+while attesting to a tree that never existed — worse than an absent record, because it looks like a
+complete one. `baseCommit` is read from the workspace with a read-only `git rev-parse`, never accepted
+from a caller, for the same reason the registry re-hashes files instead of trusting a supplied hash.
+
+**Three limits worth knowing before it is quoted.** `stdoutHash` digests the **redacted** verification
+output, because the raw log stays local by design, so it binds what was reported rather than the
+evidence behind it. An unobserved exit status is recorded as `-1`, never `0`, so a verification that
+never ran cannot be read as a clean one. And the record describes an out-of-process run, which is why
+it pairs with the subprocess isolation above rather than replacing it.
+
+**This is a provenance record, not a compliance claim.** It hands a pipeline something checkable; what
+any particular regulatory regime requires of that something is a question for the people answerable
+for the regime, not for this file.
 
 ## State
 
