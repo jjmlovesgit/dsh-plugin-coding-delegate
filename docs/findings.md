@@ -812,3 +812,34 @@ a file written for two other, still-valid protections — refusal of content tha
 and of a fence that named no file — which is exactly how a threshold gets filed alongside rules and stops
 being questioned.
 
+## The attestation signs a unit that wrote nothing
+
+A delegation whose target file already existed produced a signed generation record over an empty artifact
+list. The worker was refused — a whole-file emission may create a file and may not modify one, the rule the
+section above records — so it wrote nothing at all:
+
+    status: VERIFICATION_FAILED   filesWritten: []   artifacts: []
+
+and the envelope came back signed anyway, carrying `"artifacts":[],"verification":{"exitCode":0,"passed":true}`,
+with a git note written to `refs/notes/delegations` for the base commit.
+
+Every field in it is true. A verification command really did run and really did exit 0 — against the
+implementation the previous run had already committed, which the refused write left untouched. What the
+record cannot express is that the unit failed. `passed: true` over `artifacts: []` is indistinguishable from
+a verified change, and the only signal that anything went wrong is a field the envelope does not carry: the
+delegation's own status.
+
+This is the `withheld` invariant aimed at the wrong condition. `buildAttestationPlan` withholds when the key
+is unreadable, when the base commit cannot be read, and when no verification process ran. It never asks
+whether the unit produced anything, or whether it succeeded. So the one case that yields a green attestation
+over nothing — a verification that passed because the tree was already correct, for a unit whose write was
+refused — satisfies every check the plan makes.
+
+The note was removed from the ref rather than left in place. A vacuous green record in a provenance store is
+worse than a gap, because at the point a consumer reads it there is nothing to distinguish it from the real
+thing.
+
+Fix, for the next release: gate signing on the unit having succeeded and having produced at least one
+artifact — `status === 'SUCCESS' && artifacts.length > 0 && verification.passed` — and where a delegation
+failed before writing, omit the envelope rather than sign an empty one.
+
