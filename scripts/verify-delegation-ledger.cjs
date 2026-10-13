@@ -91,6 +91,15 @@ const {
   publicKeyFromPrivate,
 } = require('../plugin/dist/crypto-attestation.js')
 const { canonicalizeJson } = require('../plugin/dist/canonical-json.js')
+// The trust root and its normalisation live in ONE module, shared with the signer, so the two cannot
+// disagree about which key is the operator's. See scripts/operator-key.cjs for what the pin does and
+// does not buy, and for the rotation ceremony.
+const {
+  TRUSTED_OPERATOR_PUBKEY_SHA256,
+  cleanKey,
+  keyFingerprint,
+  spkiFingerprint,
+} = require('./operator-key.cjs')
 
 const REPO_ROOT = path.resolve(__dirname, '..')
 const NOTES_REF = 'refs/notes/delegations'
@@ -114,58 +123,9 @@ const SPEC_1_1_CUTOFF = 'c5bcc5a61b018468dd8cb16a3aed9c53c1c73232'
 
 const sha256 = (buffer) => crypto.createHash('sha256').update(buffer).digest('hex')
 
-/**
- * Canonicalise a PEM before it is compared or consumed: CRLF and lone CR become LF, then trim.
- *
- * WHY THIS IS NOT COSMETIC. The crypto layer ALREADY tolerates CRLF -- measured on this checkout,
- * `verifyEnvelope`, `publicKeyFromPrivate` and `crypto.sign` all accept a CRLF PEM and behave
- * identically to LF -- so the only thing CRLF breaks is STRING EQUALITY, which is exactly how the pin is
- * enforced. A CRLF checkout of `keys/delegation-operator.pub` (any machine with core.autocrlf=true, and
- * this repository carries no .gitattributes to prevent it) therefore made this audit refuse to run at
- * all, with a message asserting that two copies of ONE key "disagree" and that one of them is stale.
- * A false rejection whose text accuses the operator of pinning the wrong key is worse than a crash: it
- * is a lie told by the security path, and its remedy points at the wrong thing.
- *
- * `\r\n?` rather than `\r\n` so a lone CR -- an old-Mac or hand-edited file -- is normalised too.
- */
-const cleanKey = (keyStr) => String(keyStr).replace(/\r\n?/g, '\n').trim()
-
-/**
- * SHA-256 of the operator public key, over the LF-normalised, trimmed PEM text.
- *
- * THIS CONSTANT IS THE TRUST ROOT OF THE WHOLE AUDIT, and it is deliberately a constant rather than a
- * value read from the tree it is checking. Resolving the key from the repository is what lets CI
- * attribute records without holding a secret; the cost is that the file defining trust lives inside the
- * verified tree. Pinning the digest means substituting the key is no longer sufficient on its own --
- * the substitution must also be visible as an edit to this line.
- *
- * WHAT IT DOES NOT BUY: a writer who can change this file can change the constant, so this is not an
- * out-of-band root of trust. It converts a silent re-pin into a reviewable diff. That is a real gain and
- * a partial one, and calling it anything more would be the kind of overclaim this repository exists to
- * catch. Recomputed with --print-key-fingerprint; `keyFingerprint` below is the ONLY definition of it.
- */
-const TRUSTED_OPERATOR_PUBKEY_SHA256 = 'afea373a3cef0db436ec594c653dca371dd292dba6cc096a77b9b9aacbdaddd3'
-
-/** The pinned fingerprint's one definition: sha256 over the LF-normalised, trimmed PEM text. */
-function keyFingerprint(pem) {
-  return crypto.createHash('sha256').update(cleanKey(pem), 'utf8').digest('hex')
-}
-
-/**
- * Fingerprint of the KEY ITSELF as SPKI DER, independent of PEM formatting.
- *
- * Not pinned, and not compared -- it exists so a mismatch can be DIAGNOSED. "Same key, the file was
- * re-wrapped at 76 columns" and "a different key entirely" call for different responses, and a bare
- * digest comparison cannot tell them apart.
- */
-function spkiFingerprint(pem) {
-  try {
-    const der = crypto.createPublicKey(cleanKey(pem)).export({ type: 'spki', format: 'der' })
-    return crypto.createHash('sha256').update(der).digest('hex')
-  } catch (err) {
-    return 'unreadable (' + (err && err.message ? err.message : err) + ')'
-  }
-}
+// `cleanKey`, `TRUSTED_OPERATOR_PUBKEY_SHA256`, `keyFingerprint` and `spkiFingerprint` are imported from
+// ./operator-key.cjs above, together with the reasoning behind each. They were defined here first; they
+// moved so the signer can enforce the same pin without a second copy of the digest to keep in step.
 
 /**
  * Resolve the operator's public key to pin against, from every source that is present.

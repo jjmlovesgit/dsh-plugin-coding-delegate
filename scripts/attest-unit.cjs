@@ -33,6 +33,11 @@
  * buildAttestationPlan itself -- this script does not re-implement any of it. The payload records the
  * set, so a reader recomputes the digest from the document rather than guessing a path convention.
  *
+ * THE OPERATOR KEY IS PINNED BY FINGERPRINT, before anything is signed. The local key is cross-checked
+ * against `keys/delegation-operator.pub`, and both are checked against the trust-root digest that
+ * `scripts/operator-key.cjs` defines and the ledger audit enforces. Agreement between two files is not
+ * enough on its own: a writer can change both together, and a signature is the irreversible step here.
+ *
  * Requires the operator private key locally; no secret is ever written to the repository.
  */
 'use strict'
@@ -58,19 +63,24 @@ const PRIVATE_KEY_PATH = path.join(os.homedir(), '.dsh', 'keys', 'delegation_ed2
 const REPO_PUBLIC_KEY_PATH = path.join(REPO_ROOT, 'keys', 'delegation-operator.pub')
 
 /**
- * Canonicalise a PEM before it is compared or consumed: CRLF and lone CR become LF, then trim.
+ * The trust root and its PEM normalisation come from ONE module shared with the ledger audit.
  *
- * THE SIGNER HAS THE SAME HAZARD AS THE AUDITOR, and for the same reason: the crypto layer tolerates
- * CRLF (measured -- `crypto.sign`, `publicKeyFromPrivate` and `verifyEnvelope` all accept it), so only
- * string equality breaks, and string equality is how the committed pin is enforced. A CRLF copy of
- * `keys/delegation-operator.pub` would make this script refuse to sign while asserting the signing key
- * "does not correspond to" the pin -- false, and pointed at the wrong remedy.
+ * The signer needs the same pin the auditor enforces, and it must be the SAME DEFINITION rather than a
+ * second copy of a 64-character digest. A duplicated constant rots silently in both directions, and the
+ * direction that matters here is the one that wastes the work: a signer holding a digest the auditor does
+ * not recognise produces a note that passes every check the signer can make locally and is then REJECTED
+ * at audit time, after the unit is built and the note is on the ref.
  *
- * CLEANING HERE ALSO KEEPS THE RECORD CANONICAL. `derivedPublicKey` is embedded in the envelope, so
- * normalising it is what stops the line endings of the machine that signed from leaking into the ledger
- * and making a sound record look unattributed to an auditor on a different platform.
+ * CLEANING THE PEM KEEPS THE RECORD CANONICAL TOO. `derivedPublicKey` is embedded in the envelope, so
+ * normalising it is what stops the line endings of the signing machine from leaking into the ledger and
+ * making a sound record look unattributed to an auditor on a different platform.
  */
-const cleanKey = (keyStr) => String(keyStr).replace(/\r\n?/g, '\n').trim()
+const {
+  TRUSTED_OPERATOR_PUBKEY_SHA256,
+  cleanKey,
+  keyFingerprint,
+  spkiFingerprint,
+} = require('./operator-key.cjs')
 
 function fatal(message) {
   console.error('ATTEST FATAL  ' + message)
@@ -164,6 +174,27 @@ if (fs.existsSync(REPO_PUBLIC_KEY_PATH)) {
         'forged, and correctly so.'
     )
   }
+}
+
+// THE PIN, TOO, AND BEFORE ANYTHING IS SIGNED. The check above is an agreement between two files a
+// writer can change together; this one is against the constant that defines trust, so it holds even when
+// the local key directory and the committed pin have been altered in step. Signing is the irreversible
+// step in this script -- it puts a record on refs/notes/delegations -- so the refusal has to land here
+// rather than being discovered by the audit afterwards, when the only remaining remedy is to rewrite
+// published history.
+const signingFingerprint = keyFingerprint(derivedPublicKey)
+if (signingFingerprint !== TRUSTED_OPERATOR_PUBKEY_SHA256) {
+  fatal(
+    'the signing key does not match the pinned operator fingerprint.\n' +
+      '  pinned fingerprint : ' + TRUSTED_OPERATOR_PUBKEY_SHA256 + '\n' +
+      '  signing fingerprint: ' + signingFingerprint + '\n' +
+      '  spki sha256        : ' + spkiFingerprint(derivedPublicKey) + '\n' +
+      '  This is the same pin scripts/verify-delegation-ledger.cjs enforces, so signing now would attach\n' +
+      '  a note the audit rejects. If the two fingerprints differ ONLY because the PEM was reformatted,\n' +
+      '  restore the committed formatting. If this is a deliberate rotation, change\n' +
+      '  TRUSTED_OPERATOR_PUBKEY_SHA256 in scripts/operator-key.cjs in the same commit that changes the\n' +
+      '  key, and sign a note for that commit so the rotation is itself an attested record.'
+  )
 }
 
 // ---------------------------------------------------------------------------

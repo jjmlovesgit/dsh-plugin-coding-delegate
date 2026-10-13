@@ -939,3 +939,128 @@ finish reason is an operator decision, not a side effect of this fix.
 Both halves are covered: the oracle suite exercises the built `dist/delegation.js` (452 in the suite),
 and the unit suite grew from 149 to 158.
 
+The three sections below come from an external security review (`SECURITY-REVIEW-3.md`), whose own
+limitations line is the first of them: *"Ledger audit aborted at startup due key line-ending mismatch."*
+
+## The trust root was compared as text, and text differs by platform
+
+**The review could not run the audit at all, and the reason was not the ledger.** On a fresh checkout of
+the same revision the audit aborted with:
+
+```
+FATAL  pinned public keys disagree: keys/delegation-operator.pub and
+       ~/.dsh/keys/delegation_ed25519.pub. One is stale, and pinning either would
+       attribute records to the wrong key.
+```
+
+The two keys were identical. They differed by three carriage returns.
+
+| what was measured | result |
+| --- | --- |
+| `core.autocrlf` | **`true` globally**; `false` in this repository's local config |
+| `.gitattributes` | absent |
+| a plain `git clone` of this repository, on this machine | `keys/delegation-operator.pub` = **116 bytes, 3 CR** |
+| the committed blob | **113 bytes, 0 CR** |
+
+**The repo-local `false` is what hid it here.** Every run from this working copy passed; the defect lived
+in the difference between this checkout and a fresh one, which is the only checkout CI or a reviewer
+ever has. The variable was set once on one machine, and the gate depended on it.
+
+**Only string equality was actually broken.** Measured against a CRLF copy of the pin:
+
+| layer | CRLF PEM | LF PEM |
+| --- | --- | --- |
+| `verifyEnvelope` | true | true |
+| `publicKeyFromPrivate` | derives the same key | derives the same key |
+| `crypto.sign` | accepted | accepted |
+| `pinned === derived` | **false** | true |
+
+So this was never a cryptographic problem, and the fix did not belong in the crypto layer. `===` was the
+whole of the enforcement, and `===` compares bytes that the filesystem is entitled to rewrite. The
+failure was also a *lie told by the security path*: the message asserted that one of two identical keys
+was stale and would misattribute records, pointing the reader at the wrong remedy -- replace the key --
+when the remedy was to normalise line endings.
+
+**Fixed at both ends.** `cleanKey` normalises CRLF and lone CR to LF at every read, in one shared module
+(`scripts/operator-key.cjs`) that the signer and the auditor both use, and a read that had to be
+normalised says so on stderr rather than passing silently. `.gitattributes` pins `*.pub` and `*.pem` to
+`eol=lf` so the conversion never happens: a fresh clone now checks the pin out at 113 bytes / 0 CR, while
+`git ls-files --eol` reports `i/lf w/lf attr/text eol=lf` and no committed blob changed, because the
+stored blobs were already LF.
+
+## An empty ledger passed the audit, which is how CI came to audit nothing
+
+**Deleting the ledger switched the gate off.** With no notes, the audit warned that it could not tell an
+empty ledger from a deleted one and exited **0**. Removal of a single record remains undetectable without
+a WORM sink, but this deletion did not need to be detectable in principle -- the entire evidence set
+could be removed and the check would report success.
+
+**The consequence was larger than the fail-open.** `actions/checkout` fetches `refs/heads` and tags and
+never notes, and defaults to a depth-1 clone. In CI the ledger was therefore empty on every run, the
+audit exited at the empty-ledger branch before reading a record, and the gate step reported success
+having verified nothing. That is not a gap in the check; it is the check never having run. Measured in a
+depth-1 clone with the notes ref fetched by hand, the audit does not merely struggle:
+
+```
+fatal: Not a valid commit name 0286c6b46f59b917771d910dad2aa88c92e124f1
+  FAIL  baseCommit 0286c6b4... is not an ancestor of main
+fatal: path 'tools/ring-buffer.ts' exists on disk, but not in '0286c6b4...'
+  FAIL  artifact is not in the anchored tree 0286c6b4: tools/ring-buffer.ts
+```
+
+Two mandates follow, and both are now workflow steps:
+
+| what CI must do | why |
+| --- | --- |
+| `fetch-depth: 0` | the audit checks ancestry against `main` and reads each artifact out of its anchor's TREE, so it needs the history and the trees, not just the tip |
+| `git fetch origin 'refs/notes/delegations:refs/notes/delegations'` | checkout never fetches notes; without it the ledger is empty and the gate is decorative |
+
+**Fixed in both halves, because either alone is a broken gate.** The audit exits 1 on an empty ledger
+with an explicit message, and `--allow-empty` covers the window before the first delegation is signed --
+passed explicitly, never inferred, because a missing ledger and a project with no delegations are the
+same bytes on disk. `--print-key-fingerprint` was added alongside, so the rotation ceremony can obtain
+the value it must paste rather than transcribing a 64-character digest.
+
+## A dangling symlink was authorised rather than resolved, and the literal fix broke linked checkouts
+
+**`fs.existsSync` follows links, so it answers false for a link whose target does not exist.** The walk in
+`canonicalisePath` treated such a link as a directory the write would create, descended past it, and
+re-appended the link's own name to a canonically in-workspace parent. The containment gate then compared
+a spelling that stayed inside the workspace to a destination that did not. Measured against the pre-fix
+build, with `workspace/link` junctioned to a directory that does not exist:
+
+| step | pre-fix result |
+| --- | --- |
+| `lstat(link).isSymbolicLink()` | `true` |
+| `existsSync(link)` | **`false`** -- the blindness the walk inherited |
+| `canonicalisePath('<ws>/link/payload.ts')` | `'<ws>/link/payload.ts'` -- the in-workspace spelling |
+| `isPathWithin('<ws>', ...)` | `true` |
+| `evaluateEmissionPath(...)`.allowed | **`true`** -- an unauthorised destination authorised |
+
+**The review's stated mechanism is not what happens.** It says the bytes land outside. They were not
+observed to: the write failed `ENOENT` because the link's target had no parent to create the file in. So
+the demonstrated defect is an **authorization** defect, with a race to real bytes if the target directory
+appears between the check and the write. It is recorded that way here rather than as a byte escape,
+because the difference decides whether the fix is urgent or merely correct.
+
+**Fixed, and the refusal lives in the one gate rather than beside it.** `canonicalisePath` now resolves a
+link by its own target, so containment compares the path a write would really use, and the lstat refusal
+is folded into `evaluateEmissionPath` -- the single gate every emission route already calls -- so there
+is one enforcement function and no second check to drift from it. The oracle asserting this fails 4 of
+its 7 tests against the pre-fix build. It also pins the opposite direction, which is the half a security
+fix usually omits: a fix that refused everything would pass every escape test and break the product.
+
+**That guard was not hypothetical.** Taking the rule literally -- refuse a path if any component is a
+link -- refused *every write* in a checkout reached through a link, because a junctioned project
+directory, a mapped drive, and `/var` on macOS (a symlink to `/private/var`) are links too, and none of
+them is a path a worker created. Measured with `junction-parent -> real-parent` above the workspace: an
+ordinary `workspace/plain.ts` emission reported one error and wrote **zero files**. The refusal is now
+bounded to links strictly below the workspace root, and containment needs no help with the ones above it
+because it resolves the root and the destination alike. Both directions are pinned by a guard test.
+
+**What is not covered, stated because the suite is green.** File symlinks cannot be created on a host
+without Developer Mode or elevation, and this one has neither, so that single case is skipped -- loudly,
+with its reason, and deliberately without failing the suite, since a suite that is red on every Windows
+machine for an environment reason is the permanently-red check this repository's own audit header calls
+worse than no check. No byte-landing escape was ever observed, and Linux was not exercised.
+
