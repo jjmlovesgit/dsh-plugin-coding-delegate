@@ -12,6 +12,17 @@
  * contract, or a contract was written for a unit that never landed; both leave the suite claiming
  * coverage it does not have.
  *
+ * AND THE REVERSE, which this file did not check until the claim was tested rather than asserted. A module
+ * with no contract is the same failure from the other side -- a utility nothing proves anything about --
+ * and it went unreported because this walked `tests/contracts` and never `tools/`. MEASURED: adding
+ * `tools/zz-orphan-probe.ts` left this script printing "All 7 contracts are well-formed" and exiting 0, so
+ * the 1:1 invariant held only because the two counts happened to match. A coincidence is not an invariant,
+ * and "every module has a contract" is exactly the kind of claim a green run invites a reader to over-read.
+ *
+ * `.ts` only, and never `.d.ts`. The contract boundary is the utility modules; `tools/worker-build.mjs` is
+ * a dispatcher that no contract governs. Exempting by EXTENSION rather than by a list of names means a new
+ * dispatcher does not have to be remembered here, and a new utility cannot slip past by not being listed.
+ *
  * A spawn failure is reported AS a spawn failure. `status` is null when the child never ran, and
  * reporting that as an unfit contract sends the reader to inspect the wrong file -- the same distinction
  * worker-build.mjs had to draw.
@@ -27,6 +38,7 @@ const { spawnSync } = require('node:child_process')
 
 const REPO_ROOT = path.resolve(__dirname, '..')
 const CONTRACTS_DIR = path.join(REPO_ROOT, 'tests', 'contracts')
+const TOOLS_DIR = path.join(REPO_ROOT, 'tools')
 const CHECKER = path.join(REPO_ROOT, 'scripts', 'check-contract.cjs')
 
 if (!fs.existsSync(CONTRACTS_DIR)) {
@@ -89,9 +101,44 @@ for (const contract of contracts) {
   console.log('')
 }
 
-if (failed > 0) {
-  console.error(failed + ' of ' + contracts.length + ' contract(s) failed well-formedness.')
+// --- the reverse direction: every utility module must have a contract -----------------
+//
+// Deliberately NOT folded into the loop above. That loop is driven by the contracts, so it cannot see a
+// module that has none; the two directions fail for different reasons and name different files, and a
+// reader fixing one of them should not have to work out which pass reported it.
+if (!fs.existsSync(TOOLS_DIR)) {
+  console.error('ERROR  no tools directory at ' + TOOLS_DIR)
   process.exit(1)
 }
 
-console.log('All ' + contracts.length + ' contracts are well-formed.')
+const toolModules = fs
+  .readdirSync(TOOLS_DIR)
+  .filter((file) => file.endsWith('.ts') && !file.endsWith('.d.ts'))
+  .sort()
+
+console.log('=== module -> contract parity (' + toolModules.length + ' utility module(s)) ===')
+
+for (const toolFile of toolModules) {
+  const base = toolFile.replace(/\.ts$/, '')
+  const contractPath = path.join(CONTRACTS_DIR, base + '.contract.cjs')
+  if (!fs.existsSync(contractPath)) {
+    console.error(
+      '  FAIL  tools/' + toolFile + ' has no contract at tests/contracts/' + base + '.contract.cjs'
+    )
+    failed += 1
+  }
+}
+console.log('')
+
+if (failed > 0) {
+  console.error(failed + ' well-formedness or module-parity failure(s).')
+  process.exit(1)
+}
+
+console.log(
+  'All ' +
+    contracts.length +
+    ' contracts are well-formed and bound to a module, and all ' +
+    toolModules.length +
+    ' utility module(s) have a contract.'
+)

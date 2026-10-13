@@ -85,6 +85,57 @@ stays on the local machine; what travels back is the failure *structure*, with s
   See SECURITY-REVIEW-2.md, findings 13 and 15.
 ```
     
+## Cryptographic Provenance & Dual-Gate Contract Attestation
+
+Every verified utility module (`tools/*.ts`) is governed by an Ed25519-signed provenance ledger
+(`refs/notes/delegations`). Tooling scripts (such as `tools/worker-build.mjs`) act as build dispatchers
+and are outside the contract boundary.
+
+### 1. Dual-Gate Verification Model
+
+A test suite that only executes passing code cannot detect vacuous contracts. We enforce bidirectional
+parity and negative discrimination across all utility modules:
+
+* **Bidirectional 1:1 Parity (`scripts/check-contracts.cjs`)**:
+  Every `tests/contracts/<name>.contract.cjs` must bind to a matching `tools/<name>.ts`, and every
+  `tools/*.ts` must have a corresponding contract. Missing either side fails closed.
+* **Negative Fixture Discrimination (`scripts/check-contract-fixtures.cjs`)**:
+  Every contract must actively reject a deliberately defective reference implementation
+  (`tests/contracts/fixtures/<name>.negative.ts`). If a contract passes a defective fixture, the gate
+  aborts. The fixture must also pass at least one case, so a fixture that fails everything is reported as
+  evidence about nothing rather than as discrimination.
+* **Fixture Coverage Mandate**:
+  Both the signer (`scripts/attest-unit.cjs`) and the auditor (`scripts/verify-delegation-ledger.cjs`)
+  refuse any contract not verified by the fixture discrimination gate.
+
+### 2. Git Object Ledger Audit (Spec 1.1)
+
+Attestations are signed with Ed25519 and stored in `refs/notes/delegations`:
+
+* **Commit-Tree Resolution (`git cat-file`)**:
+  Substantive artifact and contract validation bypasses the current working tree. All payload artifact and
+  contract SHA-256 digests are resolved directly against the Git object database at `payload.baseCommit`.
+  A note cannot attest files introduced in later commits or modified on disk. (Historical notes like
+  `a113cff` reference paths where they existed at commit time, verifiable via Git ancestry even if
+  relocated at HEAD.)
+* **Commit-Attachment Identity**:
+  A Git note attached to commit `A` must explicitly specify `baseCommit === A`.
+* **Repository-Pinned Root of Trust**:
+  The operator key fingerprint is pinned via `TRUSTED_OPERATOR_PUBKEY_SHA256` in
+  `scripts/operator-key.cjs`. This does not provide out-of-band immutability against repository writers
+  (a committer can update the constant and key together), but it ensures that any trust-root modification
+  is forced into a distinct, auditable diff rather than occurring silently via working-tree substitution.
+* **Ancestry-Gated Cutoff**:
+  All records anchored at or after commit `c5bcc5a` must be self-describing (`specVersion >= 1.1`).
+
+### 3. Red-Team Probes
+
+The integrity gate is validated against an active harness (`scripts/redteam-probe.cjs`, run manually
+because it mutates the ledger ref and restores it) covering six attack classes: a foreign key, payload
+tampering, a post-cutoff spec regression, an orphan lineage, a valid note re-attached to a different
+commit, and an artifact present on disk but absent from the anchored commit's tree. Each probe asserts the
+specific refusal message *and* that the audit exited non-zero, so a probe cannot pass on a crash.
+
 ## What it does
 
 Five things, in the order they act:
@@ -378,9 +429,14 @@ a digest over `{path, sha256}` pairs the document never contained — so recompu
 knowing the input, and a record whose contract set could not be reconstructed was unverifiable rather
 than wrong. From 1.1 the payload carries the array beside the digest, so a reader reproduces the hash
 from the document itself and checks every contract against disk with no path convention involved.
-`keys/delegation-operator.pub` pins the operator key that the ledger audit verifies against;
-`scripts/attest-unit.cjs` signs a unit and `scripts/verify-delegation-ledger.cjs` audits the whole ledger,
-and `npm run gate` runs the contract gates and that audit together.
+The operator key is pinned by fingerprint rather than by the file alone: `TRUSTED_OPERATOR_PUBKEY_SHA256`
+in `scripts/operator-key.cjs` is computed over the LF-normalised public key, and both
+`keys/delegation-operator.pub` and the key derived from the local private key are checked against it. That
+is not out-of-band immutability — a writer who can change the key can change the constant in the same
+commit — it forces a trust-root change into a distinct, reviewable diff instead of a silent working-tree
+substitution. `scripts/attest-unit.cjs` signs a unit against the same pin, so a signature the audit would
+reject is refused before it is created; `scripts/verify-delegation-ledger.cjs` audits the whole ledger, and
+`npm run gate` runs the contract gates and that audit together.
 
 **What it establishes, and what it does not.** It binds a payload to a key: the holder signed those
 bytes and nothing in them changed. It does not establish who holds the key. The key lives in this
