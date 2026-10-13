@@ -40,6 +40,10 @@ const ctx = {
 apply(ctx, {
   sourceReadEgress: "declarations",
   declarationRoot: path.join(PLUGIN, "dist"),
+  // The session workspace, as index.ts supplies it from resolveWorkspaceDir(ctx). Without it a relative
+  // scope is resolved against the process cwd, and this oracle would pass or fail depending on where the
+  // runner happened to be started.
+  workspaceRoot: PLUGIN,
 });
 
 /**
@@ -91,7 +95,12 @@ test("a shell command that reads a source file is refused under declarations mod
 
 // CONTROLS. These exist so the wiring cannot pass by refusing everything.
 test("control: a search scoped to documentation is allowed through", async () => {
-  const decision = await dispatch("grep", { pattern: "install", path: "docs/README.md" });
+  // The scope is a REAL non-source file in the workspace. It used to name `docs/README.md`, which does not
+  // exist here: that passed while an unresolvable path-shaped scope was allowed by default, so the control
+  // was pinning the default rather than the property. A path-shaped scope that resolves to nothing is now
+  // refused, which is the fail-closed direction, and a control asserting the opposite would be asking for
+  // the leak back.
+  const decision = await dispatch("grep", { pattern: "install", path: "README.md" });
   assert.ok(!replacedContent(decision), "a search over prose must not be refused");
 });
 

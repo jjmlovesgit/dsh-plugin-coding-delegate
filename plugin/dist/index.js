@@ -975,7 +975,20 @@ function apply(ctx, options = {}) {
                     return decision;
                 try {
                     const name = String(exec?.name || '');
-                    const egressDecision = (0, declaration_egress_hook_1.handleDeclarationPostExecute)(exec, options);
+                    // THE SESSION WORKSPACE IS PASSED IN, because a relative search scope has to be resolved against
+                    // something and the process cwd is the wrong base: this repository has already lost a control to
+                    // that substitution once (the delegated-read gate resolved a relative target against the cwd and
+                    // was therefore off in normal use). Reported rather than silent when it cannot be resolved, since
+                    // a control that quietly narrows to the cwd is how the first one survived.
+                    let sessionWorkspace;
+                    try {
+                        sessionWorkspace = resolveWorkspaceDir(ctx).dir;
+                    }
+                    catch {
+                        console.warn('[LOCAL_EGRESS] could not resolve the session workspace, so a relative search scope will be ' +
+                            'resolved against the process cwd and an unresolved path-shaped scope will not be refused.');
+                    }
+                    const egressDecision = (0, declaration_egress_hook_1.handleDeclarationPostExecute)(exec, Object.assign({}, options, { workspaceRoot: sessionWorkspace }));
                     if (egressDecision)
                         return egressDecision;
                     if (!guard_1.READ_TOOLS.has(name))

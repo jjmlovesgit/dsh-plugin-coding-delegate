@@ -32,6 +32,13 @@ export interface PostExecuteExec {
 export interface PostExecuteOptions {
     sourceReadEgress?: string;
     declarationRoot?: string;
+    /**
+     * The SESSION WORKSPACE, supplied by index.ts from the same `resolveWorkspaceDir(ctx)` the delegation
+     * path uses. It is the base for resolving a relative search scope, and without it that resolution falls
+     * back to the process cwd -- measured: a workspace-relative `src` then stat'ed as absent and the
+     * evaluator allowed the search, while the same scope against the workspace was served as declarations.
+     */
+    workspaceRoot?: string;
 }
 export interface EgressHookResult {
     kind: 'accept';

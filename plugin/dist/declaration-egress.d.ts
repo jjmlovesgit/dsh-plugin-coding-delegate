@@ -60,7 +60,31 @@ export interface DeclarationEgressInput {
     listSourceFiles?: (scope: string) => string[];
     /** The declaration bytes for one source file, or its absence, plus any injected staleness verdict. */
     readDeclaration?: (sourceFile: string, root?: string) => Omit<ResolvedDeclaration, 'source' | 'skeleton'>;
+    /**
+     * The SESSION WORKSPACE, which is the base every relative scope is resolved against.
+     *
+     * WHY THIS IS NOT `declarationRoot`, and why it is not the process cwd. `declarationRoot` is where the
+     * built `.d.ts` files live; it says nothing about where the source does. The process cwd is where the
+     * host happened to be launched -- and this repository has already paid for that substitution once: the
+     * delegated-read gate resolved a relative target against the cwd instead of the workspace and was
+     * therefore off in normal use, because the architect names paths relatively essentially always. The
+     * same string, the same defect, one module over.
+     */
+    workspaceRoot?: string;
+    /** Does this RESOLVED path exist? Decides whether a non-code scope is an ordinary file or nothing. */
+    pathExists?: (resolvedPath: string) => boolean;
 }
+/**
+ * Resolve a search scope against the session workspace, which is what makes the decision independent of
+ * where the host was launched.
+ *
+ * MEASURED, which is why this function exists at all: with the scope resolved against the cwd, a search
+ * scoped to a workspace-relative `src` from a host launched anywhere else stat'ed as absent, fell through
+ * to the extension test, and came back `{"action":"allow"}` -- while the same scope resolved against the
+ * workspace came back `"serve-declaration"`. A control whose answer depends on the launching directory is
+ * not a control.
+ */
+export declare function resolveScopePath(rawScope: string, workspaceRoot?: string): string;
 /**
  * Decide whether one tool call may proceed under declarations mode.
  *

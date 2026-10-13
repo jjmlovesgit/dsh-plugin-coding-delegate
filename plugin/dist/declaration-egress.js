@@ -33,8 +33,42 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.resolveScopePath = resolveScopePath;
 exports.evaluateDeclarationEgress = evaluateDeclarationEgress;
 const path = __importStar(require("path"));
+/**
+ * Resolve a search scope against the session workspace, which is what makes the decision independent of
+ * where the host was launched.
+ *
+ * MEASURED, which is why this function exists at all: with the scope resolved against the cwd, a search
+ * scoped to a workspace-relative `src` from a host launched anywhere else stat'ed as absent, fell through
+ * to the extension test, and came back `{"action":"allow"}` -- while the same scope resolved against the
+ * workspace came back `"serve-declaration"`. A control whose answer depends on the launching directory is
+ * not a control.
+ */
+function resolveScopePath(rawScope, workspaceRoot) {
+    const raw = String(rawScope || '').trim();
+    if (!raw)
+        return '';
+    if (path.isAbsolute(raw))
+        return path.normalize(raw);
+    if (workspaceRoot && String(workspaceRoot).trim()) {
+        return path.resolve(String(workspaceRoot), raw);
+    }
+    // No workspace named. The cwd is the only base left, and it is the wrong one in general -- which is
+    // exactly why the caller is told, below, that a path-shaped scope cannot be cleared without it.
+    return path.resolve(raw);
+}
+/**
+ * Is this scope SHAPED like a path rather than like a phrase? A separator or an extension is the signal.
+ *
+ * It matters only in one place: an unresolved scope that looks like a path is treated as an escape
+ * attempt rather than as prose, because "a file I could not find" and "a sentence" are the same string to
+ * a resolver. Prose has no separator and no extension, so the two are separable in practice.
+ */
+function looksLikePath(scope) {
+    return scope.includes('/') || scope.includes('\\') || path.extname(scope).length > 0;
+}
 /**
  * The extensions `tsc --declaration --emitDeclarationOnly` can actually produce a skeleton for.
  *
@@ -57,9 +91,20 @@ const path = __importStar(require("path"));
  * `.mts` and `.cts` are absent because the build in this repository does not emit for them.
  */
 const MAPPABLE_SOURCE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx']);
-/** True when this file's extension is one declarations mode can serve a skeleton for. */
+/**
+ * True when this file's extension is one declarations mode can serve a skeleton for.
+ *
+ * THE `.d.` PREFIX IS EXCLUDED HERE, which the extension set above assumed and never got: `path.extname`
+ * of `impl.d.ts` is `.ts`, so a declaration file passed the set's test and counted as SOURCE. Measured in
+ * a directory holding both `impl.ts` and its `impl.d.ts`: the walk returned both, no skeleton can exist
+ * for a declaration file (the mapping produced `impl.d.d.ts`), and the whole scope was refused -- a
+ * legitimate search blocked by the one kind of file this mode exists to serve.
+ */
 function mappableSourceFile(filePath) {
-    return MAPPABLE_SOURCE_EXTENSIONS.has(path.extname(String(filePath || '')).toLowerCase());
+    const name = String(filePath || '').toLowerCase();
+    if (/\.d\.(ts|mts|cts)$/.test(name))
+        return false;
+    return MAPPABLE_SOURCE_EXTENSIONS.has(path.extname(name));
 }
 /**
  * Expand a search scope into the declarations that stand for the source beneath it.
@@ -193,6 +238,13 @@ function evaluateDeclarationEgress(input) {
         // The defect: a DIRECTORY has no extension, so the two checks above saw "not code" and allowed a
         // search whose matches are implementation lines from every file beneath it. The refusal below is
         // reached only with the directory resolved to explicit source files.
+        //
+        // THE SCOPE IS RESOLVED FOR THE QUESTIONS ASKED HERE -- the existence test and the fail-closed rule
+        // below -- and the injected callbacks still receive the scope AS STATED. That split is deliberate:
+        // the callbacks are the caller's view of the filesystem, and the caller is the one holding the
+        // workspace base, so it resolves them with this same exported `resolveScopePath`. Resolution is
+        // defined once; what differs is only which side of the injection boundary performs it.
+        const scopePath = resolveScopePath(scope, input.workspaceRoot);
         if (input.directoryScope ? input.directoryScope(scope) : false) {
             if (!input.listSourceFiles) {
                 // An unresolvable directory cannot be cleared: "no source beneath" is a claim about the tree and
@@ -240,8 +292,33 @@ function evaluateDeclarationEgress(input) {
                     "by policy (sourceEgress: declarations).",
             };
         }
-        // Anything else -- prose, a path that does not exist, an unresolved name -- is not shown to reach
-        // source, and the extension test above has already cleared anything code-shaped.
+        // An existing path that is neither a directory nor a code file -- `docs/README.md` is the committed
+        // oracle's case -- reads no source, so it stands. Asked about the RESOLVED path, so it does not depend
+        // on the cwd either.
+        if (input.pathExists && input.pathExists(scopePath))
+            return { action: 'allow' };
+        // FAIL CLOSED ON AN UNRESOLVED SCOPE THAT IS SHAPED LIKE A PATH.
+        //
+        // WHY THIS IS NOT THE OLD `allow`. "A path I could not resolve" and "a phrase rather than a path" are
+        // the same string to a resolver, so one of the two has to be guessed; the direction to guess in is the
+        // one that does not leak. A scope with a separator or an extension is a claim about the tree, and a
+        // claim that does not hold is refused rather than waved through.
+        //
+        // ASKED ONLY WHEN A WORKSPACE WAS NAMED, because that is what makes "could not resolve" mean
+        // something: without it the resolution base is the process cwd, and refusing every relative scope on a
+        // host launched elsewhere would refuse ordinary prose. A caller that supplies no workspace gets the
+        // old answer, and the caller in this plugin always supplies one.
+        if (input.workspaceRoot && looksLikePath(scope)) {
+            return {
+                action: 'block',
+                reason: "Searching '" +
+                    scope +
+                    "' was refused: sourceReadEgress is 'declarations', the scope is shaped like a path, and it " +
+                    'does not resolve to anything under the session workspace, so its reach cannot be shown to ' +
+                    'avoid source. Check the path, or search a scope that exists.',
+            };
+        }
+        // Prose: no separator, no extension, nothing on disk. It cannot reach source.
         return { action: 'allow' };
     }
     // 5. SHELL. Same leak by another door, with one difference that matters: a command that merely lists

@@ -82,18 +82,29 @@ function handleDeclarationPostExecute(exec, options) {
     // longestCodeReference returns the longest code-looking token, or undefined. The evaluator wants a
     // predicate, so presence becomes a boolean here rather than a second vocabulary of source extensions.
     const commandNamesSource = (cmd) => (0, guard_1.longestCodeReference)(cmd) !== undefined;
-    // THE SCOPE IS A PATH, AND A DIRECTORY IS A PATH WITH NO EXTENSION. The evaluator needs to be told
-    // which of the two it is holding, because an extension test answers "not code" for `src` -- MEASURED
-    // before this wiring existed, `{toolKind:'search', target:'src'}` came back `{"action":"allow"}` while
-    // `src/guard.ts` was refused. `statSync` is the only thing that can tell the two apart, and it is
-    // consulted here rather than inside the evaluator so the decision stays testable without a disk.
-    const directoryScope = (p) => {
+    // THE SCOPE IS RESOLVED AGAINST THE SESSION WORKSPACE HERE, with the one exported resolver, so the
+    // answer does not depend on where the host was launched. MEASURED before this: a workspace-relative
+    // `src` stat'ed as absent from any other cwd, the evaluator fell through to the extension test, and the
+    // search came back allowed while the same scope against the workspace was served as declarations.
+    const resolveScope = (scope) => (0, declaration_egress_1.resolveScopePath)(scope, options?.workspaceRoot) || scope;
+    const directoryScope = (scope) => {
         try {
-            return fs.statSync(p).isDirectory();
+            return fs.statSync(resolveScope(scope)).isDirectory();
         }
         catch {
-            // A scope that does not exist beneath the process cwd is not a directory this route can resolve,
-            // so it is not cleared here and falls through to the extension test.
+            // Nothing there. Not a directory this route can resolve, so it is not cleared here; the evaluator
+            // decides what an unresolved scope means, and refuses a path-shaped one.
+            return false;
+        }
+    };
+    // Does the resolved scope exist at all? A non-code path that exists reads no source and stands; one that
+    // does not exist is refused rather than waved through, because "not found" and "a phrase" are otherwise
+    // the same string.
+    const pathExists = (resolved) => {
+        try {
+            return fs.existsSync(resolved);
+        }
+        catch {
             return false;
         }
     };
@@ -127,7 +138,7 @@ function handleDeclarationPostExecute(exec, options) {
                     walk(path.join(p, entry.name));
             }
         };
-        walk(scope);
+        walk(resolveScope(scope));
         return found;
     };
     // The declaration bytes behind one source file, with the staleness verdict index.ts already applies to
@@ -158,6 +169,8 @@ function handleDeclarationPostExecute(exec, options) {
         directoryScope,
         listSourceFiles,
         readDeclaration,
+        workspaceRoot: options?.workspaceRoot,
+        pathExists,
     });
     if (verdict.action === 'block') {
         return {

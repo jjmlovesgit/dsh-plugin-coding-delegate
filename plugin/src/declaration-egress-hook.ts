@@ -12,7 +12,7 @@ import {
 // CODE_EXTENSIONS is declared in ./paths and is deliberately not re-exported from ./guard, so it is
 // imported from its own module. Importing it from './guard' fails to compile.
 import { CODE_EXTENSIONS } from './paths'
-import { evaluateDeclarationEgress } from './declaration-egress'
+import { evaluateDeclarationEgress, resolveScopePath } from './declaration-egress'
 
 /**
  * The wiring for declarations-mode egress control, kept out of `index.ts` on purpose.
@@ -50,6 +50,13 @@ export interface PostExecuteExec {
 export interface PostExecuteOptions {
   sourceReadEgress?: string
   declarationRoot?: string
+  /**
+   * The SESSION WORKSPACE, supplied by index.ts from the same `resolveWorkspaceDir(ctx)` the delegation
+   * path uses. It is the base for resolving a relative search scope, and without it that resolution falls
+   * back to the process cwd -- measured: a workspace-relative `src` then stat'ed as absent and the
+   * evaluator allowed the search, while the same scope against the workspace was served as declarations.
+   */
+  workspaceRoot?: string
 }
 
 export interface EgressHookResult {
@@ -104,17 +111,30 @@ export function handleDeclarationPostExecute(
   // predicate, so presence becomes a boolean here rather than a second vocabulary of source extensions.
   const commandNamesSource = (cmd: string): boolean => longestCodeReference(cmd) !== undefined
 
-  // THE SCOPE IS A PATH, AND A DIRECTORY IS A PATH WITH NO EXTENSION. The evaluator needs to be told
-  // which of the two it is holding, because an extension test answers "not code" for `src` -- MEASURED
-  // before this wiring existed, `{toolKind:'search', target:'src'}` came back `{"action":"allow"}` while
-  // `src/guard.ts` was refused. `statSync` is the only thing that can tell the two apart, and it is
-  // consulted here rather than inside the evaluator so the decision stays testable without a disk.
-  const directoryScope = (p: string): boolean => {
+  // THE SCOPE IS RESOLVED AGAINST THE SESSION WORKSPACE HERE, with the one exported resolver, so the
+  // answer does not depend on where the host was launched. MEASURED before this: a workspace-relative
+  // `src` stat'ed as absent from any other cwd, the evaluator fell through to the extension test, and the
+  // search came back allowed while the same scope against the workspace was served as declarations.
+  const resolveScope = (scope: string): string =>
+    resolveScopePath(scope, options?.workspaceRoot) || scope
+
+  const directoryScope = (scope: string): boolean => {
     try {
-      return fs.statSync(p).isDirectory()
+      return fs.statSync(resolveScope(scope)).isDirectory()
     } catch {
-      // A scope that does not exist beneath the process cwd is not a directory this route can resolve,
-      // so it is not cleared here and falls through to the extension test.
+      // Nothing there. Not a directory this route can resolve, so it is not cleared here; the evaluator
+      // decides what an unresolved scope means, and refuses a path-shaped one.
+      return false
+    }
+  }
+
+  // Does the resolved scope exist at all? A non-code path that exists reads no source and stands; one that
+  // does not exist is refused rather than waved through, because "not found" and "a phrase" are otherwise
+  // the same string.
+  const pathExists = (resolved: string): boolean => {
+    try {
+      return fs.existsSync(resolved)
+    } catch {
       return false
     }
   }
@@ -145,7 +165,7 @@ export function handleDeclarationPostExecute(
         if (entry.isDirectory() || entry.isFile()) walk(path.join(p, entry.name))
       }
     }
-    walk(scope)
+    walk(resolveScope(scope))
     return found
   }
 
@@ -179,6 +199,8 @@ export function handleDeclarationPostExecute(
     directoryScope,
     listSourceFiles,
     readDeclaration,
+    workspaceRoot: options?.workspaceRoot,
+    pathExists,
   })
 
   if (verdict.action === 'block') {
