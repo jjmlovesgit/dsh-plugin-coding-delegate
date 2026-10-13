@@ -6,11 +6,19 @@ import http from "node:http";
 // endpoint http://127.0.0.1:1234/v1, temperature 0.2, with the profile's stop sequences and its
 // `enable_thinking: false` / `reasoning_effort: 'none'` flags.
 //
-// DEVIATION, and the reason for it: the profile sets max_tokens 8192. Measured, that is not enough.
-// This model reasons on a task of this size, and the first dispatch spent 34,076 characters of
-// reasoning_content against the 8192-token budget, returning finish_reason=length with EMPTY content.
-// The budget is therefore raised to 20000 so reasoning AND answer fit inside the profile's 32768-token
-// context window. The flags are still transmitted, because the plugin transmits them.
+// WHY max_tokens IS 20000 AND NOT THE PROFILE'S 8192. A deliberate deviation, and the reason is a
+// host setting the plugin cannot reach. LM Studio's PER-MODEL thinking toggle is authoritative: with
+// it on, this model reasons about a task of this size and the first dispatch spent 34,076 characters
+// of reasoning_content against the 8192-token budget, returning finish_reason=length with EMPTY
+// content -- a delegation that returns nothing while every layer reports success. With the toggle
+// off, 8192 suffices: measured reasoning_content=0 and ~2,000 characters of code in under five
+// seconds, BOTH with and without the API flags, which are therefore neither necessary nor
+// sufficient. 20000 makes a run survive either setting, since reasoning and answer then both fit
+// inside the profile's 32768-token context window. The flags are still transmitted, for fidelity.
+//
+// An earlier revision of this comment attributed the empty content to the model simply reasoning on
+// a task this size. That was wrong: it is the per-model toggle. See docs/findings.md for the
+// measurement, and confirm the toggle before re-running this.
 const targetPath = "tools/json-canonical-merge.ts";
 const contractSource = fs.readFileSync("tests/contracts/json-canonical-merge.contract.cjs", "utf8");
 

@@ -855,3 +855,51 @@ Verified red-then-green: four new plan tests fail against the old gate and pass 
 the suite. Reaching this in the live delegation path needs a DSH restart — plugin options are read at
 registration and the module is loaded once, so a rebuilt `dist` is not what a running host executes.
 
+## The LM Studio per-model thinking toggle decides whether a delegation returns anything — open
+
+**The plugin cannot set it, cannot detect it, and does not record it.** `WORKER_LOCAL` is
+`qwen/qwen3.8-27b`, a reasoning model. Whether it reasons is decided by LM Studio's *per-model* thinking
+setting, not by anything carried on the request.
+
+Measured on the same contract-sized prompt:
+
+| request | `finish_reason` | `reasoning_content` | content | wall |
+| --- | --- | --- | --- | --- |
+| toggle on, `max_tokens` 8192 | `length` | 34,076 chars | **empty** | 89.4 s |
+| toggle off, flags sent, 8192 | `stop` | 0 | 2,025 chars | 4.5 s |
+| toggle off, **no flags at all**, 8192 | `stop` | 0 | 1,933 chars | 3.4 s |
+
+The third row is the one that settles it. `profiles.js` transmits `enable_thinking: false` and
+`reasoning_effort: 'none'` on every delegation and documents them as advisory, "because LM Studio's
+per-model setting is authoritative". That comment is correct, and the middle row alone cannot show it:
+the flags and the toggle were changed together, so the flags looked like the cause. Removing the flags
+entirely and getting the same zero-reasoning answer is what separates the two. The flags are neither
+necessary nor sufficient.
+
+An earlier probe was read as evidence and was not. It asked the model to reply "OK" and observed
+`reasoning_content=0` under every variant, including the baseline with no flags — but a trivial prompt
+is one the model never chooses to reason about, so all four rows were silent for the same reason and the
+comparison could not distinguish anything. `tools/probe-thinking.mjs` now uses the real prompt at 8192,
+where the model does choose to reason.
+
+**Impact.** A delegation can return *nothing* while every layer reports success. `finish_reason` is
+`length`, not an error, and the empty content is a well-formed response. At the profile's `max_tokens` of
+8192 the worker produces no code at all. The only thing that caught it here was a dispatch script that
+refused to overwrite its target with an empty string; the plugin has no equivalent guard, so the same
+condition inside `delegate_worker` is a unit that writes no file and reports no failure.
+
+Worse for provenance: the envelope carries `modelIdentifier`, artifact hashes, `contractHash` and the
+verification result, and **no inference parameters and no host state**. The toggle lives in LM Studio's
+UI. A run that succeeded is therefore not reproducible from its own record, and the record cannot say
+which of the two host states produced it — the same shape of gap as a `modelIdentifier` that names no
+real model.
+
+**Not fixed.** Mitigated in `tools/worker-build.mjs`, which raises `max_tokens` to 20000 so reasoning and
+answer both fit inside the profile's 32768-token context and the run survives either toggle position.
+That is a dispatch-local workaround, not a fix: `delegate_worker` still sends 8192.
+
+**How it was caught.** Not by review — the profile's comment read correctly and was in fact correct. It
+was caught by dispatching, receiving empty content, and then isolating the cause with an experiment
+rather than accepting the first plausible attribution, which had been that the model simply reasons on
+tasks of this size. It does; the toggle is what lets it.
+
