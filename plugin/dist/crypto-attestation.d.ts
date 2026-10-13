@@ -104,6 +104,21 @@ export declare function signManifest(payload: AttestationPayload, privateKeyPem:
 export declare function verifyEnvelope(envelope: SignedEnvelope): boolean;
 /** sha256, lowercase hex. The digest form the registry already uses for file content. */
 export declare function hashBuffer(buffer: Buffer | string): string;
+/**
+ * POSIX-normalise a path for digesting.
+ *
+ * The contract digest must not depend on which platform produced it. `path.relative` and `path.join`
+ * yield backslashes on Windows and forward slashes everywhere else, so the SAME contract -- same bytes,
+ * same relative location -- digested to two different values, and a verifier could not recompute a note
+ * signed on the other platform. Measured in this repository's own ledger: two notes recorded the same
+ * relative contract as `tests\contracts\json-canonical-merge.contract.cjs` and
+ * `tests/contracts/priority-queue.contract.cjs`, and only one of them recomputed.
+ *
+ * Applied to artifacts as well, so the signed payload reads the same on any host. Note that this makes
+ * the two strings COMPARABLE; it does not make them resolvable. A POSIX-normalised path is a record,
+ * not a filesystem path, and nothing should hand it back to `fs`.
+ */
+export declare function normalizePosixPath(p: string): string;
 /** One file of the contract that judged the unit, relative to the workspace. */
 export interface AttestationContractRef {
     path: string;

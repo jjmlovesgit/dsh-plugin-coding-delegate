@@ -442,6 +442,45 @@ describe('attestation plan: the payload it builds', () => {
     expect(none.contractHash).toBe(hashBuffer(canonicalizeJson([])))
   })
 
+  it('digests the same contract identically whatever separators the caller used', () => {
+    // The defect this pins. `path.relative` yields backslashes on Windows and forward slashes
+    // elsewhere, so the SAME contract -- same bytes, same relative location -- digested to two values,
+    // and a note signed on one platform could not be recomputed on the other. Measured in this
+    // repository's own ledger before the fix: the same kind of relative contract was recorded as
+    // `tests\contracts\json-canonical-merge.contract.cjs` in one note and
+    // `tests/contracts/priority-queue.contract.cjs` in another, and only the POSIX one recomputed.
+    const windows = payloadOf(
+      buildAttestationPlan(
+        inputs({ contracts: [{ path: 'tests\\contracts\\a.contract.cjs', sha256: '11' }] })
+      )
+    )
+    const posix = payloadOf(
+      buildAttestationPlan(
+        inputs({ contracts: [{ path: 'tests/contracts/a.contract.cjs', sha256: '11' }] })
+      )
+    )
+
+    expect(windows.contractHash).toBe(posix.contractHash)
+  })
+
+  it('records artifact paths POSIX-normalised, without reordering them', () => {
+    const payload = payloadOf(
+      buildAttestationPlan(
+        inputs({
+          artifacts: [
+            { path: 'tools\\second.ts', sha256: 'bb' },
+            { path: 'tools\\first.ts', sha256: 'aa' },
+          ],
+        })
+      )
+    )
+
+    expect(payload.artifacts.map((a: { path: string }) => a.path)).toEqual([
+      'tools/second.ts',
+      'tools/first.ts',
+    ])
+  })
+
   it('keeps an artifact it could not hash, rather than dropping the file', () => {
     const payload = payloadOf(
       buildAttestationPlan(

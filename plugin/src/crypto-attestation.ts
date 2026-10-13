@@ -149,6 +149,24 @@ export function hashBuffer(buffer: Buffer | string): string {
   return createHash('sha256').update(buffer).digest('hex')
 }
 
+/**
+ * POSIX-normalise a path for digesting.
+ *
+ * The contract digest must not depend on which platform produced it. `path.relative` and `path.join`
+ * yield backslashes on Windows and forward slashes everywhere else, so the SAME contract -- same bytes,
+ * same relative location -- digested to two different values, and a verifier could not recompute a note
+ * signed on the other platform. Measured in this repository's own ledger: two notes recorded the same
+ * relative contract as `tests\contracts\json-canonical-merge.contract.cjs` and
+ * `tests/contracts/priority-queue.contract.cjs`, and only one of them recomputed.
+ *
+ * Applied to artifacts as well, so the signed payload reads the same on any host. Note that this makes
+ * the two strings COMPARABLE; it does not make them resolvable. A POSIX-normalised path is a record,
+ * not a filesystem path, and nothing should hand it back to `fs`.
+ */
+export function normalizePosixPath(p: string): string {
+  return p.replace(/\\/g, '/')
+}
+
 /** One file of the contract that judged the unit, relative to the workspace. */
 export interface AttestationContractRef {
   path: string
@@ -287,9 +305,15 @@ export function buildAttestationPlan(input: AttestationInputs): AttestationPlan 
 
   // Sorted here rather than by the caller: the digest must not depend on the order a caller happened
   // to build the list in, and that is a property worth holding inside the pure function.
-  const contracts = [...input.contracts].sort((a, b) =>
-    a.path < b.path ? -1 : a.path > b.path ? 1 : 0
-  )
+  //
+  // The comparison is by UTF-16 code unit and NOT `localeCompare`. Collation is locale- and ICU-
+  // dependent -- it orders case and punctuation differently under different locales -- so a
+  // locale-aware sort would reintroduce exactly the platform dependence that normalising separators
+  // removes. Measured: the two agree on `["a-b", "a/b"]` but disagree on case, with code-unit ordering
+  // `[B, a-b, a/b, b]` against `localeCompare`'s `[a-b, a/b, b, B]`.
+  const contracts = input.contracts
+    .map((c) => ({ path: normalizePosixPath(c.path), sha256: c.sha256 }))
+    .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
 
   return {
     action: 'sign',
@@ -299,8 +323,12 @@ export function buildAttestationPlan(input: AttestationInputs): AttestationPlan 
       contractHash: hashBuffer(canonicalizeJson(contracts)),
       baseCommit: input.baseCommit,
       modelIdentifier: input.modelIdentifier,
+      // Normalised, and deliberately NOT sorted. Emission order is a property of the run rather than of
+      // the platform, so reordering here would rewrite every payload for no portability gain. Contracts
+      // are sorted because their order is an accident of how the caller assembled the list; an artifact
+      // list is the order the unit actually wrote its files.
       artifacts: input.artifacts.map((artifact) => ({
-        path: artifact.path,
+        path: normalizePosixPath(artifact.path),
         // An unreadable artifact becomes an empty string rather than being dropped: the record must
         // still name the file the unit wrote, even when its bytes could not be hashed.
         sha256: artifact.sha256 ?? '',
