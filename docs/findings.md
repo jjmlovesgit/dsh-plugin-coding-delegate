@@ -930,11 +930,20 @@ contract is not run, so no passing test result can be attached to a run that pro
 The gate is deliberately narrow. `length` with NON-empty content is a model that finished its file and
 then rambled into the cap — failing that would trade a silent green for a loud false red.
 
-**Still open: the same symptom from a different finish reason.** An empty message returned with
-`finish_reason: 'stop'` follows the identical route and still settles as `SUCCESS`. It is pinned by a
+**No longer open: the same symptom from a different finish reason.** An empty message returned with
+`finish_reason: 'stop'` followed the identical route and settled as `SUCCESS`. It was pinned here by a
 test named `KNOWN GAP: an empty reply that stopped normally still settles as SUCCESS` rather than left
-silent. The cause differs; the outcome does not. Widening the gate to reject empty content whatever the
-finish reason is an operator decision, not a side effect of this fix.
+silent, and that test carried its own instructions for this moment: *"If this ever fails, the gate was
+widened: replace this case with one asserting the new non-success status rather than deleting it."*
+**The gate has been widened, deliberately.** Empty content is now the whole condition, whatever reason the
+server gives for stopping, and the case asserts the new non-success status through the same wiring.
+
+Two things were kept, and both are the reason this is a widening rather than a rewrite. The causes still
+report different remedies, because only token exhaustion has a specific fix -- the thinking toggle on the
+host -- and one message for both would send the operator to the wrong place. And NON-empty content is
+untouched in both directions: a model that emitted a complete file and then rambled into the cap is still
+accepted, and so is a worker that answers a question in prose, which the plugin supports deliberately (a
+unit that writes no files cannot have broken coherence, so it does not pay for a build).
 
 Both halves are covered: the oracle suite exercises the built `dist/delegation.js` (452 in the suite),
 and the unit suite grew from 149 to 158.
@@ -1063,4 +1072,71 @@ without Developer Mode or elevation, and this one has neither, so that single ca
 with its reason, and deliberately without failing the suite, since a suite that is red on every Windows
 machine for an environment reason is the permanently-red check this repository's own audit header calls
 worse than no check. No byte-landing escape was ever observed, and Linux was not exercised.
+
+## Two ways to sign a record that nobody can verify
+
+Both of these produce an envelope that is internally perfect -- signature valid, canonical JSON, every
+field present -- and worthless, and in both cases the ledger audit is the first place the problem becomes
+visible. That is the property worth naming: the failure is discovered by the reader rather than by the
+writer, which is the worst place to discover it.
+
+**A digest that could not be read was written as an empty string.** `buildAttestationPlan` mapped an
+artifact with no digest to `sha256: ''` and signed anyway, on the reasoning that the record must still
+name the file the unit wrote. Naming it is right; naming it with a digest that cannot be checked is not a
+record of anything. The audit recomputes every artifact hash from the anchored tree, so an empty string
+can never match one -- the resulting note is permanently unverifiable while looking complete at every
+checkpoint before the last. **Fixed:** a unit with any unhashable artifact is withheld, and the refusal
+names the file. Dropping the artifact instead would have produced a verifiable record that does not
+describe the unit, which is the same defect one step quieter.
+
+**The anchor was read after the commands ran.** `baseCommit` was resolved when the plan was built, which
+is after the unit's verification and the project's coherence command had both executed. A command that
+commits, checks out or stashes therefore moved HEAD underneath the record, and the envelope named the
+commit the workspace landed on rather than the one the unit's files were written against. **Nothing
+downstream can catch this**, which is what makes it worth a gate rather than a comment: the commit named
+is a real commit and a real ancestor of `main`, so ancestry passes, the artifacts are read from its tree
+and match, and the record verifies perfectly while attesting to the wrong state. Measured in the oracle
+suite with a real repository whose verification command really does `git commit`: the unit's verification
+passes, HEAD moves, and the record is refused with `HEAD_DRIFT_DETECTED` naming both commits.
+
+The fix is a freeze and a parity read -- HEAD observed immediately before the commands run and again
+after the last one -- and the comparison lives in the planner rather than at the call site, because
+"gathering is the caller's half; deciding is `buildAttestationPlan`'s" is the split the rest of that
+interface already follows. The caller passes both observations, including a pair that agrees; the pure
+function decides. A host that has not configured attestation is never asked: both reads are gated on a
+signing key being present, so an unconfigured host pays no git subprocesses for a record it will not
+write.
+
+## An oracle run shares one data directory, and the delegated registry cannot take that
+
+**An intermittent failure in the control-bypass oracle, and it is not the guard's logic.** `control/rule
+3: reading CONTENT under a delegated directory is still gated` failed 3 of 17 full-suite runs and 0 of 10
+runs that were serialised with `--test-concurrency=1`, and passes every time in isolation. The captured
+diagnostic is under-gating rather than a crash: four of the six readers were allowed.
+
+| runs | result |
+| --- | --- |
+| `control-bypass.test.cjs` alone | **0 fail in 4** |
+| full suite, `--test-concurrency=1` | **0 fail in 10** |
+| full suite, parallel, before the attestation work | 0 fail in 4 |
+| full suite, parallel, after | **3 fail in 17** |
+
+**The mechanism is the registry write; the tests only make it visible.** `rememberDelegated` reads the
+registry, merges in memory and writes it back, and `saveDelegatedRegistry` writes a temporary file named
+`target + '.tmp'` -- a fixed name rather than a per-writer one. Two processes doing that at the same
+moment lose one of the two updates, or collide on the temp path, and the loser's delegation is no longer
+in the registry the guard consults. The oracle run arranges that easily: the preload deliberately creates
+**one** data directory per run and shares it across every concurrently scheduled oracle file, so several
+files register delegations into the same file at once. It is intermittent because it depends on the
+interleaving, which is also why it moved when one more oracle file was added -- the added file is the
+schedule change, not the cause.
+
+**Not fixed, and not caused by the attestation change**, whose code paths are disjoint from the guard --
+which is why it is recorded as its own finding rather than as fallout from another one. Two candidate
+fixes, and they are not equivalent. Giving each oracle file its own data directory is one line and hides
+it in tests while leaving production untouched; it is the tradeoff the preload's own comment considered
+and rejected for leaving a temp directory per file. Making the registry write per-writer atomic -- a
+unique temp name, and a read-modify-write that re-reads under a lock -- is the actual defect, and it
+matters outside tests, because two DSH sessions on one host share this file exactly as two oracle files
+do.
 

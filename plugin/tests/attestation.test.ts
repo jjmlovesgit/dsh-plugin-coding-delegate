@@ -4,6 +4,7 @@ import { canonicalizeJson } from '../src/canonical-json'
 import {
   ATTESTATION_PAYLOAD_TYPE,
   ATTESTATION_SPEC_VERSION,
+  AttestationArtifactRef,
   AttestationInputs,
   AttestationPayload,
   AttestationPlan,
@@ -356,6 +357,70 @@ describe('attestation plan: opt-in and withheld states', () => {
     expect(plan.reason).toMatch(/no artifacts/i)
   })
 
+  it('withholds when an artifact digest could not be read, naming the file', () => {
+    // The envelope this prevents was structurally perfect: an artifact list, the contract set, a passing
+    // verification, and an empty string where the digest should be. Nothing could ever match it -- the
+    // ledger audit recomputes each artifact hash from the anchored tree -- so the record was permanently
+    // unverifiable while reading as complete at every checkpoint before the last one.
+    for (const missing of [null, undefined, '', '   ']) {
+      const plan = buildAttestationPlan(
+        inputs({
+          artifacts: [{ path: 'plugin/src/thing.ts', sha256: missing } as unknown as AttestationArtifactRef],
+        })
+      )
+      expect(plan.action).toBe('withheld')
+      if (plan.action !== 'withheld') continue
+      expect(plan.reason).toContain('plugin/src/thing.ts')
+      expect(plan.reason).toMatch(/artifact digest is unavailable/i)
+      expect(plan.reason).toMatch(/nothing was signed/i)
+    }
+  })
+
+  it('withholds for ONE unhashable artifact rather than dropping it from the list', () => {
+    // Dropping it would produce a record that is verifiable and does not describe the unit -- the same
+    // class of defect, one step quieter.
+    const plan = buildAttestationPlan(
+      inputs({
+        artifacts: [
+          { path: 'plugin/src/good.ts', sha256: 'bb22' },
+          { path: 'plugin/src/bad.ts', sha256: null },
+        ],
+      })
+    )
+    expect(plan.action).toBe('withheld')
+    if (plan.action !== 'withheld') return
+    expect(plan.reason).toContain('plugin/src/bad.ts')
+  })
+
+  it('withholds when HEAD moved while the unit was being verified', () => {
+    // The anchor is READ from git, so it is always a real commit and always an ancestor of main: every
+    // check the ledger audit makes passes on a mis-anchored record. That is why the moment of the read is
+    // the only place the defect exists, and why this refusal is the only thing that catches it.
+    const plan = buildAttestationPlan(
+      inputs({
+        headObserved: {
+          before: '166ff33dfb601b0a60cc40c798c42b9c986285dc',
+          after: '9be3300000000000000000000000000000000000',
+        },
+      })
+    )
+    expect(plan.action).toBe('withheld')
+    if (plan.action !== 'withheld') return
+    expect(plan.reason).toContain('HEAD_DRIFT_DETECTED')
+    expect(plan.reason).toContain('166ff33d')
+    expect(plan.reason).toContain('9be33000')
+  })
+
+  it('signs normally when the anchor did not move, including when git was never asked', () => {
+    // The control for the two gates above. Without it, a refusal that fired unconditionally would pass
+    // every test in this block: agreeing observations, and no observations at all, must both sign.
+    const same = 'aa'.repeat(20)
+    const agreeing = payloadOf(buildAttestationPlan(inputs({ headObserved: { before: same, after: same } })))
+    expect(agreeing.artifacts).toHaveLength(1)
+    const unobserved = payloadOf(buildAttestationPlan(inputs({ headObserved: null })))
+    expect(unobserved.artifacts).toHaveLength(1)
+  })
+
   it('still builds a payload that records a failing verification, and says so', () => {
     // The STATUS gate is what keeps a failed unit out of the notes ref; there is deliberately no
     // second check on the payload. `passed` has to keep the ability to be false, or it becomes a
@@ -513,21 +578,26 @@ describe('attestation plan: the payload it builds', () => {
     expect(hashBuffer(canonicalizeJson(payload.contracts))).toBe(payload.contractHash)
   })
 
-  it('keeps an artifact it could not hash, rather than dropping the file', () => {
-    const payload = payloadOf(
-      buildAttestationPlan(
-        inputs({
-          artifacts: [
-            { path: 'plugin/src/gone.ts', sha256: null },
-            { path: 'plugin/src/here.ts', sha256: 'cc33' },
-          ],
-        })
-      )
+  it('refuses the record when an artifact could not be hashed, instead of keeping the file', () => {
+    // THIS TEST ASSERTED THE OPPOSITE until finding 7 was fixed. The payload kept the file with
+    // `sha256: ''` and signed, on the reasoning that the record must still name what the unit wrote.
+    // Naming it was right; signing a digest that can never match was not -- the ledger audit recomputes
+    // each artifact hash from the anchored tree, so that envelope was permanently unverifiable while
+    // reading as complete at every checkpoint before the last one. Dropping the artifact instead (the
+    // third option, and the one that looks tidiest) would have produced a verifiable record that does not
+    // describe the unit, which is the same defect one step quieter. So the unit is withheld.
+    const plan = buildAttestationPlan(
+      inputs({
+        artifacts: [
+          { path: 'plugin/src/gone.ts', sha256: null },
+          { path: 'plugin/src/here.ts', sha256: 'cc33' },
+        ],
+      })
     )
-    expect(payload.artifacts).toEqual([
-      { path: 'plugin/src/gone.ts', sha256: '' },
-      { path: 'plugin/src/here.ts', sha256: 'cc33' },
-    ])
+    expect(plan.action).toBe('withheld')
+    if (plan.action !== 'withheld') return
+    expect(plan.reason).toContain('plugin/src/gone.ts')
+    expect(plan.reason).toMatch(/artifact digest is unavailable/i)
   })
 
   it('carries a non-zero exit code through unchanged', () => {

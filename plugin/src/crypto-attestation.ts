@@ -213,6 +213,17 @@ export interface AttestationInputs {
   runId: string
   /** The commit the workspace is on, as READ from git. Null when it could not be read. */
   baseCommit: string | null
+  /**
+   * The workspace's HEAD as observed before and after the unit's commands ran, when attestation is
+   * configured. Absent or null means git was never asked, which is the unconfigured host.
+   *
+   * The caller OBSERVES and this function DECIDES, which is the split the rest of this interface already
+   * follows: a pair that agrees is a perfectly good thing to pass, and refusing is this function's call
+   * rather than something the caller has to work out first. The pair is carried rather than a boolean
+   * because the refusal has to say what the anchor moved FROM and TO: "HEAD moved" invites a re-run, and
+   * "HEAD moved from 4f2a1c to 9be330 while your test command ran" points at the command.
+   */
+  headObserved?: { before: string | null; after: string | null } | null
   modelIdentifier: string
   /**
    * The delegation's own outcome, as `resolveDelegateStatus` resolved it. Required rather than
@@ -268,6 +279,29 @@ export function buildAttestationPlan(input: AttestationInputs): AttestationPlan 
     }
   }
 
+  // THE ANCHOR HAS TO BE THE COMMIT THE WORK WAS WRITTEN AGAINST, and nothing else in this function can
+  // tell whether it is. `baseCommit` is READ from git, so it is always a real commit and always an
+  // ancestor of main -- the ledger audit's checks all pass on it -- which is exactly why a `baseCommit`
+  // read at the wrong MOMENT is invisible downstream. It was read after the unit's verification and the
+  // project's coherence check had both run, so a command that commits, checks out or stashes moved the
+  // anchor underneath the record and the resulting envelope named a commit the unit's files were never
+  // written against. Recorded here as a refusal for the same reason the gates below refuse: a record that
+  // is precisely wrong is worse than no record, because it verifies.
+  if (input.headObserved && input.headObserved.before !== input.headObserved.after) {
+    const show = (commit: string | null) => (commit ? commit.slice(0, 8) : '(unreadable)')
+    return {
+      action: 'withheld',
+      reason:
+        'HEAD_DRIFT_DETECTED: the workspace moved from ' +
+        show(input.headObserved.before) +
+        ' to ' +
+        show(input.headObserved.after) +
+        ' while this unit was being verified, so the anchor is no longer the commit the work was ' +
+        'written against. A verification command that commits, checks out or stashes does this. Nothing ' +
+        'was signed; re-run the unit without a command that moves HEAD.',
+    }
+  }
+
   if (!input.baseCommit || !input.baseCommit.trim()) {
     return {
       action: 'withheld',
@@ -313,6 +347,28 @@ export function buildAttestationPlan(input: AttestationInputs): AttestationPlan 
     }
   }
 
+  // AN UNHASHABLE ARTIFACT IS NOT A QUALIFIED ARTIFACT. This gate used to be absent, and the payload
+  // below wrote an empty string for a digest it could not read, on the reasoning that the record must
+  // still name the file the unit wrote. Naming it is right; naming it with a digest that cannot be
+  // checked is not a record of anything -- the ledger audit recomputes each artifact hash from the
+  // anchored tree, and a missing digest can never match one. The envelope verified, carried an artifact
+  // list, and was permanently unverifiable: the one shape of bad record that is indistinguishable from a
+  // good one at every checkpoint except the last.
+  const unhashable = input.artifacts.find(
+    (artifact) => !artifact.sha256 || !String(artifact.sha256).trim()
+  )
+  if (unhashable) {
+    return {
+      action: 'withheld',
+      reason:
+        'the artifact digest is unavailable for ' +
+        normalizePosixPath(unhashable.path) +
+        ', so nobody reading the record could check it: the audit recomputes each artifact hash from the ' +
+        'anchored tree, and a missing digest can never match. A signed envelope that cannot be verified ' +
+        'is worse than an absent one, because it looks like evidence. Nothing was signed.',
+    }
+  }
+
   // `verification.passed` is deliberately NOT a third gate. `resolveDelegateStatus` returns SUCCESS
   // only when the unit's own result held, and that requires `failed === 0`, so a passing verification
   // is already implied by the status above -- the condition would be a second name for the same fact.
@@ -351,9 +407,12 @@ export function buildAttestationPlan(input: AttestationInputs): AttestationPlan 
       // list is the order the unit actually wrote its files.
       artifacts: input.artifacts.map((artifact) => ({
         path: normalizePosixPath(artifact.path),
-        // An unreadable artifact becomes an empty string rather than being dropped: the record must
-        // still name the file the unit wrote, even when its bytes could not be hashed.
-        sha256: artifact.sha256 ?? '',
+        // NON-NULL BY THE GATE ABOVE, asserted rather than defaulted. This read `artifact.sha256 ?? ''`,
+        // and that fallback is the whole of the defect the gate exists to close: it produced a
+        // structurally valid envelope whose artifact hash could never match anything, because the audit
+        // recomputes the digest from the anchored tree. The assertion is deliberate -- if the gate is ever
+        // removed, this should fail to compile rather than quietly resume writing empty digests.
+        sha256: artifact.sha256 as string,
       })),
       verification: {
         command: input.verification.command,

@@ -163,6 +163,20 @@ export interface AttestationInputs {
     runId: string;
     /** The commit the workspace is on, as READ from git. Null when it could not be read. */
     baseCommit: string | null;
+    /**
+     * The workspace's HEAD as observed before and after the unit's commands ran, when attestation is
+     * configured. Absent or null means git was never asked, which is the unconfigured host.
+     *
+     * The caller OBSERVES and this function DECIDES, which is the split the rest of this interface already
+     * follows: a pair that agrees is a perfectly good thing to pass, and refusing is this function's call
+     * rather than something the caller has to work out first. The pair is carried rather than a boolean
+     * because the refusal has to say what the anchor moved FROM and TO: "HEAD moved" invites a re-run, and
+     * "HEAD moved from 4f2a1c to 9be330 while your test command ran" points at the command.
+     */
+    headObserved?: {
+        before: string | null;
+        after: string | null;
+    } | null;
     modelIdentifier: string;
     /**
      * The delegation's own outcome, as `resolveDelegateStatus` resolved it. Required rather than

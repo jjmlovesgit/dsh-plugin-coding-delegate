@@ -8,7 +8,10 @@
 // Properties:
 //   1. `length` with empty content is starvation.
 //   2. `length` with content is NOT -- the boundary that keeps the gate from becoming a false red.
-//   3. `stop` is never starvation, so the gate does not subsume the ordinary empty case.
+//   3. ANY finish reason with empty content is now a failure, `stop` included. This case used to be a
+//      KNOWN GAP in the unit suite; the gate was widened, and the widened gate is what has to survive
+//      into dist, since dist is what DSH loads.
+//   4. The two causes still report different remedies, because only one of them has a specific fix.
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
@@ -31,12 +34,25 @@ test('length with real content is not starvation', () => {
   assert.equal(classifyWorkerOutput({ finishReason: 'length', content: 'export const x = 1' }).starved, false);
 });
 
-test('stop is never starvation', () => {
-  assert.equal(classifyWorkerOutput({ finishReason: 'stop', content: '' }).starved, false);
+test('an empty reply is a failure whatever reason the server gave for stopping', () => {
+  assert.equal(
+    classifyWorkerOutput({ finishReason: 'stop', content: '' }).starved,
+    true,
+    'a normal stop with nothing in it is still nothing'
+  );
   assert.equal(classifyWorkerOutput({ finishReason: 'stop', content: 'done' }).starved, false);
+  // A missing reason is not a reason to accept an empty reply either.
+  assert.equal(classifyWorkerOutput({ content: '' }).starved, true);
+  assert.equal(classifyWorkerOutput({ finishReason: null, content: '' }).starved, true);
+  assert.equal(classifyWorkerOutput({ content: 'export const x = 1' }).starved, false);
 });
 
-test('a missing finish_reason is not starvation', () => {
-  assert.equal(classifyWorkerOutput({ content: '' }).starved, false);
-  assert.equal(classifyWorkerOutput({ finishReason: null, content: '' }).starved, false);
+test('the two causes report different remedies', () => {
+  const exhausted = classifyWorkerOutput({ finishReason: 'length', content: '' });
+  const stopped = classifyWorkerOutput({ finishReason: 'stop', content: '' });
+  assert.equal(exhausted.starved, true);
+  assert.equal(stopped.starved, true);
+  assert.match(exhausted.reason, /token budget/);
+  assert.match(stopped.reason, /finish_reason "stop"/);
+  assert.doesNotMatch(stopped.reason, /token budget/);
 });

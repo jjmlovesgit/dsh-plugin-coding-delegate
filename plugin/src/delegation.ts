@@ -517,22 +517,31 @@ export function resolveDelegateStatus(input: {
 }
 
 /**
- * Token starvation, judged from the response alone.
+ * An empty worker response, judged from the response alone.
  *
- * A starved worker does not report an error. The server returns HTTP 200 with `finish_reason:
- * 'length'` and an empty message, and nothing downstream can tell that apart from a worker that
- * legitimately had nothing to say: `extractAndEmitFiles('')` returns no files AND no errors, so
- * `emission.errors.length === 0` holds, the contract then re-runs over a tree the worker never
- * touched and passes, and `resolveDelegateStatus` reports SUCCESS over a run that produced nothing.
+ * A worker that produces nothing does not report an error. The server returns HTTP 200 with empty
+ * content, and nothing downstream can tell that apart from a worker that legitimately had nothing to
+ * say: `extractAndEmitFiles('')` returns no files AND no errors, so `emission.errors.length === 0`
+ * holds, the contract then re-runs over a tree the worker never touched and passes, and
+ * `resolveDelegateStatus` reports SUCCESS over a run that produced nothing. The envelope gate already
+ * withholds on an empty artifact list, so the RECORD was safe; the VERDICT was not. See
+ * `docs/findings.md`.
  *
- * Measured on `qwen/qwen3.8-27b`: with thinking enabled at the host, 34,076 characters of
- * `reasoning_content` consumed the entire 8192-token budget and the answer never arrived. The
- * envelope gate already withholds on an empty artifact list, so the RECORD was safe; the VERDICT
- * was not. See `docs/findings.md`.
+ * Measured on `qwen/qwen3.8-27b` with thinking enabled at the host: 34,076 characters of
+ * `reasoning_content` consumed the entire 8192-token budget and the answer never arrived.
  *
- * Deliberately narrow: `length` with NON-empty content is not starved. A model that emitted a
- * complete file and then rambled into the cap produced usable output, and failing it would trade a
- * silent green for a loud false red.
+ * EMPTY CONTENT IS NOW THE WHOLE CONDITION. It used to be `finish_reason === 'length'` AND empty, on the
+ * reasoning that only token exhaustion was known to produce this. That left the identical empty reply
+ * with `finish_reason: 'stop'` settling as SUCCESS -- the same "empty, passing run" reached by a
+ * different route, carried in this repository as a KNOWN GAP rather than as a fix. A worker that reports
+ * the turn finished and emits nothing has produced nothing, and which reason it gave for stopping does
+ * not make the empty reply usable. The two causes are still reported differently, because token
+ * exhaustion has a specific remedy and "finished with nothing" does not.
+ *
+ * STILL NARROW WHERE IT MATTERS: NON-empty content is never this refusal, whatever the finish reason. A
+ * model that emitted a complete file and then rambled into the cap produced usable output, and a worker
+ * that answers a question in prose rather than emitting a file is a supported delegation, not a failure.
+ * The refusal is about content that does not exist, not about content that wrote no file.
  *
  * Pure and exported, so the decision is testable without a server -- the caller's half is reading
  * the response, this half is judging it.
@@ -541,16 +550,29 @@ export function classifyWorkerOutput(input: {
   finishReason?: string | null
   content?: string | null
 }): { starved: true; reason: string } | { starved: false } {
-  if (input.finishReason !== 'length') return { starved: false }
   if ((input.content ?? '').trim() !== '') return { starved: false }
+
+  if (input.finishReason === 'length') {
+    return {
+      starved: true,
+      reason:
+        'the worker returned finish_reason "length" with empty content, so its token budget was ' +
+        'exhausted before it emitted anything. This is token starvation rather than an empty edit: a ' +
+        'reasoning model whose thinking is enabled at the host spends the whole budget on ' +
+        'reasoning_content and returns no answer. Check the per-model thinking setting on the local ' +
+        'server for this model and re-run the unit. The contract was not run.',
+    }
+  }
+
   return {
     starved: true,
     reason:
-      'the worker returned finish_reason "length" with empty content, so its token budget was ' +
-      'exhausted before it emitted anything. This is token starvation rather than an empty edit: a ' +
-      'reasoning model whose thinking is enabled at the host spends the whole budget on ' +
-      'reasoning_content and returns no answer. Check the per-model thinking setting on the local ' +
-      'server for this model and re-run the unit. The contract was not run.',
+      'the worker returned finish_reason "' +
+      String(input.finishReason ?? '(absent)') +
+      '" with empty content, so it reported the turn finished and emitted nothing. There is no file to ' +
+      'write and no contract to run, so this is a unit that produced nothing rather than a unit that ' +
+      'changed nothing. Re-run it; if it repeats, check what the model is doing with its budget on the ' +
+      'local server. The contract was not run.',
   }
 }
 
@@ -815,6 +837,21 @@ export async function delegateWorker(
     let verificationAttempts = 0
     // Set when repeated runs of the same contract disagreed with each other.
     let flaky = false
+
+    // THE ANCHOR IS FROZEN BEFORE A COMMAND RUNS, NOT READ AFTERWARDS. `baseCommit` used to be read when
+    // the attestation plan was built, which is after the unit's verification AND the project's coherence
+    // command have both executed. A command that commits, checks out or stashes therefore moved HEAD
+    // underneath the record, and the envelope named the commit the workspace landed on rather than the one
+    // the unit's files were written against. Nothing downstream can catch that: the commit it names is a
+    // real commit and a real ancestor of main, so every check the ledger audit makes passes. The parity
+    // read below is what turns it into a refusal.
+    //
+    // Read ONLY when a signing key is configured, for the same reason the plan reads it that way: a host
+    // that does not attest must not pay for git subprocesses it never asked for.
+    const anchorBeforeCommands = params.attestationPrivateKeyPath
+      ? readBaseCommit(workspaceBase)
+      : null
+
     if (params.runVerification) {
       const decision = evaluateVerificationPolicy(params.runVerification, policy)
       let permitted = decision.kind === 'allow'
@@ -898,6 +935,14 @@ export async function delegateWorker(
     // A spawn the sandbox refused reports failed > 0, so a check that could not run is a failure here
     // rather than a silent pass -- which is the direction this has to fail in.
     const coherenceFailed = Boolean(coherenceResults && coherenceResults.failed > 0)
+
+    // The parity half of the freeze above, taken after the last command that could move HEAD has run.
+    // `null` on both sides means git was never asked, so a host without attestation pays nothing. Both
+    // observations are handed to the planner, which decides -- the caller's half is gathering, and
+    // comparing them here would be a second place for the rule to live.
+    const anchorAfterCommands = params.attestationPrivateKeyPath
+      ? readBaseCommit(workspaceBase)
+      : null
 
     // Re-hash once the worker has finished and verification has run. A violation voids the verdict
     // regardless of what the tests reported, because the tests are no longer the contract.
@@ -1140,7 +1185,13 @@ export async function delegateWorker(
         runId: 'turn-' + String(params.turnId ?? 0) + '-' + String(params.taskName || 'subtask'),
         // Read only when the feature is in use: an unconfigured host must not pay for a git
         // subprocess on every delegation, and must not acquire a git dependency it never asked for.
-        baseCommit: privateKeyPath ? readBaseCommit(workspaceBase) : null,
+        // The value is the FROZEN anchor from before the commands ran, not a fresh read -- the parity
+        // check above is what makes it trustworthy, and it withholds rather than signing if the two
+        // reads disagree.
+        baseCommit: privateKeyPath ? anchorBeforeCommands : null,
+        headObserved: privateKeyPath
+          ? { before: anchorBeforeCommands, after: anchorAfterCommands }
+          : null,
         modelIdentifier: String(model || ''),
         // The unit's own outcome. A record is only worth signing for work that landed, so this is the
         // first thing `buildAttestationPlan` refuses on after the environment questions resolve.

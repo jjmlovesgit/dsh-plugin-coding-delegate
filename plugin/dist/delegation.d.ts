@@ -352,22 +352,31 @@ export declare function resolveDelegateStatus(input: {
     flaky?: boolean;
 }): string;
 /**
- * Token starvation, judged from the response alone.
+ * An empty worker response, judged from the response alone.
  *
- * A starved worker does not report an error. The server returns HTTP 200 with `finish_reason:
- * 'length'` and an empty message, and nothing downstream can tell that apart from a worker that
- * legitimately had nothing to say: `extractAndEmitFiles('')` returns no files AND no errors, so
- * `emission.errors.length === 0` holds, the contract then re-runs over a tree the worker never
- * touched and passes, and `resolveDelegateStatus` reports SUCCESS over a run that produced nothing.
+ * A worker that produces nothing does not report an error. The server returns HTTP 200 with empty
+ * content, and nothing downstream can tell that apart from a worker that legitimately had nothing to
+ * say: `extractAndEmitFiles('')` returns no files AND no errors, so `emission.errors.length === 0`
+ * holds, the contract then re-runs over a tree the worker never touched and passes, and
+ * `resolveDelegateStatus` reports SUCCESS over a run that produced nothing. The envelope gate already
+ * withholds on an empty artifact list, so the RECORD was safe; the VERDICT was not. See
+ * `docs/findings.md`.
  *
- * Measured on `qwen/qwen3.8-27b`: with thinking enabled at the host, 34,076 characters of
- * `reasoning_content` consumed the entire 8192-token budget and the answer never arrived. The
- * envelope gate already withholds on an empty artifact list, so the RECORD was safe; the VERDICT
- * was not. See `docs/findings.md`.
+ * Measured on `qwen/qwen3.8-27b` with thinking enabled at the host: 34,076 characters of
+ * `reasoning_content` consumed the entire 8192-token budget and the answer never arrived.
  *
- * Deliberately narrow: `length` with NON-empty content is not starved. A model that emitted a
- * complete file and then rambled into the cap produced usable output, and failing it would trade a
- * silent green for a loud false red.
+ * EMPTY CONTENT IS NOW THE WHOLE CONDITION. It used to be `finish_reason === 'length'` AND empty, on the
+ * reasoning that only token exhaustion was known to produce this. That left the identical empty reply
+ * with `finish_reason: 'stop'` settling as SUCCESS -- the same "empty, passing run" reached by a
+ * different route, carried in this repository as a KNOWN GAP rather than as a fix. A worker that reports
+ * the turn finished and emits nothing has produced nothing, and which reason it gave for stopping does
+ * not make the empty reply usable. The two causes are still reported differently, because token
+ * exhaustion has a specific remedy and "finished with nothing" does not.
+ *
+ * STILL NARROW WHERE IT MATTERS: NON-empty content is never this refusal, whatever the finish reason. A
+ * model that emitted a complete file and then rambled into the cap produced usable output, and a worker
+ * that answers a question in prose rather than emitting a file is a supported delegation, not a failure.
+ * The refusal is about content that does not exist, not about content that wrote no file.
  *
  * Pure and exported, so the decision is testable without a server -- the caller's half is reading
  * the response, this half is judging it.

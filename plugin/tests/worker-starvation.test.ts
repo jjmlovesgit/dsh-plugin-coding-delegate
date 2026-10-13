@@ -16,6 +16,12 @@ import { classifyWorkerOutput } from '../src/delegation'
  * `qwen/qwen3.8-27b`: 34,076 characters of `reasoning_content` consumed the whole 8192-token budget
  * and no answer was emitted. See `docs/findings.md`.
  *
+ * WIDENED SINCE. The gate was `finish_reason === 'length'` AND empty, which left the IDENTICAL empty
+ * reply with `finish_reason: 'stop'` settling as SUCCESS -- the same route through
+ * `extractAndEmitFiles('')`, the same empty passing run. That case was carried here as a KNOWN GAP test
+ * rather than fixed, because widening the gate is an operator decision. The decision was taken, so the
+ * gate is now empty-content-whatever-the-reason, and the two causes still report different remedies.
+ *
  * The decision and the wiring are tested separately, and that separation is the point: a pure
  * function can be right while its call site is missing, which is precisely the failure mode this
  * gate was written to catch one level down.
@@ -63,17 +69,33 @@ describe('classifyWorkerOutput: the decision', () => {
     )
   })
 
-  it('does not treat a normal stop as starvation, empty or not', () => {
-    expect(classifyWorkerOutput({ finishReason: 'stop', content: '' }).starved).toBe(false)
+  it('treats a normal stop with empty content as a failure, like any other empty reply', () => {
+    // The case that used to be the KNOWN GAP. It differed from starvation only in the reason the server
+    // gave for stopping, and the reason does not make an empty reply usable.
+    expect(classifyWorkerOutput({ finishReason: 'stop', content: '' }).starved).toBe(true)
     expect(classifyWorkerOutput({ finishReason: 'stop', content: 'done' }).starved).toBe(false)
   })
 
-  it('does not treat a missing finish_reason as starvation', () => {
-    // Fail closed against a malformed response means "do not invent a starvation that was not
-    // reported"; the downstream checks still apply to whatever content arrived.
-    expect(classifyWorkerOutput({ content: '' }).starved).toBe(false)
-    expect(classifyWorkerOutput({ finishReason: null, content: '' }).starved).toBe(false)
-    expect(classifyWorkerOutput({ finishReason: undefined, content: null }).starved).toBe(false)
+  it('treats a missing finish_reason with empty content as a failure too', () => {
+    // Fail closed on the reason, but only for a response that carries nothing. A server that reports no
+    // finish reason and no content has still produced no content.
+    expect(classifyWorkerOutput({ content: '' }).starved).toBe(true)
+    expect(classifyWorkerOutput({ finishReason: null, content: '' }).starved).toBe(true)
+    expect(classifyWorkerOutput({ finishReason: undefined, content: null }).starved).toBe(true)
+    // ...and NON-empty content is still never this refusal, whatever the reason is.
+    expect(classifyWorkerOutput({ content: 'export const x = 1' }).starved).toBe(false)
+    expect(classifyWorkerOutput({ finishReason: 'stop', content: ' ' }).starved).toBe(true)
+  })
+
+  it('keeps the two causes distinguishable, because their remedies differ', () => {
+    // Token exhaustion has a specific fix (the thinking toggle on the host). "Finished with nothing" does
+    // not, so collapsing them into one message would send the operator to the wrong place.
+    const exhausted = classifyWorkerOutput({ finishReason: 'length', content: '' })
+    const stopped = classifyWorkerOutput({ finishReason: 'stop', content: '' })
+    if (!exhausted.starved || !stopped.starved) throw new Error('unreachable')
+    expect(exhausted.reason).toContain('token budget')
+    expect(stopped.reason).toContain('finish_reason "stop"')
+    expect(stopped.reason).not.toContain('token budget')
   })
 
   it('explains the cause and the remedy', () => {
@@ -150,13 +172,11 @@ describe('delegation integration: a starved worker must not settle as SUCCESS', 
     expect(res.filesWritten).toContain(path.join(tmpDir, 'src', 'ok.ts'))
   })
 
-  it('KNOWN GAP: an empty reply that stopped normally still settles as SUCCESS', async () => {
-    // This gate is deliberately narrow -- `finish_reason === 'length'` AND empty -- so it does NOT
-    // cover an empty message returned with `finish_reason: 'stop'`. That case takes the same route
-    // through `extractAndEmitFiles('')`, which yields no files and no errors, so `unitSuccess` holds
-    // and the status is still SUCCESS. The reported cause differs; the symptom is the same "empty,
-    // passing run". Recorded here rather than left silent, and NOT endorsed: widening the gate is the
-    // operator's decision, not a side effect of this change.
+  it('an empty reply that stopped normally no longer settles as SUCCESS', async () => {
+    // This was `KNOWN GAP: an empty reply that stopped normally still settles as SUCCESS`, and it said
+    // what to do if it ever failed: assert the new outcome rather than delete the case. It failed when
+    // the gate was widened, and this is that assertion. It goes through the same wiring as the starved
+    // case, which is the half a pure-function test cannot cover.
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue(
@@ -171,15 +191,18 @@ describe('delegation integration: a starved worker must not settle as SUCCESS', 
         instruction: 'write it',
         targetFiles: ['src/ok.ts'],
         workspaceDir: tmpDir,
+        // Would PASS if it ran, which is the trap: a green verdict over a tree the worker never touched.
         runVerification: 'node --version',
         verificationPolicy: ALLOW,
       },
       new SavingsTracker(tmpDir)
     )
 
-    // If this ever fails, the gate was widened: replace this case with one asserting the new
-    // non-success status rather than deleting it.
-    expect(res.status).toBe('SUCCESS')
+    expect(res.status).toBe('WORKER_OUTPUT_STARVED')
+    expect(res.success).toBe(false)
     expect(res.filesWritten).toEqual([])
+    expect(res.workerFinishReason).toBe('stop')
+    expect(res.testResults.output).toContain('contract was not run')
+    expect(fs.existsSync(path.join(tmpDir, 'src', 'ok.ts'))).toBe(false)
   })
 })
