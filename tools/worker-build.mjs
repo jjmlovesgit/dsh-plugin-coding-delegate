@@ -37,6 +37,18 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..
 const MAX_TOKENS = 8192;
 
 const REQUIREMENTS = {
+  "tools/async-mutex.ts": [
+    "Export exactly one thing: export class AsyncMutex. No other exports.",
+    "acquire(): Promise<() => void> -- resolves with a RELEASE function once the caller owns the mutex.",
+    "runExclusive<T>(fn: () => T | Promise<T>): Promise<T> -- acquires, awaits fn, releases, and returns fn's value. It MUST release even when fn throws or rejects.",
+    "A GETTER `isLocked: boolean` -- true while a caller holds the mutex. A GETTER `queueLength: number` -- how many callers are waiting.",
+    "MUTUAL EXCLUSION: at most one holder at any instant. A second acquire MUST NOT resolve while the mutex is held.",
+    "CRITICAL - HAND-OFF ON RELEASE: when release() is called with a waiter queued, ownership MUST transfer to that waiter SYNCHRONOUSLY, inside the release call. The mutex must NEVER read as free while a waiter is queued, and an acquire() issued immediately after the release (in the same synchronous turn) MUST queue behind the waiter rather than take the lock. Setting `locked = false` and then waking the waiter is the defect this requirement exists to rule out: it opens a window in which a newcomer and the woken waiter both hold the mutex.",
+    "release() MUST be idempotent: calling a release function more than once is a no-op and must never admit a second waiter.",
+    "WAITERS ARE SERVED FIFO, in the order acquire() was called.",
+    "Keep all state in #private fields. A caller must not be able to reach a live Array, Map, Set or callback through any own property or prototype accessor.",
+    "No imports, no external runtime dependencies, no console output.",
+  ],
   "tools/event-emitter.ts": [
     "Export a generic class exactly as: export class EventEmitter<Events extends Record<string, (...args: any[]) => void>>  -- one generic parameter constrained to a record of functions, and exactly one export in the file.",
     "on(event, listener): this -- registers a listener. Registering the SAME function twice creates TWO registrations, both of which run, in registration order.",
