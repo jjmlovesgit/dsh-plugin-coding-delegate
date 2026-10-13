@@ -11,26 +11,35 @@
  *      difference between "these bytes are internally consistent" and "these bytes came from this
  *      operator".
  *
- *   2. baseCommit IS AN ANCESTOR OF main. A record anchored to a commit that is not in the branch
+ *   2. THE NOTE IS ATTACHED TO THE COMMIT IT NAMES. `git notes` lets a note hang off ANY commit, so a
+ *      sound envelope can be moved to a target whose tree it never saw. Checks 3 and 4 would both pass
+ *      while the record pointed at the wrong unit, so the attachment itself has to be compared to
+ *      `payload.baseCommit`. This is the only check that reads where the note LIVES rather than what it
+ *      SAYS.
+ *
+ *   3. baseCommit IS AN ANCESTOR OF main. A record anchored to a commit that is not in the branch
  *      attests a tree nobody can check out.
  *
- *   3. ARTIFACTS MATCH DISK. The paths ARE recorded in the envelope, so this is a complete check.
+ *   4. ARTIFACTS MATCH THE ANCHORED TREE. The paths ARE recorded in the envelope, so this is a complete
+ *      check -- but the comparison is against `git cat-file` at baseCommit, not the working tree. A
+ *      working-tree comparison asks "does the file on this disk look like the note says", which a
+ *      forged artifact passes as long as nobody has checked out the anchor. Asking the commit itself is
+ *      the question that matters, and it also makes the check independent of what is checked out.
  *
- *   4. SPEC CONFORMANCE AT THE ANCHOR POINT. A note anchored at or after the commit that introduced
+ *   5. SPEC CONFORMANCE AT THE ANCHOR POINT. A note anchored at or after the commit that introduced
  *      1.1 must be self-describing. The test is ancestry, not an allowlist: a 1.0 payload before that
  *      commit is history, and after it is a regression.
  *
- *   5. contractHash BY CONVENTION -- and this one is deliberately allowed to come back UNVERIFIABLE.
+ *   6. contractHash -- self-described from 1.1, by convention before it, and deliberately allowed to
+ *      come back UNVERIFIABLE.
  *
- * WHY CHECK 5 IS NOT A FAILURE WHEN IT CANNOT RUN. The envelope records `contractHash`, a digest over
- * an array of `{path, sha256}` pairs, and it does NOT record the array. So the digest is a blind
- * commitment: it can be recomputed only if the contract set is known from outside. For recent notes
- * that works by convention -- one contract at `tests/contracts/<artifact-base>.contract.cjs` -- and for
- * the legacy note on de64c778 it does not, because that unit's contract lives at
- * `tests/currency.contract.cjs` and the array fed to the signer is not recoverable. Failing the ledger
- * for a schema omission would bury real tampering behind an input set nobody can reconstruct. So a
- * divergence on a RECONSTRUCTED set is a failure, and an unreconstructable set is reported as
- * UNVERIFIABLE and left visible in the summary.
+ * WHY CHECK 6 IS NOT A FAILURE WHEN IT CANNOT RUN. For 1.1 notes the envelope records the contract SET,
+ * so the digest is recomputed from what the note itself carries, against the anchored tree. For 1.0
+ * notes it records only `contractHash`, a blind commitment over an array it does not carry, so it can be
+ * recomputed only if the contract set is known from outside: by convention, one contract at
+ * `tests/contracts/<artifact-base>.contract.cjs`. Failing the ledger for a schema omission would bury
+ * real tampering behind an input set nobody can reconstruct. So a divergence on a RECONSTRUCTED set is a
+ * failure, and an unreconstructable set is reported as UNVERIFIABLE and left visible in the summary.
  *
  * WHAT THIS CANNOT DO, stated because a green audit invites over-reading. It proves the notes PRESENT
  * are sound. It cannot prove none were REMOVED: `git notes` writes a ref any writer can rewrite, and
@@ -142,6 +151,25 @@ function git(args) {
   return execFileSync('git', args, { cwd: REPO_ROOT, encoding: 'utf8' })
 }
 
+/**
+ * Digest of a blob as it exists in a commit's tree, or null when that path is not in it.
+ *
+ * BYTES, not text. `git()` decodes as utf8, which is lossless for the ref names and path lists it is
+ * used for and silently corrupts anything binary. An artifact is arbitrary bytes, so this reads a raw
+ * Buffer and digests exactly what git stored.
+ */
+function blobHashAt(commit, repoRelativePath) {
+  try {
+    const buffer = execFileSync('git', ['cat-file', '-p', commit + ':' + repoRelativePath], {
+      cwd: REPO_ROOT,
+      maxBuffer: 32 * 1024 * 1024,
+    })
+    return hashBuffer(buffer)
+  } catch {
+    return null
+  }
+}
+
 const pinnedPublicKeyPem = resolvePinnedKey()
 
 let listing = ''
@@ -212,7 +240,24 @@ for (const { noteBlob, commitSha } of entries) {
     )
   }
 
-  // ---- 2. baseCommit is an ancestor of main -------------------------------
+  // ---- 2. the note is attached to the commit it claims ---------------------
+  //
+  // ANCESTRY ALONE DOES NOT TIE A RECORD TO ITS ANCHOR. A note can sit on any commit while its payload
+  // names a different one, and every later check still passes: the named commit is a real ancestor, the
+  // artifacts exist in that tree, the digest reproduces. Measured: a note attached to 0286c6b while
+  // claiming baseCommit 82c23c3 passed the entire audit before this check existed, which makes the
+  // anchor a comment rather than a binding.
+  if (String(payload.baseCommit) !== commitSha) {
+    fail(
+      'attachment mismatch: the note is attached to ' + short + ' but its payload claims baseCommit ' +
+        String(payload.baseCommit).slice(0, 8) + '. A record that names one commit and lives on another ' +
+        'can be moved between anchors without touching a byte of it.'
+    )
+  } else {
+    console.log('  ok    attached to the commit its payload names (' + short + ')')
+  }
+
+  // ---- 3. baseCommit is an ancestor of main -------------------------------
   let ancestryOk = false
   try {
     git(['merge-base', '--is-ancestor', payload.baseCommit, 'main'])
@@ -226,33 +271,44 @@ for (const { noteBlob, commitSha } of entries) {
     fail('baseCommit ' + payload.baseCommit + ' is not an ancestor of main; the record anchors to a tree nobody can check out')
   }
 
-  // ---- 3. artifacts match disk -------------------------------------------
+  // ---- 4. artifacts match the ANCHORED TREE -------------------------------
+  //
+  // FROM THE COMMIT, NOT FROM DISK. The record attests what was committed at baseCommit; the working
+  // tree is a later and unrelated fact. Reading disk meant a note could name an artifact that commit
+  // never contained and still report "match on-disk bytes" -- measured by anchoring a note to 82c23c3
+  // for tools/lru-cache.ts, which that commit does not hold. Reading the tree is also what makes this
+  // time-travelling: it says what the anchor contained, whatever happened to the file afterwards.
   const artifacts = Array.isArray(payload.artifacts) ? payload.artifacts : []
   let artifactsOk = artifacts.length > 0
   if (artifacts.length === 0) {
-    fail('the envelope names no artifacts, so there is nothing to check on disk')
+    fail('the envelope names no artifacts, so there is nothing to check')
   }
   for (const artifact of artifacts) {
-    const onDisk = path.resolve(REPO_ROOT, artifact.path)
-    if (!fs.existsSync(onDisk)) {
-      fail('artifact missing on disk: ' + artifact.path)
+    const inTree = blobHashAt(payload.baseCommit, artifact.path)
+    if (inTree === null) {
+      fail(
+        'artifact is not in the anchored tree ' + String(payload.baseCommit).slice(0, 8) + ': ' +
+          artifact.path
+      )
       artifactsOk = false
       continue
     }
-    const actual = hashBuffer(fs.readFileSync(onDisk))
-    if (actual !== artifact.sha256) {
-      fail('artifact sha256 mismatch on ' + artifact.path + ': disk=' + actual + ' note=' + artifact.sha256)
+    if (inTree !== artifact.sha256) {
+      fail(
+        'artifact sha256 does not match the blob in ' + String(payload.baseCommit).slice(0, 8) + ' for ' +
+          artifact.path + ': tree=' + inTree + ' note=' + artifact.sha256
+      )
       artifactsOk = false
     }
     if (artifact.path.includes('\\')) {
       console.warn('  warn  artifact path is recorded with backslashes (' + artifact.path + '); it predates POSIX normalisation')
     }
   }
-  if (artifactsOk) console.log('  ok    ' + artifacts.length + ' artifact(s) match on-disk bytes')
+  if (artifactsOk) console.log('  ok    ' + artifacts.length + ' artifact(s) match the anchored tree')
 
-  // ---- 4. spec conformance at the anchor point ----------------------------
+  // ---- 5. spec conformance at the anchor point ----------------------------
   //
-  // NOT REDUNDANT WITH CHECK 5. A 1.0 payload that HAPPENS to follow the tools/<name> convention audits
+  // NOT REDUNDANT WITH CHECK 6. A 1.0 payload that HAPPENS to follow the tools/<name> convention audits
   // as VERIFIED and nothing flags it -- but it is still a blind commitment, and it becomes UNVERIFIABLE
   // the moment the contract set leaves the convention or grows past one file. Without this rule, only
   // the notes that already fail the convention are visible; a hand-rolled or stale signer could keep
@@ -282,7 +338,7 @@ for (const { noteBlob, commitSha } of entries) {
     )
   }
 
-  // ---- 5. contractHash: self-described from 1.1, by convention for 1.0 ----------
+  // ---- 6. contractHash: self-described from 1.1, by convention for 1.0 ----------
   let contractResult = 'UNVERIFIABLE'
   const cmp = (a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)
 
@@ -292,29 +348,33 @@ for (const { noteBlob, commitSha } of entries) {
     // guessing, and a multi-contract unit is covered as well as a single-contract one.
     const recorded = payload.contracts.map((c) => ({ path: String(c.path), sha256: c.sha256 }))
     const sortedSame = JSON.stringify(recorded) === JSON.stringify([...recorded].sort(cmp))
-    let allOnDisk = true
+    let allInTree = true
 
     if (recorded.length === 0) {
       fail('the payload carries an empty contracts array, so contractHash commits to nothing')
-      allOnDisk = false
+      allInTree = false
     }
     for (const contract of recorded) {
       if (contract.path.includes('\\')) {
         console.warn('  warn  recorded contract path is not POSIX: ' + contract.path)
       }
-      const onDisk = path.resolve(REPO_ROOT, contract.path)
-      if (!fs.existsSync(onDisk)) {
-        fail('recorded contract missing on disk: ' + contract.path)
-        allOnDisk = false
+      // From the anchored tree, for the same reason check 4 is: the record is about what that commit
+      // held, and a contract edited afterwards is a later and unrelated fact.
+      const inTree = blobHashAt(payload.baseCommit, contract.path)
+      if (inTree === null) {
+        fail(
+          'recorded contract is not in the anchored tree ' + String(payload.baseCommit).slice(0, 8) +
+            ': ' + contract.path
+        )
+        allInTree = false
         continue
       }
-      const actual = hashBuffer(fs.readFileSync(onDisk))
-      if (actual !== contract.sha256) {
+      if (inTree !== contract.sha256) {
         fail(
-          'recorded contract sha256 mismatch on ' + contract.path + ': disk=' + actual + ' note=' +
-            contract.sha256
+          'recorded contract sha256 does not match the blob in ' + String(payload.baseCommit).slice(0, 8) +
+            ' for ' + contract.path + ': tree=' + inTree + ' note=' + contract.sha256
         )
-        allOnDisk = false
+        allInTree = false
       }
     }
 
@@ -327,7 +387,7 @@ for (const { noteBlob, commitSha } of entries) {
         'contractHash does not match the digest of the RECORDED contract set: recomputed=' + recomputed +
           ' note=' + payload.contractHash
       )
-    } else if (allOnDisk && sortedSame) {
+    } else if (allInTree && sortedSame) {
       contractResult = 'SELF-DESCRIBED'
       console.log(
         '  ok    contractHash reproduced from the ' + recorded.length + ' contract(s) recorded in the payload'
@@ -348,14 +408,12 @@ for (const { noteBlob, commitSha } of entries) {
       )
     } else {
       const candidateRel = 'tests/contracts/' + baseName + '.contract.cjs'
-      const candidateAbs = path.join(REPO_ROOT, candidateRel)
-      if (!fs.existsSync(candidateAbs)) {
-        console.log('  --    contractHash not recomputed: ' + candidateRel + ' does not exist')
+      const candidateSha = blobHashAt(payload.baseCommit, candidateRel)
+      if (candidateSha === null) {
+        console.log('  --    contractHash not recomputed: ' + candidateRel + ' is not in the anchored tree')
       } else {
         // Sorted the way buildAttestationPlan sorted it, so the reconstruction is the signer's own.
-        const contracts = [
-          { path: normalizePosixPath(candidateRel), sha256: hashBuffer(fs.readFileSync(candidateAbs)) },
-        ].sort(cmp)
+        const contracts = [{ path: normalizePosixPath(candidateRel), sha256: candidateSha }].sort(cmp)
         const recomputed = hashBuffer(canonicalizeJson(contracts))
         if (recomputed === payload.contractHash) {
           contractResult = 'VERIFIED'
@@ -364,7 +422,7 @@ for (const { noteBlob, commitSha } of entries) {
           contractResult = 'DIVERGED'
           fail(
             'contractHash divergence on ' + candidateRel + ': recomputed=' + recomputed + ' note=' +
-              payload.contractHash + '. The contract that judged this unit is not the one on disk.'
+              payload.contractHash + '. The contract that judged this unit is not the one its anchor held.'
           )
         }
       }
@@ -396,6 +454,6 @@ if (critical > 0) {
   console.error('AUDIT FAILED: ' + critical + ' critical check(s) failed.')
   process.exit(1)
 }
-console.log('AUDIT PASSED: every note is attributed to the pinned operator key, anchored to main, and its artifacts match disk.')
+console.log('AUDIT PASSED: every note is attributed to the pinned operator key, attached to the commit it names, and its artifacts and contracts match that commit\'s tree.')
 console.log('NOTE: this proves the records present are sound. It cannot detect a record that was deleted.')
 process.exit(0)

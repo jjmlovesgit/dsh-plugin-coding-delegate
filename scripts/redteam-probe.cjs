@@ -7,7 +7,10 @@
 // WHY EACH PROBE ASSERTS A SPECIFIC FAILURE MESSAGE. "The audit exited non-zero" is not evidence that an
 // attack was blocked -- a malformed envelope, a typo'd ref or a spawn failure all produce non-zero too,
 // and a probe that accepted any of them would report BLOCKED for an audit that never ran. Each probe
-// therefore requires BOTH a non-zero exit AND the message from the check it is aimed at.
+// therefore requires BOTH a non-zero exit AND the message from the check it is aimed at. Probes 5 and 6
+// go further and require the audit's critical-failure COUNT to be exactly 1, because those two attacks
+// are only interesting if every other check still passes: a probe that left four checks red would not
+// have shown the new check catching anything.
 //
 // No shell is used anywhere: git is invoked with an argv array and note bodies are handed over with -F,
 // because an envelope full of JSON quotes does not survive being interpolated into a command line.
@@ -28,6 +31,21 @@ const PRIVATE_KEY = path.join(os.homedir(), '.dsh', 'keys', 'delegation_ed25519.
 
 const git = (args) => execFileSync('git', args, { cwd: REPO_ROOT, encoding: 'utf8' });
 
+// Tree membership, asked of the commit rather than the working tree: exactly the distinction probe 6 tests.
+function inTreeAt(commit, repoRelativePath) {
+  try {
+    execFileSync('git', ['cat-file', '-e', commit + ':' + repoRelativePath], {
+      cwd: REPO_ROOT,
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const noteBlobOf = (commit) => String(git(['notes', '--ref=' + NOTES_REF, 'list', commit])).trim().split(/\s+/)[0];
+
 function attach(commit, body) {
   fs.writeFileSync(NOTE_TMP, body, 'utf8');
   execFileSync('git', ['notes', '--ref=' + NOTES_REF, 'add', '-f', '-F', NOTE_TMP, commit], {
@@ -43,23 +61,48 @@ function runAudit() {
 
 const head = git(['rev-parse', 'HEAD']).trim();
 const backup = git(['rev-parse', NOTES_REF]).trim();
+
+// BETWEEN PROBES THE LEDGER GOES BACK TO THE SAVED REF. Without this, each probe audits the wreckage of
+// the ones before it and a failure count stops being attributable: measured, probe 5's count read 3
+// because probe 2's tampered note was still in place, which says nothing about the check being probed.
+function restoreLedger() {
+  execFileSync('git', ['update-ref', NOTES_REF, backup], { cwd: REPO_ROOT });
+}
+
 const operatorPem = fs.readFileSync(PRIVATE_KEY, 'utf8');
 const operatorPub = String(publicKeyFromPrivate(operatorPem)).trim();
 
 let breached = 0;
 
-function probe(number, label, expectedFragment) {
+function probe(number, label, expectedFragment, expect) {
   const result = runAudit();
   const firedExpected = result.output.includes(expectedFragment);
   const blocked = result.code !== 0 && firedExpected;
-  if (!blocked) breached += 1;
+  let isolated = true;
+  const countMatch = /AUDIT FAILED: (\d+) critical check\(s\) failed\./.exec(result.output);
+  const failedCount = countMatch ? Number(countMatch[1]) : 0;
+  if (expect && expect.onlyOneFailure) {
+    isolated = failedCount === 1;
+  }
+  if (!blocked || !isolated) breached += 1;
   console.log(
-    '  ' + (blocked ? 'BLOCKED ' : 'BREACHED') + '  probe ' + number + ': ' + label
+    '  ' + (blocked && isolated ? 'BLOCKED ' : 'BREACHED') + '  probe ' + number + ': ' + label
   );
   console.log(
     '            audit exit ' + result.code + ' (non-zero required) · expected message ' +
       JSON.stringify(expectedFragment) + ' present: ' + firedExpected
   );
+  console.log(
+    '            critical checks failed: ' + failedCount +
+      (expect && expect.onlyOneFailure ? ' (exactly 1 required, so only this check fired)' : '')
+  );
+}
+
+// For claims a probe makes about its OWN setup, which are not the audit's verdict and must not be
+// smuggled into it: if the evidence line is false, the probe did not test what it says it tested.
+function requireOk(label, ok) {
+  if (!ok) breached += 1;
+  console.log('            ' + (ok ? 'ok    ' : 'FAILED') + '  ' + label);
 }
 
 console.log('HEAD            : ' + head.slice(0, 8));
@@ -94,6 +137,7 @@ try {
     })
   );
   probe(1, 'foreign key substitution (own key, own pubkey embedded)', 'signature check failed');
+  restoreLedger();
 
   // ---- Probe 2: blind payload tampering, no re-sign ------------------------
   const realEnvelope = JSON.parse(git(['notes', '--ref=' + NOTES_REF, 'show', 'ca05be7']).trim());
@@ -103,6 +147,7 @@ try {
   realEnvelope.payload = JSON.stringify(tampered);
   attach('ca05be7', JSON.stringify(realEnvelope));
   probe(2, 'blind artifact-hash tampering on a signed note', 'signature check failed');
+  restoreLedger();
 
   // ---- Probe 3: post-cutoff spec regression --------------------------------
   // Signed with the REAL key so check 1 passes, and carrying a real artifact hash so check 3 passes:
@@ -128,6 +173,7 @@ try {
     })
   );
   probe(3, 'post-cutoff note claiming spec 1.0 with no contracts array', 'spec regression');
+  restoreLedger();
 
   // ---- Probe 4: disconnected commit lineage --------------------------------
   const tree = git(['rev-parse', 'HEAD^{tree}']).trim();
@@ -147,9 +193,69 @@ try {
   realRingEnvelope.publicKeyPem = operatorPub;
   attach(head, canonicalizeJson(realRingEnvelope));
   probe(4, 'note anchored to an orphan commit outside main', 'is not an ancestor of main');
+  restoreLedger();
+
+  // ---- Probe 5: a sound record moved onto the wrong commit ------------------
+  // The a113cff envelope is NOT modified at all: right key, right signature, right artifact hashes,
+  // right contract digest. Every check that reads the payload therefore still passes, and the ONLY thing
+  // left to reject it is whether the note lives on the commit its payload names. The isolation
+  // assertion requires exactly one critical failure, so a green run here proves the attachment check
+  // caught something the other five could not -- which is precisely the gap this check was added for.
+  const a113Blob = noteBlobOf('a113cff');
+  const movedVerbatim = String(git(['notes', '--ref=' + NOTES_REF, 'show', 'a113cff'])).trim();
+  attach(head, movedVerbatim);
+  requireOk(
+    'note moved to ' + head.slice(0, 8) + ' byte-identical to the a113cff note blob (' + a113Blob.slice(0, 8) + ')',
+    noteBlobOf(head) === a113Blob
+  );
+  probe(
+    5,
+    'sound a113cff record re-attached to ' + head.slice(0, 8) + ', payload untouched',
+    'FAIL  attachment mismatch',
+    { onlyOneFailure: true }
+  );
+  // HEAD carried no note before probe 4, and update-ref rewinds the whole ref, so clearing it puts the
+  // ledger back and keeps each probe's failure count attributable to that probe alone.
+  restoreLedger();
+
+  // ---- Probe 6: an artifact that only exists later in history ---------------
+  // Anchored at ca05be7, which is AFTER the 1.1 cutoff (so no spec regression) and whose tree DOES hold
+  // that unit's real artifact and contract (so the digest still reproduces). The forged artifact entry
+  // points at a file that exists in the working tree right now but that ca05be7 never contained, and it
+  // carries that file's TRUE on-disk hash -- so a working-tree comparison says the note is honest. The
+  // tree-backed comparison is the only one that rejects it, and exactly one check may fail.
+  const futureRel = 'scripts/redteam-probe.cjs';
+  const futureSha = hashBuffer(fs.readFileSync(path.join(REPO_ROOT, ...futureRel.split('/'))));
+  const caEnvelope = JSON.parse(git(['notes', '--ref=' + NOTES_REF, 'show', 'ca05be7']).trim());
+  const timeTraveller = JSON.parse(caEnvelope.payload);
+  timeTraveller.artifacts = [{ path: futureRel, sha256: futureSha }];
+  const timeTravellerPayload = canonicalizeJson(timeTraveller);
+  attach(
+    'ca05be7',
+    canonicalizeJson({
+      payload: timeTravellerPayload,
+      payloadType: 'application/vnd.dsh-delegation-attestation+json',
+      // Signed with the REAL key so check 1 passes: the point is a well-signed record that is false.
+      signature: crypto
+        .sign(null, Buffer.from(timeTravellerPayload, 'utf8'), operatorPem)
+        .toString('base64'),
+      publicKeyPem: operatorPub,
+    })
+  );
+  const onDisk = hashBuffer(fs.readFileSync(path.join(REPO_ROOT, ...futureRel.split('/'))));
+  console.log('  forged artifact ' + futureRel + ' hashes to ' + futureSha.slice(0, 8) + ' on disk');
+  requireOk('the forged artifact is absent from the ca05be7 tree', !inTreeAt('ca05be7', futureRel));
+  requireOk('the forged artifact is present at HEAD (so a disk read would accept it)', inTreeAt(head, futureRel));
+  requireOk('the note\'s own artifact hash equals the on-disk bytes it names', onDisk === futureSha);
+  probe(
+    6,
+    'artifact on disk today but absent from the anchored tree',
+    'FAIL  artifact is not in the anchored tree',
+    { onlyOneFailure: true }
+  );
 } finally {
   fs.rmSync(NOTE_TMP, { force: true });
-  execFileSync('git', ['update-ref', NOTES_REF, backup], { cwd: REPO_ROOT });
+  restoreLedger();
   const restored = git(['rev-parse', NOTES_REF]).trim() === backup;
   const after = runAudit();
   console.log('');
@@ -159,5 +265,5 @@ try {
 }
 
 console.log('');
-console.log(breached === 0 ? 'ALL 4 ATTACK VECTORS BLOCKED, LEDGER RESTORED' : breached + ' PROBE PROBLEM(S)');
+console.log(breached === 0 ? 'ALL 6 ATTACK VECTORS BLOCKED, LEDGER RESTORED' : breached + ' PROBE PROBLEM(S)');
 process.exit(breached === 0 ? 0 : 1);
