@@ -369,9 +369,18 @@ more cannot change — so a flaky unit costs two runs, and a clean pass or a cle
 
 A resolved delegation can be signed. With `attestationPrivateKeyPath` set to a PKCS#8 Ed25519 key, the
 verdict carries an `attestation` envelope whose payload is RFC 8785 canonical JSON binding the base
-commit, a digest of the contract set, the artifact paths and hashes, and the verification command with
-its observed exit status. Deterministic serialization is what makes that a signature over *bytes*
-rather than over an object whose property order varies between runs.
+commit, the whole contract set with a digest over it, the artifact paths and hashes, and the verification
+command with its observed exit status. Deterministic serialization is what makes that a signature over
+*bytes* rather than over an object whose property order varies between runs.
+
+**Spec 1.1 records the contract set, not only its digest.** A 1.0 payload carried `contractHash` alone —
+a digest over `{path, sha256}` pairs the document never contained — so recomputing it meant already
+knowing the input, and a record whose contract set could not be reconstructed was unverifiable rather
+than wrong. From 1.1 the payload carries the array beside the digest, so a reader reproduces the hash
+from the document itself and checks every contract against disk with no path convention involved.
+`keys/delegation-operator.pub` pins the operator key that the ledger audit verifies against;
+`scripts/attest-unit.cjs` signs a unit and `scripts/verify-delegation-ledger.cjs` audits the whole ledger,
+and `npm run gate` runs the contract gates and that audit together.
 
 **What it establishes, and what it does not.** It binds a payload to a key: the holder signed those
 bytes and nothing in them changed. It does not establish who holds the key. The key lives in this

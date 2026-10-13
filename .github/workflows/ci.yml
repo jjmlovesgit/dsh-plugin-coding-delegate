@@ -79,53 +79,16 @@ jobs:
         working-directory: .
         run: node scripts/check-readme-consistency.cjs
 
-      - name: Contract well-formedness
-        # check-contract.cjs judges a contract against a NULL implementation -- does it reach its
-        # assertions, does it malfunction -- and takes one contract at a time. This walks the directory
-        # and pairs each contract with the module of the same name, which is the convention both
-        # contracts follow. The exit code is checked after EVERY run on purpose: GitHub's pwsh wrapper
-        # only inspects the last native command's status, so a bare sequence would let an earlier
-        # failure pass unnoticed.
-        working-directory: .
-        shell: pwsh
-        run: |
-          foreach ($c in Get-ChildItem tests/contracts/*.contract.cjs) {
-            $base = $c.BaseName -replace '\.contract$', ''
-            Write-Host "checking $($c.Name) against tools/$base.ts"
-            node scripts/check-contract.cjs --contract $c.FullName --module "tools/$base.ts"
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          }
-
-      - name: Contract discriminative power (negative fixtures)
-        # The half check-contract.cjs cannot test. A null stub is not a plausible WRONG answer, so it
-        # cannot tell whether a case exercises the property its name claims: measured, a contract
-        # containing only the vacuous non-mutating corruption case is reported by check-contract.cjs as
-        # "well-formed and discriminating". This step requires every contract to PASS its own module and
-        # FAIL a fixture that is deliberately correct in every respect except one, and it fails closed
-        # when a fixture is missing rather than skipping, because a gate that passes when its fixtures
-        # are absent provides no guarantee at all.
-        working-directory: .
-        run: node scripts/check-contract-fixtures.cjs
-
-      - name: Delegation ledger audit
-        # Walks refs/notes/delegations and checks four things per note: the Ed25519 signature against a
-        # PINNED operator key, that baseCommit is an ancestor of main, that every artifact still matches
-        # the bytes on disk, and that contractHash recomputes.
+      - name: Run full attestation & verification gate
+        # The three gates, called exactly the way a developer calls them locally. What this replaces was
+        # an inline PowerShell loop that duplicated scripts/check-contracts.cjs, and the duplication had
+        # already drifted in two ways: the loop hardcoded a `pwsh` shell, and it lacked the safeguards
+        # the script enforces -- a contract with no matching module is a FAILURE rather than a skip, and
+        # a null exit status is reported as a spawn failure rather than as a verdict on the contract.
+        # One rule with two implementations is how this repository's README rule-counts diverged once
+        # already, which is why the step below is a call rather than a copy.
         #
-        # The pin is what makes this attribution rather than self-consistency. `verifyEnvelope` verifies
-        # against the key EMBEDDED IN THE ENVELOPE, so an attacker who replaces the payload can replace
-        # the key beside it and the envelope still verifies. Measured against a note re-signed with a
-        # throwaway key: it passes its own check and fails this one.
-        #
-        # THE PINNED PUBLIC KEY IS COMMITTED at keys/delegation-operator.pub. A runner has no ~/.dsh, so
-        # a resolver that read only the operator's key directory would fail this step on every run --
-        # permanently red, and so ignored. The public key is not a secret, and committing it is what lets
-        # CI attribute records without holding one. The script still cross-checks every key source that
-        # IS present locally and fails if they disagree.
-        #
-        # contractHash is recomputed by convention where the contract set is recoverable, and reported
-        # UNVERIFIABLE where it is not: the envelope records only the digest, never the {path, sha256}
-        # array it was taken over, so one legacy note cannot be reconstructed. That is a schema gap, and
-        # failing the build for it would bury real tampering behind an unrecoverable input.
+        # `working-directory: .` is required and not decorative: this job defaults to `plugin`, and
+        # plugin/package.json has no `gate` script.
         working-directory: .
-        run: node scripts/verify-delegation-ledger.cjs
+        run: npm run gate

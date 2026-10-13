@@ -824,8 +824,18 @@ Set `attestationPrivateKeyPath` to a PKCS#8 Ed25519 private key and every resolv
 | `signature` | base64 Ed25519 over the UTF-8 bytes of `payload` |
 | `publicKeyPem` | the SPKI public key, **derived from the private key**, so one file is provisioned rather than a pair that can disagree |
 
-The payload binds the base commit, a digest of the whole contract set, the artifact paths and their
-hashes, and the verification command with its observed exit status and a digest of its output.
+The payload binds the base commit, the whole contract set with a digest over it, the artifact paths and
+their hashes, and the verification command with its observed exit status and a digest of its output.
+
+**Spec 1.1 records the contract set, not only its digest.** A 1.0 payload carried `contractHash` alone —
+a digest over `{path, sha256}` pairs the document never contained — so recomputing it meant already
+knowing the input, and a record whose contract set could not be reconstructed was unverifiable rather
+than wrong. From 1.1 the payload carries the array beside the digest, so a reader reproduces the hash
+from the document itself and checks every contract against disk with no path convention involved.
+`keys/delegation-operator.pub` pins the operator public key at the repository root: `verifyEnvelope`
+checks the key EMBEDDED IN THE ENVELOPE, which is self-consistency, and pinning is what turns it into
+attribution. `scripts/attest-unit.cjs` signs a unit and `scripts/verify-delegation-ledger.cjs` audits the
+whole ledger; `npm run gate` runs that audit together with the contract gates.
 
 **What a signature here establishes, stated plainly because it is easy to overstate.** It binds a
 payload to a KEY: the holder of that key signed these bytes and nothing in them changed. It does
