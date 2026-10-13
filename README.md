@@ -85,6 +85,46 @@ stays on the local machine; what travels back is the failure *structure*, with s
   See SECURITY-REVIEW-2.md, findings 13 and 15.
 ```
     
+## Understanding the Audit System (The Plain-English View)
+
+In conventional software development, we rely on an honor system: if code is checked into a folder and tests pass on a developer's computer, we trust it. In automated pipelines—especially where AI writes or refactors code—that honor system breaks down. AI agents can easily generate vacuous tests that pass even when code is broken, or a pipeline might test good code locally but record something different into history.
+
+This repository eliminates that honor system by acting as a **tamper-evident, automated notary for delegated code**. It enforces three concrete layers of verification:
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                        THREE LAYERS OF PROOF                           │
+├────────────────────────────────────────────────────────────────────────┤
+│ 1. Proof the Tests Aren't Fake     → Negative Fixture Discrimination   │
+│ 2. Tamper-Evident Wax Seal         → Cryptographic Git Ledger (Ed25519)│
+│ 3. Time-Machine Verification       → Pure Git Object Trees (No Disk)   │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+### 1. Proof the Tests Aren't Fake (Negative Discrimination)
+A test that always passes is worse than no test at all. To guarantee contracts actually enforce correctness, every utility maintains an intentionally broken twin (a "negative fixture"):
+* Before a test contract is accepted, the gate forces it to run against the broken fixture.
+* If the contract doesn't catch the intentional defect and fail, **the contract itself is rejected**.
+* You can only certify working code if your test has proven it detects real failures.
+
+### 2. A Tamper-Evident Wax Seal (Cryptographic Provenance)
+When an authorized operator verifies and accepts a utility, the pipeline stamps a cryptographic certificate directly into the repository's Git history (`refs/notes/delegations`):
+* The record binds the exact SHA-256 fingerprints of the code, its contract, and the generating model.
+* It is digitally signed using an Ed25519 operator key.
+* The auditor cross-checks this key against a pinned fingerprint (`TRUSTED_OPERATOR_PUBKEY_SHA256`), ensuring any unauthorized key rotation is immediately flagged in code review.
+
+### 3. A Time Machine That Audits History, Not Your Laptop (Tree-Accurate Auditing)
+Standard test runners check whatever loose files currently sit on your local hard drive. That allows "time-travel" bugs and race conditions, where a record claims to verify files that weren't even in that commit.
+* The auditor ignores your working directory for the bytes it checks: no artifact or contract digest is read from disk.
+* Instead, it resolves each one directly from Git's internal object database (`git cat-file`) at the commit the record names.
+* It verifies that the code *as it existed in that exact historical commit* hashes to the digest inside the signature, preventing working-tree substitution attacks or retroactive claims.
+
+### What This Guarantees in Practice
+* **No Un-tested Code**: Every single module must have a corresponding contract, and every contract must have a module — both directions are enforced by `scripts/check-contracts.cjs`.
+* **No Tampered Commits**: Modifying even one byte of a file after it was signed stops matching the digest that the signature covers, and the audit fails.
+* **No Deleted Ledgers**: Deleting or emptying the audit log causes the gate to fail closed immediately.
+* **No False Greens**: The build passes only when proven tests, frozen Git history, and the operator's digital signature strictly align.
+
 ## Cryptographic Provenance & Dual-Gate Contract Attestation
 
 Every verified utility module (`tools/*.ts`) is governed by an Ed25519-signed provenance ledger
