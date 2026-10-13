@@ -30,7 +30,19 @@ const canonical_json_1 = require("./canonical-json");
  * Labelling this payload `application/vnd.in-toto+json` would send a consumer looking for fields
  * that are not there. A vendor media type says what the document actually is.
  */
-exports.ATTESTATION_SPEC_VERSION = '1.0';
+/**
+ * 1.1 records the contract SET, not only its digest.
+ *
+ * The 1.0 payload carried `contractHash` alone: a digest over an array of {path, sha256} pairs that the
+ * document never contained. That made it a BLIND COMMITMENT, recomputable only by knowing the input
+ * from outside, and the ledger audit found a real record it could not reconstruct at all. 1.1 carries
+ * the array beside the digest, so a reader recomputes the hash from the document itself and checks
+ * every contract against disk without guessing a path convention.
+ *
+ * Additive, so a 1.0 payload remains valid and self-verifying -- a signature covers its own bytes, and
+ * nothing re-signs an old record. Only the readers are version-aware.
+ */
+exports.ATTESTATION_SPEC_VERSION = '1.1';
 /**
  * A vendor media type, deliberately: see the note above. It names the shape, so a consumer that
  * dispatches on it reads `payload` as canonical JSON and `signature` as base64 Ed25519.
@@ -186,9 +198,13 @@ function buildAttestationPlan(input) {
     return {
         action: 'sign',
         payload: {
-            specVersion: '1.0',
+            specVersion: exports.ATTESTATION_SPEC_VERSION,
             runId: input.runId,
             contractHash: hashBuffer((0, canonical_json_1.canonicalizeJson)(contracts)),
+            // The array the digest was taken over, so the commitment is no longer blind. `contracts` is the
+            // already-normalised, already-sorted value that was hashed on the line above; recording a
+            // separately-built copy would let a reader recompute a different value from the same document.
+            contracts,
             baseCommit: input.baseCommit,
             modelIdentifier: input.modelIdentifier,
             // Normalised, and deliberately NOT sorted. Emission order is a property of the run rather than of

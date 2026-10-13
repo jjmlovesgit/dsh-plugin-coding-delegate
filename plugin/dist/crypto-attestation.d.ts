@@ -18,7 +18,19 @@
  * Labelling this payload `application/vnd.in-toto+json` would send a consumer looking for fields
  * that are not there. A vendor media type says what the document actually is.
  */
-export declare const ATTESTATION_SPEC_VERSION = "1.0";
+/**
+ * 1.1 records the contract SET, not only its digest.
+ *
+ * The 1.0 payload carried `contractHash` alone: a digest over an array of {path, sha256} pairs that the
+ * document never contained. That made it a BLIND COMMITMENT, recomputable only by knowing the input
+ * from outside, and the ledger audit found a real record it could not reconstruct at all. 1.1 carries
+ * the array beside the digest, so a reader recomputes the hash from the document itself and checks
+ * every contract against disk without guessing a path convention.
+ *
+ * Additive, so a 1.0 payload remains valid and self-verifying -- a signature covers its own bytes, and
+ * nothing re-signs an old record. Only the readers are version-aware.
+ */
+export declare const ATTESTATION_SPEC_VERSION = "1.1";
 /**
  * A vendor media type, deliberately: see the note above. It names the shape, so a consumer that
  * dispatches on it reads `payload` as canonical JSON and `signature` as base64 Ed25519.
@@ -29,10 +41,16 @@ export declare const ATTESTATION_PAYLOAD_TYPE = "application/vnd.dsh-delegation-
  * signing adds no new bookkeeping to the delegation path.
  */
 export interface AttestationPayload {
-    specVersion: '1.0';
+    /** Tied to the constant rather than repeated, so the two cannot drift apart. */
+    specVersion: typeof ATTESTATION_SPEC_VERSION;
     runId: string;
     /** sha256 of the contract that judged the unit -- what "verified" is a verdict ABOUT. */
     contractHash: string;
+    /**
+     * The set that `contractHash` is taken over. Present from 1.1. Absent from a 1.0 payload, where the
+     * digest is recomputable only if the reader already knows the input from outside.
+     */
+    contracts: AttestationContractRef[];
     /** The commit the unit started from, so the record can be replayed against a tree. */
     baseCommit: string;
     modelIdentifier: string;

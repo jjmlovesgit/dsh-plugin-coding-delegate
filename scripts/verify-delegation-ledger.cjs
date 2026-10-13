@@ -233,39 +233,97 @@ for (const { noteBlob, commitSha } of entries) {
   }
   if (artifactsOk) console.log('  ok    ' + artifacts.length + ' artifact(s) match on-disk bytes')
 
-  // ---- 4. contractHash by convention, allowed to be UNVERIFIABLE ----------
+  // ---- 4. contractHash: self-described from 1.1, by convention for 1.0 ----------
   let contractResult = 'UNVERIFIABLE'
-  const firstArtifact = artifacts.length > 0 ? String(artifacts[0].path) : ''
-  const baseName = normalizePosixPath(firstArtifact).replace(/^tools\//, '').replace(/\.(ts|js|mjs|mts)$/, '')
-  const conventional = baseName.length > 0 && !baseName.includes('/')
+  const cmp = (a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)
 
-  if (!conventional) {
-    console.log(
-      '  --    contractHash not recomputed: the artifact is outside the tools/<name> convention, so ' +
-        'the contract set cannot be reconstructed from the envelope'
-    )
-  } else {
-    const candidateRel = 'tests/contracts/' + baseName + '.contract.cjs'
-    const candidateAbs = path.join(REPO_ROOT, candidateRel)
-    if (!fs.existsSync(candidateAbs)) {
-      console.log('  --    contractHash not recomputed: ' + candidateRel + ' does not exist')
-    } else {
-      // Sorted the same way buildAttestationPlan sorts, so the reconstruction is the signer's own.
-      const contracts = [{ path: normalizePosixPath(candidateRel), sha256: hashBuffer(fs.readFileSync(candidateAbs)) }].sort(
-        (a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)
-      )
-      const recomputed = hashBuffer(canonicalizeJson(contracts))
-      if (recomputed === payload.contractHash) {
-        contractResult = 'VERIFIED'
-        console.log('  ok    contractHash recomputed against ' + candidateRel)
-      } else {
-        contractResult = 'DIVERGED'
+  if (Array.isArray(payload.contracts)) {
+    // SELF-DESCRIBING. The document carries the set its digest was taken over, so every contract is
+    // checked against disk and the digest is reproduced from the document itself -- no convention, no
+    // guessing, and a multi-contract unit is covered as well as a single-contract one.
+    const recorded = payload.contracts.map((c) => ({ path: String(c.path), sha256: c.sha256 }))
+    const sortedSame = JSON.stringify(recorded) === JSON.stringify([...recorded].sort(cmp))
+    let allOnDisk = true
+
+    if (recorded.length === 0) {
+      fail('the payload carries an empty contracts array, so contractHash commits to nothing')
+      allOnDisk = false
+    }
+    for (const contract of recorded) {
+      if (contract.path.includes('\\')) {
+        console.warn('  warn  recorded contract path is not POSIX: ' + contract.path)
+      }
+      const onDisk = path.resolve(REPO_ROOT, contract.path)
+      if (!fs.existsSync(onDisk)) {
+        fail('recorded contract missing on disk: ' + contract.path)
+        allOnDisk = false
+        continue
+      }
+      const actual = hashBuffer(fs.readFileSync(onDisk))
+      if (actual !== contract.sha256) {
         fail(
-          'contractHash divergence on ' + candidateRel + ': recomputed=' + recomputed + ' note=' +
-            payload.contractHash + '. The contract that judged this unit is not the one on disk.'
+          'recorded contract sha256 mismatch on ' + contract.path + ': disk=' + actual + ' note=' +
+            contract.sha256
         )
+        allOnDisk = false
       }
     }
+
+    // Hashed EXACTLY as recorded. This is the reader's reproduction of the commitment, so normalising
+    // or re-sorting here would mask a signer that recorded something other than what it hashed.
+    const recomputed = hashBuffer(canonicalizeJson(recorded))
+    if (recomputed !== payload.contractHash) {
+      contractResult = 'DIVERGED'
+      fail(
+        'contractHash does not match the digest of the RECORDED contract set: recomputed=' + recomputed +
+          ' note=' + payload.contractHash
+      )
+    } else if (allOnDisk && sortedSame) {
+      contractResult = 'SELF-DESCRIBED'
+      console.log(
+        '  ok    contractHash reproduced from the ' + recorded.length + ' contract(s) recorded in the payload'
+      )
+    }
+  } else if (payload.specVersion === '1.0') {
+    // LEGACY. A 1.0 payload records the digest and never the set, so it is reproduced by convention or
+    // not at all -- and NOT reproduced is UNVERIFIABLE rather than failed. Failing the ledger for a
+    // schema omission would bury real tampering behind an input set nobody can recover.
+    const firstArtifact = artifacts.length > 0 ? String(artifacts[0].path) : ''
+    const baseName = normalizePosixPath(firstArtifact).replace(/^tools\//, '').replace(/\.(ts|js|mjs|mts)$/, '')
+    const conventional = baseName.length > 0 && !baseName.includes('/')
+
+    if (!conventional) {
+      console.log(
+        '  --    contractHash not recomputed: the artifact is outside the tools/<name> convention, so ' +
+          'the contract set cannot be reconstructed from the envelope'
+      )
+    } else {
+      const candidateRel = 'tests/contracts/' + baseName + '.contract.cjs'
+      const candidateAbs = path.join(REPO_ROOT, candidateRel)
+      if (!fs.existsSync(candidateAbs)) {
+        console.log('  --    contractHash not recomputed: ' + candidateRel + ' does not exist')
+      } else {
+        // Sorted the way buildAttestationPlan sorted it, so the reconstruction is the signer's own.
+        const contracts = [
+          { path: normalizePosixPath(candidateRel), sha256: hashBuffer(fs.readFileSync(candidateAbs)) },
+        ].sort(cmp)
+        const recomputed = hashBuffer(canonicalizeJson(contracts))
+        if (recomputed === payload.contractHash) {
+          contractResult = 'VERIFIED'
+          console.log('  ok    contractHash recomputed by convention against ' + candidateRel)
+        } else {
+          contractResult = 'DIVERGED'
+          fail(
+            'contractHash divergence on ' + candidateRel + ': recomputed=' + recomputed + ' note=' +
+              payload.contractHash + '. The contract that judged this unit is not the one on disk.'
+          )
+        }
+      }
+    }
+  } else {
+    console.log(
+      '  --    contractHash not recomputed: specVersion ' + payload.specVersion + ' carries no contracts array'
+    )
   }
 
   summary.push({

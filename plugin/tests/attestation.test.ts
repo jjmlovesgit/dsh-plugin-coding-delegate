@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import { canonicalizeJson } from '../src/canonical-json'
 import {
   ATTESTATION_PAYLOAD_TYPE,
+  ATTESTATION_SPEC_VERSION,
   AttestationInputs,
   AttestationPayload,
   AttestationPlan,
@@ -182,9 +183,12 @@ describe('RFC 8785 requires an error where JSON.stringify would coerce', () => {
 
 function samplePayload(overrides: Partial<AttestationPayload> = {}): AttestationPayload {
   return {
-    specVersion: '1.0',
+    // Pinned to the literal rather than to ATTESTATION_SPEC_VERSION: a version bump changes the wire
+    // shape, and this file should have to be edited on purpose when that happens.
+    specVersion: '1.1',
     runId: 'run-test-001',
     contractHash: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+    contracts: [{ path: 'tests/unit.test.cjs', sha256: 'aa11' }],
     baseCommit: '166ff33dfb601b0a60cc40c798c42b9c986285dc',
     modelIdentifier: 'Qwen 3.8 27B Local',
     artifacts: [{ path: 'plugin/dist/index.js', sha256: 'abc123' }],
@@ -394,7 +398,7 @@ describe('attestation plan: opt-in and withheld states', () => {
 describe('attestation plan: the payload it builds', () => {
   it('carries every resolved input through', () => {
     const payload = payloadOf(buildAttestationPlan(inputs()))
-    expect(payload.specVersion).toBe('1.0')
+    expect(payload.specVersion).toBe('1.1')
     expect(payload.runId).toBe('turn-7-contract-first-probe')
     expect(payload.baseCommit).toBe('166ff33dfb601b0a60cc40c798c42b9c986285dc')
     expect(payload.modelIdentifier).toBe('Qwen 3.8 27B Local')
@@ -479,6 +483,34 @@ describe('attestation plan: the payload it builds', () => {
       'tools/second.ts',
       'tools/first.ts',
     ])
+  })
+
+  it('is self-describing: the payload carries the set its contractHash was taken over', () => {
+    // The defect this pins. A 1.0 payload recorded `contractHash` and nothing the digest was taken
+    // over, so it was a blind commitment: recomputable only by knowing the input from outside. The
+    // ledger audit found a real record (de64c778) it could not reconstruct at all, because that unit's
+    // contract lives outside the naming convention.
+    const payload = payloadOf(
+      buildAttestationPlan(
+        inputs({
+          // Deliberately unsorted, and Windows-spelled, to prove BOTH transformations are recorded
+          // rather than applied only on the way into the digest.
+          contracts: [
+            { path: 'tests\\z.test.cjs', sha256: '22' },
+            { path: 'tests/a.test.cjs', sha256: '11' },
+          ],
+        })
+      )
+    )
+
+    expect(payload.specVersion).toBe(ATTESTATION_SPEC_VERSION)
+    expect(payload.contracts).toEqual([
+      { path: 'tests/a.test.cjs', sha256: '11' },
+      { path: 'tests/z.test.cjs', sha256: '22' },
+    ])
+    // The claim that matters: a reader holding ONLY this document recomputes the digest. If this ever
+    // fails while the test above passes, the recorded set has drifted from the hashed set.
+    expect(hashBuffer(canonicalizeJson(payload.contracts))).toBe(payload.contractHash)
   })
 
   it('keeps an artifact it could not hash, rather than dropping the file', () => {

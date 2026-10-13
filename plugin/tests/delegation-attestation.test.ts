@@ -257,7 +257,7 @@ describe('delegation integration: attestation signed', () => {
     // What was actually signed, read back out of the payload the path produced.
     const payload = JSON.parse(envelope.payload)
     expect(payload.baseCommit).toBe(head)
-    expect(payload.specVersion).toBe('1.0')
+    expect(payload.specVersion).toBe('1.1')
     expect(payload.modelIdentifier).toBeTruthy()
     // Separators are platform-dependent, so this normalises rather than assuming a slash.
     expect(payload.artifacts.map((a: any) => String(a.path).replace(/\\/g, '/'))).toContain('src/ok.ts')
