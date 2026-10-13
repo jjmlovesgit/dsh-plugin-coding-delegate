@@ -39,6 +39,7 @@ exports.resolveChatCompletionsUrl = resolveChatCompletionsUrl;
 exports.parseSearchReplaceBlocks = parseSearchReplaceBlocks;
 exports.applySearchReplaceBlocks = applySearchReplaceBlocks;
 exports.resolveDelegateStatus = resolveDelegateStatus;
+exports.classifyWorkerOutput = classifyWorkerOutput;
 exports.delegateWorker = delegateWorker;
 exports.extractPromptText = extractPromptText;
 exports.estimateTokenCount = estimateTokenCount;
@@ -368,6 +369,41 @@ function resolveDelegateStatus(input) {
         return 'UNVERIFIED';
     return input.isSuccess ? 'SUCCESS' : 'VERIFICATION_FAILED';
 }
+/**
+ * Token starvation, judged from the response alone.
+ *
+ * A starved worker does not report an error. The server returns HTTP 200 with `finish_reason:
+ * 'length'` and an empty message, and nothing downstream can tell that apart from a worker that
+ * legitimately had nothing to say: `extractAndEmitFiles('')` returns no files AND no errors, so
+ * `emission.errors.length === 0` holds, the contract then re-runs over a tree the worker never
+ * touched and passes, and `resolveDelegateStatus` reports SUCCESS over a run that produced nothing.
+ *
+ * Measured on `qwen/qwen3.8-27b`: with thinking enabled at the host, 34,076 characters of
+ * `reasoning_content` consumed the entire 8192-token budget and the answer never arrived. The
+ * envelope gate already withholds on an empty artifact list, so the RECORD was safe; the VERDICT
+ * was not. See `docs/findings.md`.
+ *
+ * Deliberately narrow: `length` with NON-empty content is not starved. A model that emitted a
+ * complete file and then rambled into the cap produced usable output, and failing it would trade a
+ * silent green for a loud false red.
+ *
+ * Pure and exported, so the decision is testable without a server -- the caller's half is reading
+ * the response, this half is judging it.
+ */
+function classifyWorkerOutput(input) {
+    if (input.finishReason !== 'length')
+        return { starved: false };
+    if ((input.content ?? '').trim() !== '')
+        return { starved: false };
+    return {
+        starved: true,
+        reason: 'the worker returned finish_reason "length" with empty content, so its token budget was ' +
+            'exhausted before it emitted anything. This is token starvation rather than an empty edit: a ' +
+            'reasoning model whose thinking is enabled at the host spends the whole budget on ' +
+            'reasoning_content and returns no answer. Check the per-model thinking setting on the local ' +
+            'server for this model and re-run the unit. The contract was not run.',
+    };
+}
 async function delegateWorker(params = {}, tracker) {
     const endpoint = resolveChatCompletionsUrl(params.endpoint || profiles_1.PROFILES.WORKER.endpoint || exports.DEFAULT_LOCAL_ENDPOINT);
     const model = params.model || profiles_1.PROFILES.WORKER.model;
@@ -525,6 +561,30 @@ async function delegateWorker(params = {}, tracker) {
         const promptTokens = data.usage?.prompt_tokens ?? estimateTokenCount(combinedPrompt);
         const completionTokens = data.usage?.completion_tokens ?? estimateTokenCount(content);
         const totalTokens = data.usage?.total_tokens ?? promptTokens + completionTokens;
+        // Checked HERE, at the ingestion point, rather than downstream. Every later stage reads a starved
+        // response as an ordinary empty one: emission reports no files and no errors, the contract passes
+        // over an unchanged tree, and the unit settles as SUCCESS. Failing at the point the response is
+        // parsed is what keeps that from becoming a verdict.
+        const starvation = classifyWorkerOutput({
+            finishReason: data.choices?.[0]?.finish_reason,
+            content,
+        });
+        if (starvation.starved) {
+            return {
+                success: false,
+                status: 'WORKER_OUTPUT_STARVED',
+                message: 'The delegation produced no output: ' + starvation.reason,
+                resolvedWorkspace: workspaceBase,
+                filesWritten: [],
+                workerFinishReason: data.choices?.[0]?.finish_reason ?? null,
+                testResults: {
+                    passed: 0,
+                    failed: 0,
+                    output: 'The worker returned no content, so the contract was not run.',
+                },
+                tokens: { prompt: promptTokens, completion: completionTokens },
+            };
+        }
         if (!fs.existsSync(workspaceBase)) {
             try {
                 fs.mkdirSync(workspaceBase, { recursive: true });

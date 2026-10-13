@@ -351,6 +351,36 @@ export declare function resolveDelegateStatus(input: {
      */
     flaky?: boolean;
 }): string;
+/**
+ * Token starvation, judged from the response alone.
+ *
+ * A starved worker does not report an error. The server returns HTTP 200 with `finish_reason:
+ * 'length'` and an empty message, and nothing downstream can tell that apart from a worker that
+ * legitimately had nothing to say: `extractAndEmitFiles('')` returns no files AND no errors, so
+ * `emission.errors.length === 0` holds, the contract then re-runs over a tree the worker never
+ * touched and passes, and `resolveDelegateStatus` reports SUCCESS over a run that produced nothing.
+ *
+ * Measured on `qwen/qwen3.8-27b`: with thinking enabled at the host, 34,076 characters of
+ * `reasoning_content` consumed the entire 8192-token budget and the answer never arrived. The
+ * envelope gate already withholds on an empty artifact list, so the RECORD was safe; the VERDICT
+ * was not. See `docs/findings.md`.
+ *
+ * Deliberately narrow: `length` with NON-empty content is not starved. A model that emitted a
+ * complete file and then rambled into the cap produced usable output, and failing it would trade a
+ * silent green for a loud false red.
+ *
+ * Pure and exported, so the decision is testable without a server -- the caller's half is reading
+ * the response, this half is judging it.
+ */
+export declare function classifyWorkerOutput(input: {
+    finishReason?: string | null;
+    content?: string | null;
+}): {
+    starved: true;
+    reason: string;
+} | {
+    starved: false;
+};
 export declare function delegateWorker(params?: DelegateWorkerParams, tracker?: SavingsTracker): Promise<any>;
 export declare function extractPromptText(session: LLMSession | any): string;
 export declare function estimateTokenCount(text: string): number;

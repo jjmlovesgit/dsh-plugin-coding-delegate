@@ -903,3 +903,39 @@ was caught by dispatching, receiving empty content, and then isolating the cause
 rather than accepting the first plausible attribution, which had been that the model simply reasons on
 tasks of this size. It does; the toggle is what lets it.
 
+## Token starvation settled as SUCCESS — fixed, with one residual case still open
+
+**A worker that ran out of tokens reported a passing run that produced nothing.** Nothing failed at any
+layer. The server returns HTTP 200, `finish_reason: 'length'`, and an empty message, and every later
+stage reads that as an ordinary empty response:
+
+| stage | what it does with empty content |
+| --- | --- |
+| `extractAndEmitFiles` | returns `filesWritten: []` **and** `errors: []` |
+| `wroteFiles` | `false` — but nothing branches on it to fail |
+| `unitSuccess` | `… && emission.errors.length === 0` — satisfied, because empty content is not an error |
+| verification | runs anyway, over a tree the worker never touched, and passes |
+| `resolveDelegateStatus` | `'SUCCESS'` |
+
+Measured on `qwen/qwen3.8-27b` at the profile's 8192-token budget: 34,076 characters of
+`reasoning_content` consumed the whole budget and the answer never arrived. The envelope gate already
+withheld on the empty artifact list, so the RECORD was safe; the VERDICT was not, and the only hint to
+the architect was `filesWritten: []` sitting beside `status: 'SUCCESS'`.
+
+**Fixed** at the ingestion point (`plugin/src/delegation.ts`). `classifyWorkerOutput` is pure and
+exported so the decision is testable without a server, and `delegateWorker` returns
+`WORKER_OUTPUT_STARVED` before emission when `finish_reason === 'length'` and the content is empty. The
+contract is not run, so no passing test result can be attached to a run that produced nothing.
+
+The gate is deliberately narrow. `length` with NON-empty content is a model that finished its file and
+then rambled into the cap — failing that would trade a silent green for a loud false red.
+
+**Still open: the same symptom from a different finish reason.** An empty message returned with
+`finish_reason: 'stop'` follows the identical route and still settles as `SUCCESS`. It is pinned by a
+test named `KNOWN GAP: an empty reply that stopped normally still settles as SUCCESS` rather than left
+silent. The cause differs; the outcome does not. Widening the gate to reject empty content whatever the
+finish reason is an operator decision, not a side effect of this fix.
+
+Both halves are covered: the oracle suite exercises the built `dist/delegation.js` (452 in the suite),
+and the unit suite grew from 149 to 158.
+
