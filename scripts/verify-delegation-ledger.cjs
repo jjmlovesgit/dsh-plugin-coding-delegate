@@ -34,6 +34,15 @@
  *   6. contractHash -- self-described from 1.1, by convention before it, and deliberately allowed to
  *      come back UNVERIFIABLE.
  *
+ *   7. EVERY RECORDED CONTRACT IS COVERED BY THE DISCRIMINATION GATE. Check 6 proves the contract is the
+ *      one the anchor held; it cannot say whether that contract can FAIL a wrong implementation, and a
+ *      contract that cannot makes a passing verification mean only that a file ran. Coverage is having a
+ *      counterpart under tests/contracts with a negative fixture beside it, which is what
+ *      scripts/check-contract-fixtures.cjs establishes. Measured: tests/currency.contract.cjs was the one
+ *      contract in the repository outside that directory, recorded in a published note, and covered by
+ *      nothing -- and the record could not tell, because an envelope carries a contract hash, not a
+ *      fixture verdict.
+ *
  * WHY CHECK 6 IS NOT A FAILURE WHEN IT CANNOT RUN. For 1.1 notes the envelope records the contract SET,
  * so the digest is recomputed from what the note itself carries, against the anchored tree. For 1.0
  * notes it records only `contractHash`, a blind commitment over an array it does not carry, so it can be
@@ -273,6 +282,55 @@ const allowEmpty = argv.includes('--allow-empty')
 const printFingerprintOnly = argv.includes('--print-key-fingerprint')
 
 const pinnedPublicKeyPem = resolvePinnedKey()
+
+/**
+ * The contract names the discrimination gate actually covers: a contract at `tests/contracts/<name>.contract.cjs`
+ * that has a negative fixture beside it in `tests/contracts/fixtures/`.
+ *
+ * WHY THE AUDIT ASKS ABOUT COVERAGE AT ALL. Check 6 proves the recorded contract is the one the anchored
+ * tree held. It says nothing about whether that contract can FAIL a wrong implementation, and a contract
+ * that cannot makes `"passed": true` mean "this file ran". `scripts/check-contract-fixtures.cjs` is what
+ * establishes the stronger property, and it discovers contracts by scanning one directory -- so a contract
+ * outside it is verified by nothing. Measured: `tests/currency.contract.cjs` was the only contract in the
+ * repository outside `tests/contracts`, recorded in a published note, and never run against a fixture.
+ * The record could not tell, because an envelope carries a contract hash and not a fixture verdict.
+ *
+ * Returns null when the directories are absent, which the caller treats as fatal rather than as "nothing
+ * to check": an audit that passes because it cannot see the fixtures is the fail-open this repository
+ * keeps having to close.
+ */
+function coveredContractBasenames() {
+  const contractsDir = path.join(REPO_ROOT, 'tests', 'contracts')
+  const fixturesDir = path.join(contractsDir, 'fixtures')
+  if (!fs.existsSync(contractsDir) || !fs.existsSync(fixturesDir)) return null
+  const fixtures = new Set(
+    fs.readdirSync(fixturesDir).map((f) => f.replace(/\.negative\.(ts|cjs)$/, ''))
+  )
+  const covered = new Set()
+  for (const file of fs.readdirSync(contractsDir)) {
+    if (!file.endsWith('.contract.cjs')) continue
+    const base = file.replace(/\.contract\.cjs$/, '')
+    if (fixtures.has(base)) covered.add(base)
+  }
+  return covered
+}
+
+const coveredContracts = coveredContractBasenames()
+if (coveredContracts === null) {
+  console.error(
+    'FATAL  tests/contracts or tests/contracts/fixtures is missing, so no recorded contract can be shown ' +
+      'to be covered by the discrimination gate. Everything this audit says about a contract would be a ' +
+      'statement about a file that ran, not about a property that holds. Refusing to report on the ledger.'
+  )
+  process.exit(1)
+}
+if (coveredContracts.size === 0) {
+  console.error(
+    'FATAL  no contract under tests/contracts has a negative fixture, so the discrimination gate covers ' +
+      'nothing. Either the gate would fail closed on its own, or its discovery has been broken.'
+  )
+  process.exit(1)
+}
 
 let listing = ''
 try {
@@ -548,6 +606,37 @@ for (const { noteBlob, commitSha } of entries) {
     )
   }
 
+  // ---- 7. every recorded contract is covered by the discrimination gate ------
+  //
+  // APPLIED ONLY TO RECORDED CONTRACTS. A 1.0 payload carries no set, so there is nothing here to check:
+  // its digest is reconstructed from `tests/contracts/<name>.contract.cjs`, a path that is inside the
+  // gate's directory by construction, and the gate itself fails closed when such a contract has no
+  // fixture. A 1.1 payload names its contracts, and one of them can name anywhere in the repository --
+  // which is how the uncovered contract got recorded in the first place.
+  if (Array.isArray(payload.contracts)) {
+    let coverageOk = true
+    for (const contract of payload.contracts) {
+      const base = normalizePosixPath(String(contract.path))
+        .split('/')
+        .pop()
+        .replace(/\.contract\.cjs$/, '')
+      if (!coveredContracts.has(base)) {
+        coverageOk = false
+        fail(
+          'contract ' + contract.path + ' is not covered by the discrimination gate: no ' +
+            'tests/contracts/' + base + '.contract.cjs with a negative fixture beside it. Check 6 proved ' +
+            'this is the contract the anchor held; nothing has shown it can fail a wrong implementation, ' +
+            'so the verification it judged is only known to have run.'
+        )
+      }
+    }
+    if (coverageOk) {
+      console.log(
+        '  ok    ' + payload.contracts.length + ' recorded contract(s) covered by the discrimination gate'
+      )
+    }
+  }
+
   summary.push({
     commit: short,
     model: payload.modelIdentifier,
@@ -569,6 +658,6 @@ if (critical > 0) {
   console.error('AUDIT FAILED: ' + critical + ' critical check(s) failed.')
   process.exit(1)
 }
-console.log('AUDIT PASSED: every note is attributed to the pinned operator key, attached to the commit it names, and its artifacts and contracts match that commit\'s tree.')
+console.log('AUDIT PASSED: every note is attributed to the pinned operator key, attached to the commit it names, its artifacts and contracts match that commit\'s tree, and every recorded contract is covered by the discrimination gate.')
 console.log('NOTE: this proves the records present are sound. It cannot detect a record that was deleted.')
 process.exit(0)

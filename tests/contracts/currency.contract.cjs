@@ -1,6 +1,15 @@
 // The contract for formatCurrency. Architect-authored: hashed before the unit runs and re-hashed after
 // it, so the worker may not touch it and any change to it voids the verdict.
 //
+// RELOCATED HERE FROM tests/, and the move is the fix for a real gap rather than tidiness. This contract
+// and its module lived beside each other in tests/, so it reached the module as './currency.ts' while
+// every other contract lives in tests/contracts/ and reaches '../../tools/<name>.ts'. Both gates --
+// check-contract-fixtures.cjs and check-contracts.cjs -- discover contracts by scanning tests/contracts,
+// so this one was covered by NOTHING: no negative fixture was ever run against it, and gate:wellformed
+// never parsed it. It was the only contract in the repository outside that directory, which is exactly
+// why the hole stayed invisible. The module moved to tools/ with it, so the ordinary convention holds and
+// neither gate needs a special case for currency.
+//
 // Native node:test rather than a hand-rolled script. The hand-rolled form reported its own verdict on
 // stdout, which scripts/check-contract.cjs cannot read: that guard runs the file under `node --test` and
 // counts TAP assertion events, so an un-instrumented script is a single test block that reaches no
@@ -12,7 +21,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { formatCurrency } = require('./currency.ts');
+const { formatCurrency } = require('../../tools/currency.ts');
 
 test('formatCurrency', async (t) => {
   await t.test('zero', () => assert.equal(formatCurrency(0), '$0.00'));

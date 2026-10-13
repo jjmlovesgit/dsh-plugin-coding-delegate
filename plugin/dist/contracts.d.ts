@@ -133,7 +133,15 @@ export declare function parseDelegatedRegistry(text: string): DelegatedRecord[];
 export declare function mergeDelegatedRecords(existing: DelegatedRecord[], incoming: DelegatedRecord[], limit?: number): DelegatedRecord[];
 /** A path whose file is gone protects nothing, so it is dropped. */
 export declare function pruneDelegatedRecords(records: DelegatedRecord[], exists?: (p: string) => boolean): DelegatedRecord[];
-/** Best effort by design: failing to persist must not fail a delegation that was already paid for. */
+/**
+ * Best effort by design: failing to persist must not fail a delegation that was already paid for.
+ *
+ * THE TEMPORARY NAME IS UNIQUE PER WRITER. It used to be `target + '.tmp'`, which is the same string for
+ * every process on the machine -- a shared file, not a scratch file. Two writers saving at the same moment
+ * therefore wrote to one path, and the loser's rename either failed or put the winner's bytes in place
+ * while the loser believed it had saved. The suffix removes the shared name entirely, so the rename is
+ * the only step that touches the real file and it is atomic on both platforms.
+ */
 export declare function saveDelegatedRegistry(records: DelegatedRecord[]): boolean;
 /** Load, validate and prune. Called at startup so a restart does not forget what was delegated. */
 export declare function loadDelegatedRegistry(): DelegatedRecord[];

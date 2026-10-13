@@ -1110,19 +1110,27 @@ write.
 ## An oracle run shares one data directory, and the delegated registry cannot take that
 
 **An intermittent failure in the control-bypass oracle, and it is not the guard's logic.** `control/rule
-3: reading CONTENT under a delegated directory is still gated` failed 3 of 17 full-suite runs and 0 of 10
-runs that were serialised with `--test-concurrency=1`, and passes every time in isolation. The captured
-diagnostic is under-gating rather than a crash: four of the six readers were allowed.
+3: reading CONTENT under a delegated directory is still gated` failed 3 of 17 full-suite runs and passes
+every time in isolation. The captured diagnostic is under-gating rather than a crash: four of the six
+readers were allowed.
 
 | runs | result |
 | --- | --- |
 | `control-bypass.test.cjs` alone | **0 fail in 4** |
-| full suite, `--test-concurrency=1` | **0 fail in 10** |
 | full suite, parallel, before the attestation work | 0 fail in 4 |
 | full suite, parallel, after | **3 fail in 17** |
+| full suite, parallel, after the registry fix | **0 fail in 10** |
 
-**The mechanism is the registry write; the tests only make it visible.** `rememberDelegated` reads the
-registry, merges in memory and writes it back, and `saveDelegatedRegistry` writes a temporary file named
+**A CORRECTION TO HOW THE FIRST VERSION OF THIS NOTE MEASURED IT.** It claimed a serialised run was
+stable, on ten runs of `npm run test:oracles -- --test-concurrency=1`. That flag never reached the runner
+in that position: node parses it only when it precedes `--test`, so appending it after the file glob is
+silently ignored. Measured both ways on the same tree -- **3.0s** with the flag after the glob, **10.5s**
+with it before `--test` -- and ten "serialised" runs that finished in three seconds each were parallel
+runs. The claim was an artifact of a flag that did not apply, which is the same shape as everything else
+in this file: a check that reports a setting and never verifies it arrived.
+
+**The mechanism is the registry write; the tests only make it visible.** `rememberDelegated` read the
+registry, merged in memory and wrote it back, and `saveDelegatedRegistry` wrote a temporary file named
 `target + '.tmp'` -- a fixed name rather than a per-writer one. Two processes doing that at the same
 moment lose one of the two updates, or collide on the temp path, and the loser's delegation is no longer
 in the registry the guard consults. The oracle run arranges that easily: the preload deliberately creates
@@ -1131,12 +1139,25 @@ files register delegations into the same file at once. It is intermittent becaus
 interleaving, which is also why it moved when one more oracle file was added -- the added file is the
 schedule change, not the cause.
 
-**Not fixed, and not caused by the attestation change**, whose code paths are disjoint from the guard --
-which is why it is recorded as its own finding rather than as fallout from another one. Two candidate
-fixes, and they are not equivalent. Giving each oracle file its own data directory is one line and hides
-it in tests while leaving production untouched; it is the tradeoff the preload's own comment considered
-and rejected for leaving a temp directory per file. Making the registry write per-writer atomic -- a
-unique temp name, and a read-modify-write that re-reads under a lock -- is the actual defect, and it
-matters outside tests, because two DSH sessions on one host share this file exactly as two oracle files
-do.
+**Fixed at the root, in the product and not in the test setup.** `saveDelegatedRegistry` now writes a
+per-writer temporary file (`<target>.<pid>.<random>.tmp`) and renames it into place, retrying the
+transient Windows failures (EPERM/EBUSY/EACCES) that a rename onto an open file produces. That alone
+would not have been enough, because the atomic rename guarantees the file is never half-written and NOT
+that it contains both updates: every caller is a read-modify-write, so a second writer's read can still
+predate the first writer's write. All three of them -- `rememberDelegated`, `recordDelegatedOutcome` and
+`recordOperatorAttestation` -- now load, merge and persist while holding an `O_EXCL` lock file, with a
+staleness rule so a writer that dies cannot wedge the registry for ever. A writer that cannot take the
+lock proceeds anyway and warns: the registry is best effort by design, and a delegation that already
+succeeded must not be failed by metadata.
+
+Ten full parallel runs after the fix: **0 failures**. That is consistent with the fix and is not proof of
+it -- at the pre-fix rate of roughly one in six, ten clean runs would happen about 14% of the time by
+chance. The defect and the loss it describes are real regardless of the rate, and the reason to fix it was
+never the flake: two DSH sessions on one host share this file exactly as two oracle files do, so an
+operator running two sessions could have had a file they had just delegated read back ungated.
+
+**Still true, and deliberately not changed:** the per-run data directory means records accumulate across
+oracle files within one run, so the suite is order-sensitive in principle. Giving each file its own
+directory would remove that, and it is the wrong fix to make first -- it hides in tests a sharing that
+production genuinely has, which is how this defect stayed invisible for as long as it did.
 

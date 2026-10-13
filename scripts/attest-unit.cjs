@@ -151,6 +151,56 @@ for (const file of artifacts) {
   }
 }
 
+/**
+ * Every contract must be covered by the discrimination gate, checked HERE because signing is the
+ * irreversible step.
+ *
+ * WHY THIS IS A SIGNER RULE AND NOT ONLY A GATE RULE. `scripts/check-contract-fixtures.cjs` discovers
+ * contracts by scanning `tests/contracts`, so a contract anywhere else is never run against a negative
+ * fixture -- and a contract that has never been shown to fail a plausible wrong implementation makes
+ * `"passed": true` mean "this file ran", not "this property holds". Measured: `tests/currency.contract.cjs`
+ * was the only contract in the repository outside that directory, and it was covered by nothing, which
+ * the ledger audit could not see because a record carries a contract hash and not a fixture verdict.
+ * The audit now checks coverage too; this refuses to create the record in the first place, so the failure
+ * arrives before the note is on the ref rather than afterwards, when the only remedy left is rewriting
+ * published history.
+ *
+ * The check is on the PATH as well as the fixture, because a fixture only counts when the gate can pair
+ * it with a contract under that directory -- `tests/contracts/fixtures/<name>.negative.ts` beside
+ * `tests/contracts/<name>.contract.cjs` is the pairing the gate performs, and a fixture anywhere else is
+ * dead weight that looks like coverage.
+ */
+function requireContractCoverage(contractFiles) {
+  for (const contract of contractFiles) {
+    const directory = path.posix.dirname(contract.relative)
+    const fileName = path.posix.basename(contract.relative)
+    const base = fileName.replace(/\.contract\.cjs$/, '')
+    if (directory !== 'tests/contracts' || !fileName.endsWith('.contract.cjs')) {
+      fatal(
+        'the contract ' + contract.relative + ' is not one the discrimination gate discovers, which is ' +
+          'only tests/contracts/<name>.contract.cjs. A contract outside that shape has therefore never ' +
+          'been run against a negative fixture, so passing verification against it would mean only that ' +
+          'it ran. Move it into that convention -- as tests/currency.contract.cjs was moved to ' +
+          'tests/contracts/currency.contract.cjs, with its module at tools/currency.ts.'
+      )
+    }
+    const fixtures = [
+      path.join(REPO_ROOT, 'tests', 'contracts', 'fixtures', base + '.negative.ts'),
+      path.join(REPO_ROOT, 'tests', 'contracts', 'fixtures', base + '.negative.cjs'),
+    ]
+    if (!fixtures.some((candidate) => fs.existsSync(candidate))) {
+      fatal(
+        'the contract ' + contract.relative + ' has no negative fixture at ' +
+          'tests/contracts/fixtures/' + base + '.negative.ts, so it has never been shown to fail a ' +
+          'plausible wrong implementation. A contract that cannot fail one is not evidence; write the ' +
+          'fixture first, and let scripts/check-contract-fixtures.cjs report that it discriminates.'
+      )
+    }
+  }
+}
+
+requireContractCoverage(contracts)
+
 // ---------------------------------------------------------------------------
 // Operator key, cross-checked against the committed pin
 // ---------------------------------------------------------------------------

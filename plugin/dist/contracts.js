@@ -260,19 +260,137 @@ function mergeDelegatedRecords(existing, incoming, limit = exports.DELEGATED_PAT
 function pruneDelegatedRecords(records, exists = (p) => fs.existsSync(p)) {
     return (records ?? []).filter((r) => r && r.path && exists(r.path));
 }
-/** Best effort by design: failing to persist must not fail a delegation that was already paid for. */
+/**
+ * Best effort by design: failing to persist must not fail a delegation that was already paid for.
+ *
+ * THE TEMPORARY NAME IS UNIQUE PER WRITER. It used to be `target + '.tmp'`, which is the same string for
+ * every process on the machine -- a shared file, not a scratch file. Two writers saving at the same moment
+ * therefore wrote to one path, and the loser's rename either failed or put the winner's bytes in place
+ * while the loser believed it had saved. The suffix removes the shared name entirely, so the rename is
+ * the only step that touches the real file and it is atomic on both platforms.
+ */
 function saveDelegatedRegistry(records) {
     const target = resolveDelegatedRegistryPath();
     try {
         fs.mkdirSync(path.dirname(target), { recursive: true });
-        const temp = target + '.tmp';
+        const temp = target + '.' + String(process.pid) + '.' + crypto.randomBytes(4).toString('hex') + '.tmp';
         fs.writeFileSync(temp, JSON.stringify({ version: 1, records }, null, 2), 'utf8');
-        fs.renameSync(temp, target);
+        renameWithRetry(temp, target);
         return true;
     }
     catch (err) {
         console.warn('[LOCAL_GUARD] could not persist the delegated registry:', err?.message || err);
         return false;
+    }
+}
+/** A synchronous sleep, because every caller on this path is synchronous. */
+function sleepSync(ms) {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+/**
+ * Rename over an existing file, retrying the transient failures.
+ *
+ * On Windows a rename onto a file another process currently has open fails with EPERM, EBUSY or EACCES
+ * and then succeeds moments later; POSIX has no such window. Retrying is the documented remedy, and
+ * anything that is not one of those three codes is a real failure and is re-thrown rather than retried
+ * into a timeout.
+ */
+function renameWithRetry(from, to, attempts = 12) {
+    for (let attempt = 1;; attempt++) {
+        try {
+            fs.renameSync(from, to);
+            return;
+        }
+        catch (err) {
+            const transient = err?.code === 'EPERM' || err?.code === 'EBUSY' || err?.code === 'EACCES';
+            if (!transient || attempt >= attempts)
+                throw err;
+            sleepSync(5 * attempt);
+        }
+    }
+}
+/** How long a writer waits for the registry lock before giving up, and when a lock is treated as dead. */
+const REGISTRY_LOCK_TIMEOUT_MS = 4000;
+const REGISTRY_LOCK_STALE_MS = 10000;
+/**
+ * Take the registry lock, or throw when it cannot be taken within the budget.
+ *
+ * WHY A LOCK AND NOT ONLY THE ATOMIC RENAME. `saveDelegatedRegistry` alone cannot make the whole
+ * operation safe, because every caller is a READ-MODIFY-WRITE: load the registry, change it in memory,
+ * write the whole file back. Two writers that interleave their reads lose one update even when both
+ * writes land intact -- the atomic rename guarantees the file is never half-written, not that it contains
+ * both updates. MEASURED in the oracle suite, which runs many processes against one data directory: a
+ * delegation registered by one file was intermittently absent from the registry the read guard consulted,
+ * and the failing assertion named files that had just been delegated and were read back ungated. Two DSH
+ * sessions on one host share this file exactly as two test processes do, so the loss is not a test
+ * artifact.
+ *
+ * `wx` is O_CREAT|O_EXCL, which is atomic on both platforms, so the create is the mutual exclusion and no
+ * separate check is needed. A holder that dies is handled by the staleness rule rather than by leaving the
+ * registry unwritable for ever.
+ */
+function acquireRegistryLock() {
+    const lockPath = resolveDelegatedRegistryPath() + '.lock';
+    fs.mkdirSync(path.dirname(lockPath), { recursive: true });
+    const deadline = Date.now() + REGISTRY_LOCK_TIMEOUT_MS;
+    for (;;) {
+        try {
+            const handle = fs.openSync(lockPath, 'wx');
+            fs.writeSync(handle, String(process.pid));
+            fs.closeSync(handle);
+            return lockPath;
+        }
+        catch (err) {
+            if (err?.code !== 'EEXIST')
+                throw err;
+            try {
+                if (Date.now() - fs.statSync(lockPath).mtimeMs > REGISTRY_LOCK_STALE_MS) {
+                    fs.rmSync(lockPath, { force: true });
+                    continue;
+                }
+            }
+            catch {
+                // The holder released it between the open and the stat; the next attempt will take it.
+            }
+            if (Date.now() > deadline) {
+                throw new Error('timed out waiting for the delegated-registry lock at ' + lockPath);
+            }
+            sleepSync(5);
+        }
+    }
+}
+function releaseRegistryLock(lockPath) {
+    try {
+        fs.rmSync(lockPath, { force: true });
+    }
+    catch {
+        // A lock left behind is reclaimed by the staleness rule, so a failed release is not worth a warning
+        // on a path that must not fail a delegation.
+    }
+}
+/**
+ * Run a read-modify-write of the registry under the lock, and run it anyway if the lock cannot be taken.
+ *
+ * THE UNLOCKED PATH IS THE OLD BEHAVIOUR, and it stays because the registry is best-effort by design: a
+ * delegation that already succeeded must not be failed by a lock it could not acquire. The warning names
+ * the risk rather than reporting a benign fallback, because that is what it is -- the update may be lost.
+ */
+function withRegistryLockOrWarn(label, fn) {
+    let lockPath = null;
+    try {
+        lockPath = acquireRegistryLock();
+    }
+    catch (err) {
+        console.warn('[LOCAL_GUARD] could not take the delegated-registry lock (' +
+            label +
+            '), so this update may be lost if another process writes at the same time:', err?.message || err);
+        return fn();
+    }
+    try {
+        return fn();
+    }
+    finally {
+        releaseRegistryLock(lockPath);
     }
 }
 /** Load, validate and prune. Called at startup so a restart does not forget what was delegated. */
@@ -299,9 +417,14 @@ function rememberDelegated(paths, mode = 'created') {
     }
     if (added.length === 0)
         return;
-    const merged = mergeDelegatedRecords(loadDelegatedRegistry(), added);
-    saveDelegatedRegistry(merged);
-    indexDelegated(merged);
+    // THE READ IS INSIDE THE LOCK, which is the whole point: a merge is only correct against the registry
+    // as it stands now, and reading first and locking afterwards is precisely the interleaving that loses
+    // the other writer's update.
+    withRegistryLockOrWarn('rememberDelegated', () => {
+        const merged = mergeDelegatedRecords(loadDelegatedRegistry(), added);
+        saveDelegatedRegistry(merged);
+        indexDelegated(merged);
+    });
 }
 /**
  * Stamp a unit's verdict onto the registry records for the files that unit wrote.
@@ -330,23 +453,25 @@ function recordDelegatedOutcome(paths, outcome, succeeded, at = Date.now()) {
     }
     if (wanted.size === 0)
         return 0;
-    const records = loadDelegatedRegistry();
-    let stamped = 0;
-    for (const record of records) {
-        if (!wanted.has((0, paths_1.canonicalisePath)(record.path)))
-            continue;
-        record.outcome = outcome;
-        record.succeeded = succeeded === true;
-        record.verdictAt = at;
-        stamped += 1;
-    }
-    if (stamped > 0) {
-        saveDelegatedRegistry(records);
-        // The index still holds these records as they were before the stamp, so it has to be refreshed or the
-        // guard would keep reading "no verdict" for a file whose verdict has just been recorded.
-        indexDelegated(records);
-    }
-    return stamped;
+    return withRegistryLockOrWarn('recordDelegatedOutcome', () => {
+        const records = loadDelegatedRegistry();
+        let stamped = 0;
+        for (const record of records) {
+            if (!wanted.has((0, paths_1.canonicalisePath)(record.path)))
+                continue;
+            record.outcome = outcome;
+            record.succeeded = succeeded === true;
+            record.verdictAt = at;
+            stamped += 1;
+        }
+        if (stamped > 0) {
+            saveDelegatedRegistry(records);
+            // The index still holds these records as they were before the stamp, so it has to be refreshed or
+            // the guard would keep reading "no verdict" for a file whose verdict has just been recorded.
+            indexDelegated(records);
+        }
+        return stamped;
+    });
 }
 /**
  * Record that a HUMAN verified a file, with the evidence they gave.
@@ -379,19 +504,29 @@ function recordOperatorAttestation(path, operator, evidence, at = Date.now()) {
     if (!hash)
         return null;
     const canonical = (0, paths_1.canonicalisePath)(target);
-    const records = loadDelegatedRegistry();
-    const existing = records.find((record) => (0, paths_1.canonicalisePath)(record.path) === canonical);
-    const record = existing ?? { path: canonical, sha256: hash, at, mode: 'created' };
-    record.sha256 = hash;
-    record.outcome = 'OPERATOR_ATTESTED';
-    // Deliberately NOT `succeeded: true`. Success is a claim that a contract was met, and no contract ran
-    // here. A consumer that wants to promote an attested file must check the verdict, not a boolean whose
-    // meaning would otherwise quietly widen to include "a human looked at it".
-    record.succeeded = false;
-    record.verdictAt = at;
-    record.attestation = { operator: who, evidence: why, at };
-    if (!existing)
-        records.push(record);
+    // Under the lock, like the other two: this creates or stamps a record against a registry it just read,
+    // so an unlocked read-modify-write here can drop another writer's attestation. The persist result is
+    // carried out of the lock rather than thrown from inside it, so the lock is released before the caller
+    // unwinds.
+    const record = withRegistryLockOrWarn('recordOperatorAttestation', () => {
+        const records = loadDelegatedRegistry();
+        const existing = records.find((r) => (0, paths_1.canonicalisePath)(r.path) === canonical);
+        const entry = existing ?? { path: canonical, sha256: hash, at, mode: 'created' };
+        entry.sha256 = hash;
+        entry.outcome = 'OPERATOR_ATTESTED';
+        // Deliberately NOT `succeeded: true`. Success is a claim that a contract was met, and no contract ran
+        // here. A consumer that wants to promote an attested file must check the verdict, not a boolean whose
+        // meaning would otherwise quietly widen to include "a human looked at it".
+        entry.succeeded = false;
+        entry.verdictAt = at;
+        entry.attestation = { operator: who, evidence: why, at };
+        if (!existing)
+            records.push(entry);
+        if (!saveDelegatedRegistry(records))
+            return null;
+        indexDelegated(records);
+        return entry;
+    });
     // A persist that did not happen must not be reported as one. `saveDelegatedRegistry` returns a boolean
     // rather than throwing so its other callers can decide, and the first version of this function ignored
     // that return -- so the very first attestation attempt printed a hash and an operator while the registry
@@ -403,13 +538,12 @@ function recordOperatorAttestation(path, operator, evidence, at = Date.now()) {
     // fail-closed direction -- an absent verdict reads as "nothing is proven". An attestation that fails to
     // record leaves the operator believing a human-verified claim is on file when nothing is, and the whole
     // point of the verdict is that somebody can be named for it.
-    if (!saveDelegatedRegistry(records)) {
+    if (!record) {
         throw new Error('Could not persist the operator attestation for ' +
             canonical +
             '. The registry at ' +
             resolveDelegatedRegistryPath() +
             ' was not written, so nothing was attested.');
     }
-    indexDelegated(records);
     return record;
 }

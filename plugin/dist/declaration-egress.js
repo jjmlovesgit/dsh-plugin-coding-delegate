@@ -62,6 +62,54 @@ function mappableSourceFile(filePath) {
     return MAPPABLE_SOURCE_EXTENSIONS.has(path.extname(String(filePath || '')).toLowerCase());
 }
 /**
+ * Expand a search scope into the declarations that stand for the source beneath it.
+ *
+ * WHY AN EXPANSION RATHER THAN A VERDICT PER SCOPE. The search branch used to decide from the scope's
+ * extension alone, which is a question about the string and not about the tree. MEASURED: scoping a
+ * search to `src` returned `{"action":"allow"}` while `src/guard.ts` was refused, so the filter's reach
+ * depended on how the caller spelled the path rather than on what the path contains. Resolving the
+ * scope first removes the spelling from the decision entirely.
+ *
+ * `text` is the whole skeleton, never a filtered selection of the source: matching the search pattern
+ * against source and returning the matching declaration lines would be a different and much easier thing
+ * to get wrong, and the point of this mode is that implementation bytes never cross at all.
+ */
+function resolveDeclarations(input, scope) {
+    const listed = input.listSourceFiles(scope);
+    const sources = Array.isArray(listed) ? listed.filter((f) => mappableSourceFile(String(f))) : [];
+    const resolved = [];
+    const unresolved = [];
+    for (const source of sources) {
+        const skeleton = input.declarationPathFor
+            ? input.declarationPathFor(source, input.declarationRoot)
+            : null;
+        if (!skeleton) {
+            unresolved.push(source + ' (no declaration path can be derived for it)');
+            continue;
+        }
+        let detail = { exists: false };
+        try {
+            detail = input.readDeclaration ? input.readDeclaration(source, input.declarationRoot) : { exists: false };
+        }
+        catch {
+            detail = { exists: false };
+        }
+        if (!detail || detail.exists !== true || typeof detail.text !== 'string') {
+            unresolved.push(source + " (no type skeleton exists at '" + skeleton + "')");
+            continue;
+        }
+        // A stale declaration is refused rather than summarised away. index.ts applies the same rule for a
+        // read: serving yesterday's signature while the caller believes it is current is the failure that
+        // check exists to prevent, and a search must not become the route that skips it.
+        if (detail.staleReason) {
+            unresolved.push(source + ' (' + detail.staleReason + ')');
+            continue;
+        }
+        resolved.push({ source, skeleton, exists: true, text: detail.text });
+    }
+    return { resolved, unresolved };
+}
+/**
  * Decide whether one tool call may proceed under declarations mode.
  *
  * Pure, with every environment-dependent question injected, so the whole policy is testable without a
@@ -122,20 +170,79 @@ function evaluateDeclarationEgress(input) {
     //    the opposite of the read branch, where an unstated target is simply not a read.
     if (input.toolKind === 'search') {
         const scope = target.trim();
-        if (scope && !(input.isCodeExtension ? input.isCodeExtension(scope) : false)) {
-            return { action: 'allow' };
-        }
-        return {
-            action: 'block',
-            reason: scope
-                ? "Searching '" +
-                    scope +
-                    "' was refused: sourceReadEgress is 'declarations' and a search returns matched source lines, " +
-                    'which are implementation bodies. Read the declaration path directly instead.'
-                : "A search with no stated scope was refused: sourceReadEgress is 'declarations' and the search's " +
+        if (!scope) {
+            return {
+                action: 'block',
+                reason: "A search with no stated scope was refused: sourceReadEgress is 'declarations' and the search's " +
                     'reach cannot be shown to avoid source. Narrow it to a non-source path, or read a declaration ' +
                     'path directly.',
-        };
+            };
+        }
+        // A scope that names a source FILE keeps the rule the committed oracle pins for it -- a search over a
+        // code file is refused rather than answered with the file's whole skeleton, which would answer a
+        // question the caller did not ask. The directory route below is where the defect was.
+        if (input.isCodeExtension ? input.isCodeExtension(scope) : false) {
+            return {
+                action: 'block',
+                reason: "Searching '" +
+                    scope +
+                    "' was refused: sourceReadEgress is 'declarations' and a search returns matched source lines, " +
+                    'which are implementation bodies. Read the declaration path directly instead.',
+            };
+        }
+        // The defect: a DIRECTORY has no extension, so the two checks above saw "not code" and allowed a
+        // search whose matches are implementation lines from every file beneath it. The refusal below is
+        // reached only with the directory resolved to explicit source files.
+        if (input.directoryScope ? input.directoryScope(scope) : false) {
+            if (!input.listSourceFiles) {
+                // An unresolvable directory cannot be cleared: "no source beneath" is a claim about the tree and
+                // nothing here has looked at the tree. Fail closed, the rule the shell branch already states.
+                return {
+                    action: 'block',
+                    reason: "Searching '" +
+                        scope +
+                        "' was refused: sourceReadEgress is 'declarations', that scope is a directory, and this " +
+                        'route cannot resolve it to the source files beneath it, so it cannot be shown to avoid ' +
+                        'source. Read a declaration path directly instead.',
+                };
+            }
+            const { resolved, unresolved } = resolveDeclarations(input, scope);
+            // Refused rather than served when any file beneath the scope has no declaration. Serving the rest
+            // would answer a question about a tree by silently omitting part of it, and the caller cannot tell
+            // which part is missing.
+            if (unresolved.length) {
+                return {
+                    action: 'block',
+                    reason: "Searching '" +
+                        scope +
+                        "' was refused: sourceReadEgress is 'declarations' and the scope holds source with no " +
+                        'servable type skeleton -- ' +
+                        unresolved.join('; ') +
+                        '. Implementation bodies are not served to this context. Build the declarations with ' +
+                        'npm run build, or search a narrower non-source path.',
+                };
+            }
+            // Positively resolved to nothing: the resolver looked and there is no source beneath this scope, so
+            // the search cannot return an implementation line. A control, so this route cannot pass by
+            // refusing every directory.
+            if (!resolved.length)
+                return { action: 'allow' };
+            const skeletons = resolved.map((r) => r.skeleton);
+            return {
+                action: 'serve-declaration',
+                skeleton: skeletons.join(', '),
+                declarationText: resolved
+                    .map((r) => '// Declaration file: ' + r.skeleton + '\n' + String(r.text).trim())
+                    .join('\n\n'),
+                reason: 'The scope resolves to ' +
+                    resolved.length +
+                    ' source file(s). Only their type declarations are served; implementation bodies are withheld ' +
+                    "by policy (sourceEgress: declarations).",
+            };
+        }
+        // Anything else -- prose, a path that does not exist, an unresolved name -- is not shown to reach
+        // source, and the extension test above has already cleared anything code-shaped.
+        return { action: 'allow' };
     }
     // 5. SHELL. Same leak by another door, with one difference that matters: a command that merely lists
     //    or tests reads no bytes, so there is nothing to leak and it is allowed through.

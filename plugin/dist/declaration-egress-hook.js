@@ -35,6 +35,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.handleDeclarationPostExecute = handleDeclarationPostExecute;
 const path = __importStar(require("path"));
+const fs = __importStar(require("fs"));
 const guard_1 = require("./guard");
 // CODE_EXTENSIONS is declared in ./paths and is deliberately not re-exported from ./guard, so it is
 // imported from its own module. Importing it from './guard' fails to compile.
@@ -81,6 +82,70 @@ function handleDeclarationPostExecute(exec, options) {
     // longestCodeReference returns the longest code-looking token, or undefined. The evaluator wants a
     // predicate, so presence becomes a boolean here rather than a second vocabulary of source extensions.
     const commandNamesSource = (cmd) => (0, guard_1.longestCodeReference)(cmd) !== undefined;
+    // THE SCOPE IS A PATH, AND A DIRECTORY IS A PATH WITH NO EXTENSION. The evaluator needs to be told
+    // which of the two it is holding, because an extension test answers "not code" for `src` -- MEASURED
+    // before this wiring existed, `{toolKind:'search', target:'src'}` came back `{"action":"allow"}` while
+    // `src/guard.ts` was refused. `statSync` is the only thing that can tell the two apart, and it is
+    // consulted here rather than inside the evaluator so the decision stays testable without a disk.
+    const directoryScope = (p) => {
+        try {
+            return fs.statSync(p).isDirectory();
+        }
+        catch {
+            // A scope that does not exist beneath the process cwd is not a directory this route can resolve,
+            // so it is not cleared here and falls through to the extension test.
+            return false;
+        }
+    };
+    // The source files a scope names. A directory is walked; a file is itself. An unreadable branch is
+    // reported as no source rather than as an error, and that is deliberate: the walk answers "which files
+    // can the caller's search reach", so a subtree the harness cannot read is a subtree the search cannot
+    // return bytes from either. Anything the walk genuinely cannot tell apart fails closed in the
+    // evaluator instead -- a missing declaration for a file it DID find is refused there, not here.
+    const listSourceFiles = (scope) => {
+        const found = [];
+        const walk = (p) => {
+            let entries;
+            let isDirectory = false;
+            try {
+                const stat = fs.statSync(p);
+                isDirectory = stat.isDirectory();
+                if (!isDirectory && !stat.isFile())
+                    return;
+                if (!isDirectory) {
+                    if (paths_1.CODE_EXTENSIONS.has(path.extname(p).toLowerCase()))
+                        found.push(p);
+                    return;
+                }
+                entries = fs.readdirSync(p, { withFileTypes: true });
+            }
+            catch {
+                return;
+            }
+            for (const entry of entries) {
+                if (entry.isDirectory() || entry.isFile())
+                    walk(path.join(p, entry.name));
+            }
+        };
+        walk(scope);
+        return found;
+    };
+    // The declaration bytes behind one source file, with the staleness verdict index.ts already applies to
+    // a read. `exists:false` for anything unreadable, so a missing skeleton is refused rather than served.
+    const readDeclaration = (sourceFile, root) => {
+        const skeleton = (0, guard_1.declarationPathFor)(sourceFile, String(root || ''));
+        if (!skeleton)
+            return { exists: false };
+        let text;
+        try {
+            text = fs.readFileSync(skeleton, 'utf8');
+        }
+        catch {
+            return { exists: false };
+        }
+        const staleReason = (0, guard_1.staleDeclarationReason)(sourceFile, skeleton);
+        return staleReason ? { exists: true, text, staleReason } : { exists: true, text };
+    };
     const verdict = (0, declaration_egress_1.evaluateDeclarationEgress)({
         toolKind,
         target,
@@ -90,6 +155,9 @@ function handleDeclarationPostExecute(exec, options) {
         declarationPathFor: guard_1.declarationPathFor,
         commandReadsContent: guard_1.commandReadsContent,
         commandNamesSource,
+        directoryScope,
+        listSourceFiles,
+        readDeclaration,
     });
     if (verdict.action === 'block') {
         return {
@@ -102,11 +170,27 @@ function handleDeclarationPostExecute(exec, options) {
             ],
         };
     }
-    // A search or a shell command has no single file to substitute a skeleton for: a search returns
-    // matched lines from wherever they matched. If the evaluator ever returns serve-declaration for one of
-    // these kinds, refusing is the safe reading -- serving a whole declaration in place of search output
-    // would answer a question the caller did not ask. Reads never reach this module.
+    // A search has no single file to substitute a skeleton for, so a bare skeleton name is not servable
+    // here. A scope that RESOLVED to declaration bytes is different: the evaluator has already walked the
+    // scope and carries the declarations, which is the only thing that may stand in for the matched lines.
     if (verdict.action === 'serve-declaration') {
+        if (typeof verdict.declarationText === 'string' && verdict.declarationText.trim()) {
+            return {
+                kind: 'accept',
+                content: [
+                    {
+                        type: 'text',
+                        text: '// SERVED AS TYPE DECLARATIONS, NOT SOURCE. Implementation bodies are withheld by policy ' +
+                            '(sourceEgress: declarations).\n// Declaration file(s): ' +
+                            String(verdict.skeleton || '') +
+                            '\n// ' +
+                            String(verdict.reason || '') +
+                            '\n\n' +
+                            verdict.declarationText,
+                    },
+                ],
+            };
+        }
         return {
             kind: 'accept',
             content: [

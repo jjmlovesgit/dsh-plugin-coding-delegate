@@ -16,8 +16,14 @@
  *   2. it prefixes the served text with the "SERVED AS TYPE DECLARATIONS, NOT SOURCE" banner that
  *      `egress-guard.test.cjs` asserts on.
  *
- * So a read returns null here and falls through to the path that is already covered by tests. Only the
- * two routes that can act on nothing except by refusing -- search and shell -- are handled below.
+ * So a read returns null here and falls through to the path that is already covered by tests.
+ *
+ * WHAT IT DOES SERVE, added with the directory-scope fix: the declarations for a SEARCH whose scope
+ * resolved to source files. Refusing was the whole of this module's power over a search until the
+ * evaluator was given the tree -- a scope like `src` names no file to redirect, and refusing it left the
+ * caller with nothing. The evaluator now walks the scope, so the same banner and the same staleness rule
+ * the read branch applies are applied to the resolved declarations here, and implementation bytes never
+ * cross on this route either.
  */
 export interface PostExecuteExec {
     name?: string;
