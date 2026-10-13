@@ -11,11 +11,18 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { canonicalMerge } = require('../../tools/json-canonical-merge.ts');
+const { canonicalMerge } = require(
+  // The module under test. Overridable so the negative-fixture gate can aim this same contract at a
+  // deliberately defective implementation; see scripts/check-contract-fixtures.cjs.
+  process.env.TARGET_OVERRIDE || path.join(__dirname, '..', '..', 'tools', 'json-canonical-merge.ts')
+);
 
 test('json-canonical-merge specification contract', async (t) => {
   await t.test('enforces exact generic signature in source', () => {
-    const src = fs.readFileSync(path.join(__dirname, '../../tools/json-canonical-merge.ts'), 'utf8');
+    const src = fs.readFileSync(
+      process.env.TARGET_OVERRIDE || path.join(__dirname, '../../tools/json-canonical-merge.ts'),
+      'utf8'
+    );
     const sigPattern = /export\s+function\s+canonicalMerge\s*<\s*T\s+extends\s+Record<\s*string\s*,\s*any\s*>\s*>\s*\(\s*base\s*:\s*T\s*,\s*patch\s*:\s*Record<\s*string\s*,\s*any\s*>\s*\)\s*:\s*Record<\s*string\s*,\s*any\s*>/;
     assert.match(src, sigPattern, 'Source must define exact generic type signature');
   });

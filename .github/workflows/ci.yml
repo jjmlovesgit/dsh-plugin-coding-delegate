@@ -78,3 +78,31 @@ jobs:
         # the job, because the scripts resolve the repository root from their own location, not the cwd.
         working-directory: .
         run: node scripts/check-readme-consistency.cjs
+
+      - name: Contract well-formedness
+        # check-contract.cjs judges a contract against a NULL implementation -- does it reach its
+        # assertions, does it malfunction -- and takes one contract at a time. This walks the directory
+        # and pairs each contract with the module of the same name, which is the convention both
+        # contracts follow. The exit code is checked after EVERY run on purpose: GitHub's pwsh wrapper
+        # only inspects the last native command's status, so a bare sequence would let an earlier
+        # failure pass unnoticed.
+        working-directory: .
+        shell: pwsh
+        run: |
+          foreach ($c in Get-ChildItem tests/contracts/*.contract.cjs) {
+            $base = $c.BaseName -replace '\.contract$', ''
+            Write-Host "checking $($c.Name) against tools/$base.ts"
+            node scripts/check-contract.cjs --contract $c.FullName --module "tools/$base.ts"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
+      - name: Contract discriminative power (negative fixtures)
+        # The half check-contract.cjs cannot test. A null stub is not a plausible WRONG answer, so it
+        # cannot tell whether a case exercises the property its name claims: measured, a contract
+        # containing only the vacuous non-mutating corruption case is reported by check-contract.cjs as
+        # "well-formed and discriminating". This step requires every contract to PASS its own module and
+        # FAIL a fixture that is deliberately correct in every respect except one, and it fails closed
+        # when a fixture is missing rather than skipping, because a gate that passes when its fixtures
+        # are absent provides no guarantee at all.
+        working-directory: .
+        run: node scripts/check-contract-fixtures.cjs

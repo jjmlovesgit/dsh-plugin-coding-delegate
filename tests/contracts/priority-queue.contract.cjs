@@ -2,11 +2,18 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { PriorityQueue } = require('../../tools/priority-queue.ts');
+const { PriorityQueue } = require(
+  // The module under test. Overridable so the negative-fixture gate can aim this same contract at a
+  // deliberately defective implementation; see scripts/check-contract-fixtures.cjs.
+  process.env.TARGET_OVERRIDE || path.join(__dirname, '..', '..', 'tools', 'priority-queue.ts')
+);
 
 test('PriorityQueue strict specification contract', async (t) => {
   await t.test('enforces exact generic class signature and exports', () => {
-    const src = fs.readFileSync(path.join(__dirname, '../../tools/priority-queue.ts'), 'utf8');
+    const src = fs.readFileSync(
+      process.env.TARGET_OVERRIDE || path.join(__dirname, '../../tools/priority-queue.ts'),
+      'utf8'
+    );
     assert.match(
       src,
       /export\s+class\s+PriorityQueue\s*<\s*T\s*>/,
