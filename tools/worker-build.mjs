@@ -32,6 +32,18 @@ import http from "node:http";
 const MAX_TOKENS = 8192;
 
 const REQUIREMENTS = {
+  "tools/ring-buffer.ts": [
+    "Export a generic class exactly as: export class RingBuffer<T>",
+    "The constructor takes capacity: number and MUST throw a RangeError when capacity is not a positive integer. 0, negative values, fractional values, NaN and Infinity are all invalid. A capacity of 1 is valid.",
+    "push(item: T): boolean -- appends item as the NEWEST element. Returns true when it was stored, and false when the buffer is already full. A refused push must change NOTHING: no overwrite of the oldest element, no eviction, no change to size, and no reordering.",
+    "pop(): T | undefined -- removes and returns the OLDEST element (FIFO). Returns undefined when empty.",
+    "peek(): T | undefined -- returns the OLDEST element without removing it. Returns undefined when empty. Calling it twice must return the same element.",
+    "isFull(): boolean and isEmpty(): boolean.",
+    "A GETTER `size: number` for the current element count and a GETTER `capacity: number` for the fixed capacity. Both are getters, not methods.",
+    "CRITICAL: keep the store in a #private field and wrap the write index modulo capacity. After a pop, the next push MUST reuse the freed slot rather than appending, so the buffer never grows past capacity and the oldest element is not at index 0 once it has wrapped. Use #buffer, #head and #size (or equivalent #private fields).",
+    "The backing store MUST NOT be reachable from the instance: a caller must not be able to reach a live array through any own property or prototype accessor.",
+    "No imports, no external runtime dependencies, no console output.",
+  ],
   "tools/priority-queue.ts": [
     "Export a generic class exactly as: export class PriorityQueue<T>",
     "The constructor takes an optional comparator (a: T, b: T) => number. With no comparator, order naturally ascending, i.e. a min-heap.",
