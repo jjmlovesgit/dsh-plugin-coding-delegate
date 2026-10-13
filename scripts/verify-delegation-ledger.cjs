@@ -16,9 +16,13 @@
  *
  *   3. ARTIFACTS MATCH DISK. The paths ARE recorded in the envelope, so this is a complete check.
  *
- *   4. contractHash BY CONVENTION -- and this one is deliberately allowed to come back UNVERIFIABLE.
+ *   4. SPEC CONFORMANCE AT THE ANCHOR POINT. A note anchored at or after the commit that introduced
+ *      1.1 must be self-describing. The test is ancestry, not an allowlist: a 1.0 payload before that
+ *      commit is history, and after it is a regression.
  *
- * WHY CHECK 4 IS NOT A FAILURE WHEN IT CANNOT RUN. The envelope records `contractHash`, a digest over
+ *   5. contractHash BY CONVENTION -- and this one is deliberately allowed to come back UNVERIFIABLE.
+ *
+ * WHY CHECK 5 IS NOT A FAILURE WHEN IT CANNOT RUN. The envelope records `contractHash`, a digest over
  * an array of `{path, sha256}` pairs, and it does NOT record the array. So the digest is a blind
  * commitment: it can be recomputed only if the contract set is known from outside. For recent notes
  * that works by convention -- one contract at `tests/contracts/<artifact-base>.contract.cjs` -- and for
@@ -58,6 +62,19 @@ const KEYS_DIR = path.join(os.homedir(), '.dsh', 'keys')
 const PRIVATE_KEY_PATH = path.join(KEYS_DIR, 'delegation_ed25519.pem')
 const PUBLIC_KEY_PATH = path.join(KEYS_DIR, 'delegation_ed25519.pub')
 const REPO_PINNED_KEY_PATH = path.join(REPO_ROOT, 'keys', 'delegation-operator.pub')
+
+/**
+ * The commit that introduced attestation spec 1.1, where the payload began recording the contract set.
+ *
+ * A note anchored at or after this commit must be self-describing. The test is ANCESTRY, not an
+ * allowlist of SHAs: a 1.0 payload anchored BEFORE this commit is history that cannot be re-signed
+ * without rewriting a published record, and a 1.0 payload anchored after it means a signer that should
+ * not still be in use produced it.
+ *
+ * The full object name, not an abbreviation: an abbreviated name is unambiguous only until the object
+ * database grows another object sharing the prefix, and this constant must not rot into ambiguity.
+ */
+const SPEC_1_1_CUTOFF = 'c5bcc5a61b018468dd8cb16a3aed9c53c1c73232'
 
 const sha256 = (buffer) => crypto.createHash('sha256').update(buffer).digest('hex')
 
@@ -233,7 +250,39 @@ for (const { noteBlob, commitSha } of entries) {
   }
   if (artifactsOk) console.log('  ok    ' + artifacts.length + ' artifact(s) match on-disk bytes')
 
-  // ---- 4. contractHash: self-described from 1.1, by convention for 1.0 ----------
+  // ---- 4. spec conformance at the anchor point ----------------------------
+  //
+  // NOT REDUNDANT WITH CHECK 5. A 1.0 payload that HAPPENS to follow the tools/<name> convention audits
+  // as VERIFIED and nothing flags it -- but it is still a blind commitment, and it becomes UNVERIFIABLE
+  // the moment the contract set leaves the convention or grows past one file. Without this rule, only
+  // the notes that already fail the convention are visible; a hand-rolled or stale signer could keep
+  // producing convention-dependent records indefinitely and every one of them would look clean.
+  let postCutoff = false
+  try {
+    // argv, not a shell: `baseCommit` comes out of the note payload, and interpolating note content
+    // into a command line is how a record gets to choose what the auditor executes.
+    git(['merge-base', '--is-ancestor', SPEC_1_1_CUTOFF, payload.baseCommit])
+    postCutoff = true
+  } catch {
+    postCutoff = false
+  }
+
+  const hasContractSet = Array.isArray(payload.contracts)
+
+  if (postCutoff && !hasContractSet) {
+    fail(
+      'spec regression: anchored after the 1.1 cutoff (' + SPEC_1_1_CUTOFF.slice(0, 8) + ') but the ' +
+        'payload records specVersion ' + payload.specVersion + ' with no contracts array. A record ' +
+        'signed from here on must be self-describing: a digest whose input set is never recorded can ' +
+        'only be recomputed by guessing a path convention.'
+    )
+  } else if (!postCutoff && !hasContractSet) {
+    console.log(
+      '  --    legacy 1.0 payload, anchored before the 1.1 cutoff; grandfathered and resolved below'
+    )
+  }
+
+  // ---- 5. contractHash: self-described from 1.1, by convention for 1.0 ----------
   let contractResult = 'UNVERIFIABLE'
   const cmp = (a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)
 
