@@ -26,6 +26,18 @@ export declare function configurePatchEngine(engine: {
  * The containment decision for one delegated write. `baseDir` is the session workspace
  * and `allowedRoots` is the operator's explicit extension list. Both sides are
  * canonicalised, so a symlink inside the workspace cannot be used to escape it.
+ *
+ * Symbolic links are refused outright, not merely resolved: the project's rule is that a path is
+ * rejected the moment `lstat` reports `isSymbolicLink()`. This is the one gate every emission route
+ * passes through, so the check lives here rather than at the write, and a refusal names the link
+ * component instead of only reporting that the destination resolved somewhere unexpected.
+ *
+ * The lstat check is not redundant with the containment comparison below even though canonicalisation
+ * now resolves a dangling link too. Canonicalising a link hides that there was one, which is what let
+ * a link-shaped destination be described as an ordinary in-workspace file; and a link that points back
+ * INSIDE the workspace would pass containment while still violating the rule. Containment asks "is
+ * this destination inside the workspace"; this asks "is the destination expressed as a link at all",
+ * and only the second question has the answer the rule is written against.
  */
 export declare function evaluateEmissionPath(resolvedPath: string, baseDir: string, allowedRoots?: string[]): {
     allowed: boolean;

@@ -61,9 +61,31 @@ function configurePatchEngine(engine) {
  * The containment decision for one delegated write. `baseDir` is the session workspace
  * and `allowedRoots` is the operator's explicit extension list. Both sides are
  * canonicalised, so a symlink inside the workspace cannot be used to escape it.
+ *
+ * Symbolic links are refused outright, not merely resolved: the project's rule is that a path is
+ * rejected the moment `lstat` reports `isSymbolicLink()`. This is the one gate every emission route
+ * passes through, so the check lives here rather than at the write, and a refusal names the link
+ * component instead of only reporting that the destination resolved somewhere unexpected.
+ *
+ * The lstat check is not redundant with the containment comparison below even though canonicalisation
+ * now resolves a dangling link too. Canonicalising a link hides that there was one, which is what let
+ * a link-shaped destination be described as an ordinary in-workspace file; and a link that points back
+ * INSIDE the workspace would pass containment while still violating the rule. Containment asks "is
+ * this destination inside the workspace"; this asks "is the destination expressed as a link at all",
+ * and only the second question has the answer the rule is written against.
  */
 function evaluateEmissionPath(resolvedPath, baseDir, allowedRoots = []) {
     const canonical = (0, paths_1.canonicalisePath)(resolvedPath);
+    const link = (0, paths_1.describeSymlinkInPath)(resolvedPath, [baseDir, ...allowedRoots]);
+    if (link) {
+        return {
+            allowed: false,
+            reason: `Refused to write '${resolvedPath}': '${link.path}' is a symbolic link` +
+                (link.target ? `, pointing at '${link.target}'` : '') +
+                `. Symbolic links are prohibited in generated artifacts, so a delegated worker may not write ` +
+                `through one. Emit to the link's target directly if that destination is intended.`,
+        };
+    }
     const roots = [baseDir, ...allowedRoots].filter((root) => typeof root === 'string' && root.trim().length > 0);
     for (const root of roots) {
         if ((0, paths_1.isPathWithin)((0, paths_1.canonicalisePath)(root), canonical))
@@ -154,6 +176,10 @@ function extractAndEmitFiles(content, targetFilesHint, baseDir = process.cwd(), 
             console.warn(`[EMIT_FILE_BLOCKED] ${containment.reason}`);
             return;
         }
+        // Symbolic links are prohibited in generated artifacts -- "if lstat indicates isSymbolicLink(),
+        // reject the path immediately". That refusal lives in `evaluateEmissionPath` above, which is the
+        // single gate every emission route already passes through, so there is no second check here to
+        // drift from it.
         // Contract files belong to the architect. This is checked before anything is written, and it
         // covers every emission route -- the fenced header, the `// FILE:` marker, and the fallback --
         // because they all funnel through here.
