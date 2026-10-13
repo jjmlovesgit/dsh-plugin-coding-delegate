@@ -32,6 +32,20 @@ import http from "node:http";
 const MAX_TOKENS = 8192;
 
 const REQUIREMENTS = {
+  "tools/lru-cache.ts": [
+    "Export a generic class exactly as: export class LRUCache<K, V>",
+    "The constructor takes capacity: number and MUST throw a RangeError when capacity is not a positive integer. 0, negative values, fractional values, NaN and Infinity are all invalid. A capacity of 1 is valid.",
+    "get(key: K): V | undefined -- returns the stored value, or undefined when absent. A successful get MUST promote the entry to most-recently-used.",
+    "set(key: K, value: V): void -- inserts or updates. Setting a key that is already present MUST update the value in place, MUST NOT grow size, and MUST promote the entry to most-recently-used.",
+    "has(key: K): boolean -- a pure membership test. It MUST NOT promote: asking whether a key is present must not reorder the cache.",
+    "delete(key: K): boolean -- removes the entry and its recency position; returns true if it was present, false otherwise.",
+    "clear(): void -- removes every entry.",
+    "A GETTER `size: number` and a GETTER `capacity: number`. Both are getters, not methods.",
+    "EVICTION: when an insertion would take size past capacity, drop the least-recently-used entry. Exactly one entry is dropped per insertion, and the entry dropped is the one least recently used by the rules above.",
+    "COMPLEXITY: get, set and delete must be O(1) amortised. Use a hash Map for lookup plus a doubly-linked list for recency order. An array scan over the entries satisfies the behaviour but is O(n) and is NOT acceptable.",
+    "CRITICAL: keep the map and the list nodes in #private fields. A caller must not be able to reach a live Map, Array, Set or node object through any own property or prototype accessor.",
+    "No imports, no external runtime dependencies, no console output.",
+  ],
   "tools/ring-buffer.ts": [
     "Export a generic class exactly as: export class RingBuffer<T>",
     "The constructor takes capacity: number and MUST throw a RangeError when capacity is not a positive integer. 0, negative values, fractional values, NaN and Infinity are all invalid. A capacity of 1 is valid.",
