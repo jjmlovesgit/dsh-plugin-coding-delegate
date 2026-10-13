@@ -37,6 +37,19 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..
 const MAX_TOKENS = 8192;
 
 const REQUIREMENTS = {
+  "tools/event-emitter.ts": [
+    "Export a generic class exactly as: export class EventEmitter<Events extends Record<string, (...args: any[]) => void>>  -- one generic parameter constrained to a record of functions, and exactly one export in the file.",
+    "on(event, listener): this -- registers a listener. Registering the SAME function twice creates TWO registrations, both of which run, in registration order.",
+    "once(event, listener): this -- registers a listener that is UNREGISTERED BEFORE IT IS INVOKED. A once listener that re-emits the same event during its own call must not run a second time.",
+    "off(event, listener): this -- removes the first registration of that listener. Removing a listener that is not registered is a no-op and must not disturb the others.",
+    "emit(event, ...args): boolean -- invokes every listener registered for the event, in registration order, forwarding every argument BY REFERENCE (no cloning, no serialising, no truncation). Returns true if at least one listener ran, false if none did. Emitting an event with no listeners is a normal call, not an error.",
+    "listenerCount(event): number -- the number of registrations for that event; 0 for an unknown event.",
+    "removeAllListeners(event?): this -- with an event, clears only that event; with no argument, clears every event. The emitter must be fully reusable afterwards.",
+    "CRITICAL - SNAPSHOT DISPATCH: emit MUST take a snapshot of the listener set for the event at the moment emit is called, and iterate THAT. A listener that removes itself or another listener during the dispatch must not cause any listener present at the start to be skipped. A listener registered DURING a dispatch must not be invoked by that dispatch; it runs on the next one.",
+    "on, once, off and removeAllListeners MUST return `this` so calls chain.",
+    "Keep the listener store in a #private field. A caller must not be able to reach a live Array, Map, Set or listener object through any own property or prototype accessor.",
+    "No imports, no external runtime dependencies, no console output.",
+  ],
   "tools/lru-cache.ts": [
     "Export a generic class exactly as: export class LRUCache<K, V>",
     "The constructor takes capacity: number and MUST throw a RangeError when capacity is not a positive integer. 0, negative values, fractional values, NaN and Infinity are all invalid. A capacity of 1 is valid.",
