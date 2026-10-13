@@ -57,6 +57,21 @@ const NOTES_REF = 'refs/notes/delegations'
 const PRIVATE_KEY_PATH = path.join(os.homedir(), '.dsh', 'keys', 'delegation_ed25519.pem')
 const REPO_PUBLIC_KEY_PATH = path.join(REPO_ROOT, 'keys', 'delegation-operator.pub')
 
+/**
+ * Canonicalise a PEM before it is compared or consumed: CRLF and lone CR become LF, then trim.
+ *
+ * THE SIGNER HAS THE SAME HAZARD AS THE AUDITOR, and for the same reason: the crypto layer tolerates
+ * CRLF (measured -- `crypto.sign`, `publicKeyFromPrivate` and `verifyEnvelope` all accept it), so only
+ * string equality breaks, and string equality is how the committed pin is enforced. A CRLF copy of
+ * `keys/delegation-operator.pub` would make this script refuse to sign while asserting the signing key
+ * "does not correspond to" the pin -- false, and pointed at the wrong remedy.
+ *
+ * CLEANING HERE ALSO KEEPS THE RECORD CANONICAL. `derivedPublicKey` is embedded in the envelope, so
+ * normalising it is what stops the line endings of the machine that signed from leaking into the ledger
+ * and making a sound record look unattributed to an auditor on a different platform.
+ */
+const cleanKey = (keyStr) => String(keyStr).replace(/\r\n?/g, '\n').trim()
+
 function fatal(message) {
   console.error('ATTEST FATAL  ' + message)
   process.exit(1)
@@ -133,11 +148,15 @@ for (const file of artifacts) {
 if (!fs.existsSync(PRIVATE_KEY_PATH)) {
   fatal('no signing key at ' + PRIVATE_KEY_PATH)
 }
-const privateKeyPem = fs.readFileSync(PRIVATE_KEY_PATH, 'utf8')
-const derivedPublicKey = String(publicKeyFromPrivate(privateKeyPem)).trim()
+const privateKeyPem = cleanKey(fs.readFileSync(PRIVATE_KEY_PATH, 'utf8'))
+const derivedPublicKey = cleanKey(publicKeyFromPrivate(privateKeyPem))
 
 if (fs.existsSync(REPO_PUBLIC_KEY_PATH)) {
-  const pinned = fs.readFileSync(REPO_PUBLIC_KEY_PATH, 'utf8').trim()
+  const pinnedRaw = fs.readFileSync(REPO_PUBLIC_KEY_PATH, 'utf8')
+  const pinned = cleanKey(pinnedRaw)
+  if (/\r/.test(pinnedRaw)) {
+    console.warn('  warn  keys/delegation-operator.pub contained CR line endings; normalised to LF before comparison')
+  }
   if (pinned !== derivedPublicKey) {
     fatal(
       'the signing key does not correspond to keys/delegation-operator.pub. Signing with it would ' +

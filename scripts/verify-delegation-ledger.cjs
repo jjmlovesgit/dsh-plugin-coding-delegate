@@ -9,7 +9,8 @@
  *      replaces the payload can replace the key beside it, and the envelope still verifies. Pinning the
  *      operator's key is what turns self-signed tamper-evidence into operator attribution. It is the
  *      difference between "these bytes are internally consistent" and "these bytes came from this
- *      operator".
+ *      operator". The comparison is on LF-normalised PEMs, because a CRLF checkout of the committed pin
+ *      would otherwise reject every record in the ledger while claiming the keys disagree.
  *
  *   2. THE NOTE IS ATTACHED TO THE COMMIT IT NAMES. `git notes` lets a note hang off ANY commit, so a
  *      sound envelope can be moved to a target whose tree it never saw. Checks 3 and 4 would both pass
@@ -88,6 +89,22 @@ const SPEC_1_1_CUTOFF = 'c5bcc5a61b018468dd8cb16a3aed9c53c1c73232'
 const sha256 = (buffer) => crypto.createHash('sha256').update(buffer).digest('hex')
 
 /**
+ * Canonicalise a PEM before it is compared or consumed: CRLF and lone CR become LF, then trim.
+ *
+ * WHY THIS IS NOT COSMETIC. The crypto layer ALREADY tolerates CRLF -- measured on this checkout,
+ * `verifyEnvelope`, `publicKeyFromPrivate` and `crypto.sign` all accept a CRLF PEM and behave
+ * identically to LF -- so the only thing CRLF breaks is STRING EQUALITY, which is exactly how the pin is
+ * enforced. A CRLF checkout of `keys/delegation-operator.pub` (any machine with core.autocrlf=true, and
+ * this repository carries no .gitattributes to prevent it) therefore made this audit refuse to run at
+ * all, with a message asserting that two copies of ONE key "disagree" and that one of them is stale.
+ * A false rejection whose text accuses the operator of pinning the wrong key is worse than a crash: it
+ * is a lie told by the security path, and its remedy points at the wrong thing.
+ *
+ * `\r\n?` rather than `\r\n` so a lone CR -- an old-Mac or hand-edited file -- is normalised too.
+ */
+const cleanKey = (keyStr) => String(keyStr).replace(/\r\n?/g, '\n').trim()
+
+/**
  * Resolve the operator's public key to pin against, from every source that is present.
  *
  * THE REPO PIN IS WHAT MAKES THIS RUNNABLE IN CI. A GitHub runner has no ~/.dsh, so a resolver that
@@ -103,23 +120,30 @@ const sha256 = (buffer) => crypto.createHash('sha256').update(buffer).digest('he
 function resolvePinnedKey() {
   const sources = []
 
+  // NORMALISED AT THE READ, once, so every downstream comparison and every verifyEnvelope call sees the
+  // same canonical bytes regardless of how git checked the file out. `hadCr` is kept so the normalisation
+  // is reported rather than silent: a cross-environment difference worth hiding is not worth hiding.
+  const addSource = (label, raw) => {
+    sources.push({ label, pem: cleanKey(raw), hadCr: /\r/.test(String(raw)) })
+  }
+
   if (fs.existsSync(REPO_PINNED_KEY_PATH)) {
-    sources.push({
-      label: 'keys/delegation-operator.pub',
-      pem: fs.readFileSync(REPO_PINNED_KEY_PATH, 'utf8').trim(),
-    })
+    addSource('keys/delegation-operator.pub', fs.readFileSync(REPO_PINNED_KEY_PATH, 'utf8'))
   }
   if (fs.existsSync(PUBLIC_KEY_PATH)) {
-    sources.push({
-      label: '~/.dsh/keys/delegation_ed25519.pub',
-      pem: fs.readFileSync(PUBLIC_KEY_PATH, 'utf8').trim(),
-    })
+    addSource('~/.dsh/keys/delegation_ed25519.pub', fs.readFileSync(PUBLIC_KEY_PATH, 'utf8'))
   }
   if (fs.existsSync(PRIVATE_KEY_PATH)) {
-    sources.push({
-      label: '~/.dsh/keys/delegation_ed25519.pem (derived)',
-      pem: String(publicKeyFromPrivate(fs.readFileSync(PRIVATE_KEY_PATH, 'utf8'))).trim(),
-    })
+    addSource(
+      '~/.dsh/keys/delegation_ed25519.pem (derived)',
+      publicKeyFromPrivate(fs.readFileSync(PRIVATE_KEY_PATH, 'utf8'))
+    )
+  }
+
+  for (const source of sources) {
+    if (source.hadCr) {
+      console.warn('  warn  ' + source.label + ' contained CR line endings; normalised to LF before comparison')
+    }
   }
 
   if (sources.length === 0) {
@@ -226,7 +250,9 @@ for (const { noteBlob, commitSha } of entries) {
   }
 
   // ---- 1. signature against the PINNED key --------------------------------
-  const embeddedKey = String(envelope.publicKeyPem || '').trim()
+  // The embedded key is normalised too: an envelope signed on a CRLF machine can carry a CRLF PEM, and
+  // comparing raw bytes there would report a sound record as unattributed.
+  const embeddedKey = cleanKey(envelope.publicKeyPem || '')
   const keyMatchesPinned = embeddedKey === pinnedPublicKeyPem
   const signatureValid = verifyEnvelope(Object.assign({}, envelope, { publicKeyPem: pinnedPublicKeyPem }))
 

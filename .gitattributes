@@ -1,0 +1,15 @@
+# The operator trust root must be the same bytes on every machine that checks it out.
+#
+# WHY THIS FILE EXISTS. There was no .gitattributes here, and the default `core.autocrlf=true` on Windows
+# checks text files out with CRLF. Measured on this machine: the repo-local `core.autocrlf=false` hid the
+# problem, while the global setting is `true`, so a plain `git clone` produced a 116-byte
+# keys/delegation-operator.pub (3 CR) where the committed blob is 113 bytes. The ledger audit compares
+# that file against the local ~/.dsh copy and against the key derived from the private PEM, so the CRLF
+# checkout made it abort with "pinned public keys disagree" when the keys were byte-identical apart from
+# line endings. The scripts now normalise line endings before comparing, and warn when they have to; this
+# prevents the conversion in the first place rather than depending on that tolerance.
+#
+# `text eol=lf` normalises the stored blob to LF too. The committed blobs are already LF, so this changes
+# no existing object -- it only stops a checkout from rewriting them.
+*.pub text eol=lf
+*.pem text eol=lf
