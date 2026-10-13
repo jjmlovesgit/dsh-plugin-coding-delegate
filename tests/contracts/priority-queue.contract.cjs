@@ -2,11 +2,11 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { PriorityQueue } = require('../../src/priority-queue.ts');
+const { PriorityQueue } = require('../../tools/priority-queue.ts');
 
 test('PriorityQueue strict specification contract', async (t) => {
   await t.test('enforces exact generic class signature and exports', () => {
-    const src = fs.readFileSync(path.join(__dirname, '../../src/priority-queue.ts'), 'utf8');
+    const src = fs.readFileSync(path.join(__dirname, '../../tools/priority-queue.ts'), 'utf8');
     assert.match(
       src,
       /export\s+class\s+PriorityQueue\s*<\s*T\s*>/,
@@ -52,29 +52,38 @@ test('PriorityQueue strict specification contract', async (t) => {
   });
 
   await t.test('maintains heap invariant across randomized interleaved push/pop', () => {
+    // INTERLEAVED, not batched. The previous revision of this case pushed 150 values and then drained
+    // the queue, so despite its name it never exercised a push against a populated heap followed by a
+    // pop, and never checked `size` against an independent model mid-flight. A shadow array kept in
+    // sorted order is the oracle: every pop must equal its minimum, and the size must track after
+    // every single operation.
     const pq = new PriorityQueue((a, b) => a - b);
-    const expected = [];
+    const shadow = [];
 
-    // Deterministic pseudo-random sequence
     let seed = 42;
     const nextRand = () => {
       seed = (seed * 1664525 + 1013904223) % 4294967296;
       return seed % 1000;
     };
 
-    for (let i = 0; i < 150; i++) {
-      const val = nextRand();
-      pq.push(val);
-      expected.push(val);
+    for (let i = 0; i < 300; i++) {
+      if (shadow.length === 0 || nextRand() > 350) {
+        const val = nextRand();
+        pq.push(val);
+        shadow.push(val);
+        shadow.sort((a, b) => a - b);
+      } else {
+        const expected = shadow.shift();
+        const actual = pq.pop();
+        assert.equal(actual, expected, 'Interleaved pop must match minimum element');
+      }
+      assert.equal(pq.size, shadow.length, 'Size must track interleaved operations');
     }
-    expected.sort((a, b) => a - b);
 
-    const actual = [];
-    while (!pq.isEmpty()) {
-      actual.push(pq.pop());
-    }
-
-    assert.deepEqual(actual, expected, 'Extracted elements must match sorted array');
+    // Drained after the fact, so the run cannot end with elements still sitting in an unverified heap.
+    const tail = [];
+    while (!pq.isEmpty()) tail.push(pq.pop());
+    assert.deepEqual(tail, shadow, 'The remaining heap must drain in sorted order');
   });
 
   await t.test('prevents internal array corruption via direct mutation', () => {

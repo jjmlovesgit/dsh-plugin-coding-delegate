@@ -32,7 +32,7 @@ import http from "node:http";
 const MAX_TOKENS = 8192;
 
 const REQUIREMENTS = {
-  "src/priority-queue.ts": [
+  "tools/priority-queue.ts": [
     "Export a generic class exactly as: export class PriorityQueue<T>",
     "The constructor takes an optional comparator (a: T, b: T) => number. With no comparator, order naturally ascending, i.e. a min-heap.",
     "Methods: push(item: T): void, pop(): T | undefined, peek(): T | undefined, isEmpty(): boolean, and a GETTER `size: number` (a getter, not a method call).",
@@ -51,7 +51,7 @@ const REQUIREMENTS = {
   ],
 };
 
-const targetPath = process.argv[2] || "src/priority-queue.ts";
+const targetPath = process.argv[2] || "tools/priority-queue.ts";
 const contractPath = process.argv[3] || "tests/contracts/priority-queue.contract.cjs";
 
 const requirements = REQUIREMENTS[targetPath];
