@@ -1,6 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import http from "node:http";
+import { execFileSync, spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
+// This file lives in tools/, so the repository root is one level up.
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 // Worker dispatch for the contract-first delegation pipeline.
 //
@@ -77,8 +82,14 @@ const REQUIREMENTS = {
   ],
 };
 
-const targetPath = process.argv[2] || "tools/priority-queue.ts";
-const contractPath = process.argv[3] || "tests/contracts/priority-queue.contract.cjs";
+// Flags are separated from positionals first: `node tools/worker-build.mjs --attest` must not read
+// `--attest` as the target path.
+const argv = process.argv.slice(2);
+const wantAttest = argv.includes("--attest");
+const positionals = argv.filter((token) => !token.startsWith("--"));
+
+const targetPath = positionals[0] || "tools/priority-queue.ts";
+const contractPath = positionals[1] || "tests/contracts/priority-queue.contract.cjs";
 
 const requirements = REQUIREMENTS[targetPath];
 if (!requirements) {
@@ -121,6 +132,96 @@ const payload = JSON.stringify({
   stop: ["<|im_end|>", "<|endoftext|>"],
   stream: false,
 });
+
+/**
+ * Post-generation phase, opt-in with `--attest`.
+ *
+ * WHY IT DOES NOT COMMIT. `attest-unit.cjs` refuses an artifact that is not in the commit it would
+ * anchor to, because a record naming a hash that commit does not contain cannot be reproduced by
+ * checking that commit out. A freshly generated artifact is by definition not committed, so this phase
+ * has two honest outcomes and never signs over uncommitted bytes.
+ *
+ * The commit is left to the operator on purpose. A passing contract proves conformance to the contract,
+ * and it cannot prove the absence of a hidden dependency, a mock escape or a silent O(n) shortcut --
+ * none of which any contract in this repository can observe. The commit boundary is the step where a
+ * person looks at what the worker actually produced before it is anchored into history, and a build
+ * script that both generates and commits would delete that step.
+ *
+ * `git status` is invoked with argv and NO shell, so a path cannot be read as an option or as shell
+ * syntax -- the same reason attestation-notes.js builds its command as an argument array.
+ */
+function runAttestPhase() {
+  const asRelative = (p) => path.relative(REPO_ROOT, path.resolve(REPO_ROOT, p)).split(path.sep).join("/");
+  const targetRel = asRelative(targetPath);
+  const contractRel = asRelative(contractPath);
+  const base = path.basename(targetRel).replace(/\.ts$/, "");
+  const fixtureRel = "tests/contracts/fixtures/" + base + ".negative.ts";
+  const buildScriptRel = "tools/worker-build.mjs";
+
+  console.log("");
+  console.log("=== contract verification ===");
+  const run = spawnSync(process.execPath, [path.resolve(REPO_ROOT, contractRel)], {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+  });
+  const output = String(run.stdout || "") + String(run.stderr || "");
+  for (const line of output.split("\n")) {
+    if (/^# (tests|pass|fail)/.test(line)) console.log("  " + line);
+  }
+
+  // A spawn failure is NOT a contract failure, and reporting it as one sends the operator to look at
+  // the wrong artifact. `status` is null when the child never ran.
+  if (run.error) {
+    console.error("  the contract could not be RUN: " + run.error.message);
+    console.error("  this is an environment failure, not a verdict on the unit; nothing was attested");
+    process.exitCode = 1;
+    return;
+  }
+
+  if (typeof run.status !== "number" || run.status !== 0) {
+    console.error(
+      "  contract FAILED (exit " + run.status + "). Nothing will be attested: a signature over a unit " +
+        "its own contract rejects would launder a failure into an operator statement."
+    );
+    process.exitCode = 1;
+    return;
+  }
+  console.log("  contract PASSED (exit " + run.status + ")");
+
+  // Every path that the commit would need, so the guidance below is complete rather than partial.
+  const paths = [targetRel, contractRel, fixtureRel, buildScriptRel];
+  const status = execFileSync("git", ["status", "--porcelain", "--", ...paths], {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+  }).trim();
+
+  if (status.length === 0) {
+    console.log("");
+    console.log("[ATTEST] the artifact and its contract are committed and clean; invoking the signer");
+    const signer = path.join(REPO_ROOT, "scripts", "attest-unit.cjs");
+    const signed = spawnSync(process.execPath, [signer, targetRel, contractRel], {
+      cwd: REPO_ROOT,
+      stdio: "inherit",
+    });
+    if (typeof signed.status === "number" && signed.status !== 0) process.exitCode = signed.status;
+    return;
+  }
+
+  console.log("");
+  console.log("============================================================");
+  console.log("CONTRACT PASSED -- THE UNIT IS NOT COMMITTED");
+  console.log("A record can only anchor to a commit that CONTAINS these bytes, so");
+  console.log("the commit is the next step and it is deliberately yours:");
+  console.log("============================================================");
+  console.log("");
+  console.log("  git add " + paths.join(" "));
+  console.log('  git commit -m "feat(tools): add ' + base + ' utility with verified contract"');
+  console.log("  node scripts/attest-unit.cjs " + targetRel + " " + contractRel);
+  console.log("");
+  console.log("still uncommitted:");
+  for (const line of status.split("\n")) console.log("  " + line);
+  console.log("");
+}
 
 const req = http.request(
   {
@@ -173,6 +274,9 @@ const req = http.request(
       console.log(
         "Model generation finished. target: " + targetPath + " bytes: " + Buffer.byteLength(code, "utf8")
       );
+      // Runs AFTER the write, inside the response handler. A block at module scope would have executed
+      // before the model answered, and would have checked the PREVIOUS contents of the file.
+      if (wantAttest) runAttestPhase();
     });
   }
 );
