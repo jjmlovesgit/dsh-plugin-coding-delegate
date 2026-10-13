@@ -17,6 +17,13 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+        with:
+          # Full history is REQUIRED by the ledger audit: it checks that each note's anchor is an
+          # ancestor of main and reads each artifact out of THAT commit's tree. The default depth-1
+          # checkout has neither, so every note fails with "Not a valid commit name" -- measured in a
+          # depth-1 clone, not assumed. This was invisible for as long as an empty ledger made the audit
+          # exit early, which is why it is being fixed in the same change that stopped it exiting early.
+          fetch-depth: 0
 
       - uses: actions/setup-node@v5
         with:
@@ -78,6 +85,15 @@ jobs:
         # the job, because the scripts resolve the repository root from their own location, not the cwd.
         working-directory: .
         run: node scripts/check-readme-consistency.cjs
+
+      - name: Fetch the delegation ledger
+        # `actions/checkout` fetches refs/heads and tags, and never notes. Without this step the ledger
+        # is empty in CI, and the audit now treats an empty ledger as a FAILURE rather than a warning,
+        # because an empty ledger and a deleted one are indistinguishable. Note what this means for the
+        # previous configuration: every gate run in CI audited zero records and reported success, so the
+        # attestation check has never actually run here. This step is what makes it run.
+        working-directory: .
+        run: git fetch origin 'refs/notes/delegations:refs/notes/delegations'
 
       - name: Run full attestation & verification gate
         # The three gates, called exactly the way a developer calls them locally. What this replaces was

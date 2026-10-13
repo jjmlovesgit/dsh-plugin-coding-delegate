@@ -44,11 +44,37 @@
  *
  * WHAT THIS CANNOT DO, stated because a green audit invites over-reading. It proves the notes PRESENT
  * are sound. It cannot prove none were REMOVED: `git notes` writes a ref any writer can rewrite, and
- * the module that stores them says so in its own header. Detecting a deletion needs a WORM sink or a
- * transparency log, not a git ref.
+ * the module that stores them says so in its own header. Detecting the removal of a SINGLE record needs
+ * a WORM sink or a transparency log, not a git ref. Removing ALL of them is now caught, by the
+ * empty-ledger rule below -- that is the one deletion an attacker gets for free otherwise.
  *
- * Usage: node scripts/verify-delegation-ledger.cjs
- * Exit 0 when every note passes its critical checks, 1 otherwise.
+ * AN EMPTY LEDGER FAILS CLOSED. This audit used to warn and exit 0 when the notes ref had no entries,
+ * reasoning that "no notes yet" is a legitimate state. It is -- and it is also exactly what an attacker
+ * produces by deleting the ref, so the check passed in the one case it existed to catch. A gate that
+ * reports success once its evidence is deleted is not a gate. `--allow-empty` is the explicit opt-out,
+ * and it exists only for the window before the first delegation is signed.
+ *
+ * THE PINNED KEY IS ITSELF FINGERPRINTED. Resolving the key from the repository is what makes this
+ * runnable in CI without a secret, but it also puts the file that defines trust inside the tree being
+ * verified: a writer could replace the key and then author notes that satisfy it. A digest constant
+ * raises that attack from a one-file substitution to an edit that appears in a reviewed diff AS a change
+ * to the trust root. IT DOES NOT CREATE AN OUT-OF-BAND ROOT OF TRUST -- a writer who can edit this file
+ * can edit the constant too -- so the honest summary is that this makes re-pinning VISIBLE, not
+ * impossible. An actual root of trust has to come from outside the repository, which this cannot supply
+ * for itself.
+ *
+ * KEY ROTATION. A changed key fails every run until the constant is updated deliberately. To rotate:
+ * publish the new public key, read the new value from --print-key-fingerprint, change
+ * TRUSTED_OPERATOR_PUBKEY_SHA256 in the SAME commit that changes the key, and sign a note for that
+ * commit so the rotation is itself an attested record. Do not update the constant to silence a failure
+ * whose cause has not been established -- that is how a re-pin gets laundered as maintenance.
+ *
+ * Usage: node scripts/verify-delegation-ledger.cjs [--allow-empty] [--print-key-fingerprint]
+ *
+ *   --allow-empty             exit 0 on a ledger with no notes; initialization ceremonies only
+ *   --print-key-fingerprint   print the resolved key's fingerprints and exit 0, checking no records
+ *
+ * Exit 0 when every note passes its critical checks, 1 otherwise, 2 on a usage error.
  */
 'use strict'
 
@@ -103,6 +129,43 @@ const sha256 = (buffer) => crypto.createHash('sha256').update(buffer).digest('he
  * `\r\n?` rather than `\r\n` so a lone CR -- an old-Mac or hand-edited file -- is normalised too.
  */
 const cleanKey = (keyStr) => String(keyStr).replace(/\r\n?/g, '\n').trim()
+
+/**
+ * SHA-256 of the operator public key, over the LF-normalised, trimmed PEM text.
+ *
+ * THIS CONSTANT IS THE TRUST ROOT OF THE WHOLE AUDIT, and it is deliberately a constant rather than a
+ * value read from the tree it is checking. Resolving the key from the repository is what lets CI
+ * attribute records without holding a secret; the cost is that the file defining trust lives inside the
+ * verified tree. Pinning the digest means substituting the key is no longer sufficient on its own --
+ * the substitution must also be visible as an edit to this line.
+ *
+ * WHAT IT DOES NOT BUY: a writer who can change this file can change the constant, so this is not an
+ * out-of-band root of trust. It converts a silent re-pin into a reviewable diff. That is a real gain and
+ * a partial one, and calling it anything more would be the kind of overclaim this repository exists to
+ * catch. Recomputed with --print-key-fingerprint; `keyFingerprint` below is the ONLY definition of it.
+ */
+const TRUSTED_OPERATOR_PUBKEY_SHA256 = 'afea373a3cef0db436ec594c653dca371dd292dba6cc096a77b9b9aacbdaddd3'
+
+/** The pinned fingerprint's one definition: sha256 over the LF-normalised, trimmed PEM text. */
+function keyFingerprint(pem) {
+  return crypto.createHash('sha256').update(cleanKey(pem), 'utf8').digest('hex')
+}
+
+/**
+ * Fingerprint of the KEY ITSELF as SPKI DER, independent of PEM formatting.
+ *
+ * Not pinned, and not compared -- it exists so a mismatch can be DIAGNOSED. "Same key, the file was
+ * re-wrapped at 76 columns" and "a different key entirely" call for different responses, and a bare
+ * digest comparison cannot tell them apart.
+ */
+function spkiFingerprint(pem) {
+  try {
+    const der = crypto.createPublicKey(cleanKey(pem)).export({ type: 'spki', format: 'der' })
+    return crypto.createHash('sha256').update(der).digest('hex')
+  } catch (err) {
+    return 'unreadable (' + (err && err.message ? err.message : err) + ')'
+  }
+}
 
 /**
  * Resolve the operator's public key to pin against, from every source that is present.
@@ -166,8 +229,50 @@ function resolvePinnedKey() {
     }
   }
 
+  // A QUERY, NOT A CHECK: prints what the sources actually hold and exits before any record is read, so
+  // an operator can obtain the value for a rotation without having to first make the audit pass.
+  if (printFingerprintOnly) {
+    for (const source of sources) {
+      const fingerprint = keyFingerprint(source.pem)
+      console.log('  ' + source.label)
+      console.log(
+        '    pem  sha256 : ' + fingerprint +
+          (fingerprint === TRUSTED_OPERATOR_PUBKEY_SHA256 ? '  (matches the constant)' : '  (DIFFERS from the constant)')
+      )
+      console.log('    spki sha256 : ' + spkiFingerprint(source.pem))
+    }
+    // Printed in the exact form the constant needs, so a rotation is a paste rather than a transcription.
+    console.log('\nTRUSTED_OPERATOR_PUBKEY_SHA256 = \'' + keyFingerprint(primary.pem) + '\'')
+    process.exit(0)
+  }
+
+  // CHECKED BEFORE ANY RECORD IS READ. Verifying notes against a key that this audit was not written to
+  // trust would produce confident verdicts about the wrong operator, which is the failure mode the whole
+  // pinned-key design exists to prevent.
+  for (const source of sources) {
+    const fingerprint = keyFingerprint(source.pem)
+    if (fingerprint === TRUSTED_OPERATOR_PUBKEY_SHA256) continue
+    console.error(
+      'FATAL  the operator key does not match the pinned fingerprint.\n' +
+        '       source             : ' + source.label + '\n' +
+        '       pinned fingerprint : ' + TRUSTED_OPERATOR_PUBKEY_SHA256 + '\n' +
+        '       actual fingerprint : ' + fingerprint + '\n' +
+        '       spki sha256        : ' + spkiFingerprint(source.pem) + '\n' +
+        '       This audit will not judge a ledger against a key it was not written to trust. If the two\n' +
+        '       fingerprints differ ONLY because the PEM was reformatted, restore the committed formatting.\n' +
+        '       If this is a deliberate rotation, change TRUSTED_OPERATOR_PUBKEY_SHA256 in the same commit\n' +
+        '       that changes the key and sign a note for that commit, so the rotation is itself attested.\n' +
+        '       --print-key-fingerprint prints the value to use. Do not edit the constant merely to make\n' +
+        '       this message go away.'
+    )
+    process.exit(1)
+  }
+
   const agreement = sources.length > 1 ? ' (agrees with ' + sources.slice(1).map((s) => s.label).join(', ') + ')' : ''
-  console.log('pinned key: ' + primary.label + agreement + '\n')
+  console.log(
+    'pinned key: ' + primary.label + agreement + ' · fingerprint ' +
+      TRUSTED_OPERATOR_PUBKEY_SHA256.slice(0, 8) + ' verified\n'
+  )
   return primary.pem
 }
 
@@ -194,6 +299,19 @@ function blobHashAt(commit, repoRelativePath) {
   }
 }
 
+const KNOWN_FLAGS = ['--allow-empty', '--print-key-fingerprint']
+const argv = process.argv.slice(2)
+const unknownArgs = argv.filter((arg) => !KNOWN_FLAGS.includes(arg))
+if (unknownArgs.length > 0) {
+  console.error('usage: node scripts/verify-delegation-ledger.cjs [--allow-empty] [--print-key-fingerprint]')
+  console.error('unrecognised argument(s): ' + unknownArgs.join(', '))
+  process.exit(2)
+}
+// Explicit, never inferred: a missing ledger and an unattested project look identical on disk, so the
+// decision to accept one cannot be made silently by whoever deletes the ref first.
+const allowEmpty = argv.includes('--allow-empty')
+const printFingerprintOnly = argv.includes('--print-key-fingerprint')
+
 const pinnedPublicKeyPem = resolvePinnedKey()
 
 let listing = ''
@@ -214,9 +332,20 @@ const entries = listing
   })
 
 if (entries.length === 0) {
+  // THE ONE DELETION AN ATTACKER WOULD OTHERWISE GET FOR FREE. An empty ref is indistinguishable from a
+  // deleted ref, so passing here means the gate can be switched off by removing its evidence.
+  if (!allowEmpty) {
+    console.error(
+      'FATAL  ' + NOTES_REF + ' carries no notes, and an empty ledger is indistinguishable from a\n' +
+        '       deleted one. Failing closed: a gate that reports success once its evidence is removed is\n' +
+        '       not a gate. If this repository genuinely has no delegations yet, pass --allow-empty\n' +
+        '       explicitly -- and note that doing so in CI would disable this check for everyone.'
+    )
+    process.exit(1)
+  }
   console.warn(
-    'WARN  ' + NOTES_REF + ' carries no notes. That is a legitimate state before the first ' +
-      'delegation, and this audit cannot distinguish it from every record having been deleted.'
+    'WARN  ' + NOTES_REF + ' carries no notes; --allow-empty was passed, so this is treated as a\n' +
+      '      pre-first-delegation state. This run proves nothing about any record.'
   )
   process.exit(0)
 }
