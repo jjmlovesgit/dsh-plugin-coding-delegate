@@ -1161,3 +1161,78 @@ oracle files within one run, so the suite is order-sensitive in principle. Givin
 directory would remove that, and it is the wrong fix to make first -- it hides in tests a sharing that
 production genuinely has, which is how this defect stayed invisible for as long as it did.
 
+## A tool argument could answer for a human, and the schema said it was allowed — fixed
+
+`delegate_worker` accepted `attestTargets`, `attestEvidence` and `attestOperator`, and a unit that passed
+against any declared target was written into the delegated registry as `OPERATOR_ATTESTED`. The name in that
+field was whatever the model sent. Every guard inside `recordOperatorAttestation` polices the CONTENT of the
+claim -- that the identity is not the worker's own, that the evidence is not empty, that the target was
+written by this unit -- and none of them can turn a claim that arrived as a tool argument into something a
+human said. A caller able to set all three fields has forged an approval, and the registry then asserts it to
+every later reader.
+
+**Two mitigations had already been tried, and neither held.** The first required an identity in the plugin's
+own configuration; the second scoped the targets to files this unit had written. Both police the claim rather
+than its author, which is why the next review found the route still open -- and why removing two of the three
+parameters would only have repeated the exercise: `attestTargets` plus the configured `operatorIdentity` and a
+canned default evidence string is by itself enough to write a substantiated-looking attestation.
+
+**A correction to how this was described, including by me.** The CLI that does record a human approval,
+`scripts/attest-unit.cjs --approve`, writes a signed git note in `refs/notes/delegations`. It never wrote this
+registry field, and nothing in the repository did except the tool call that has now been removed. So the
+honest statement of the fix is not "operator attestation now belongs to the human CLI" but the stronger one:
+`OPERATOR_ATTESTED` is unreachable from any shipped execution path. The status is still honoured by the
+guard and `recordOperatorAttestation` is still exported, so an embedder that calls it deliberately still
+writes one -- what is gone is the route where the model supplies the claim.
+
+**The removal is enforced by the compiler rather than by care.** `DELEGATE_WORKER_SCHEMA_COVERS_EVERY_PARAMETER`
+requires the schema's property set, the `DelegateWorkerParameter` union and the canonical parameter list to
+be equal at compile time, so the three names had to leave all three places together and a partial
+re-introduction cannot build. The oracles that asserted the parameters were present now assert they are
+absent, with a failure message naming what a future author would have to prove before putting them back.
+
+Fixed at `ec88dca`.
+
+## The contract guard wrote its stub outside its own mirror — fixed
+
+`scripts/check-contract.cjs` proves a contract discriminates by copying it into a temporary mirror, replacing
+the module it requires with a null implementation, and requiring the contract to fail. The stub goes at the
+module's position RELATIVE to the contract, so the mirror must be deep enough to absorb the `..` ascents in
+that path. It was one level deep, and a contract in `tests/contracts` reaches its module by `../../tools/x.ts`:
+two ascents from a one-level mirror resolved to `%TEMP%\tools\x.ts` -- outside the mirror, in a directory
+every process on the machine shares, where the cleanup could not reach it. Measured before the fix: seven
+432-byte null stubs in `%TEMP%\tools\`, one per contract, plus six abandoned mirror roots.
+
+**That is worse than scratch files, because the guard's claim is about control.** The module it judged was a
+file outside its own control that outlived the run, so a process that had created that path first would have
+had the null run judge ITS file while the guard reported the contract discriminating. The path was also
+attacker-shaped rather than merely wrong: the stub location is derived from the caller-supplied `--module`
+argument, so a `..`-heavy invocation aimed that write anywhere on the drive. The content is only ever the null
+stub, but overwriting a file the caller names is a write primitive, and the guard was handing it out.
+
+**The first fix was wrong in the other direction, and the oracle said so.** Mirroring at the contract's path
+relative to the repository root contains every in-repo contract and refuses every contract outside the
+repository -- which `contract-spec-conformance.test.cjs` depends on, because it builds its workspace in the
+temp directory. Five of its cases failed. Containment therefore has to come from the SHAPE of the mirror
+rather than from where the contract lives: the mirror is nested one directory per ascent in the contract's own
+module path, whatever that path is. A pair spanning two drives has no relative path at all and is refused by
+name. The mirrored test name is uniquified, because a contract and its specification suite can share a
+basename and the wrong one would then be judged. Containment is asserted before every write.
+
+**Three leaks on the way out, all measured.** `process.exit` runs no `finally`, so a refusal that merely exits
+leaves its temporary root behind -- hundreds of abandoned `dsh-contract-*` directories had accumulated in
+`%TEMP%` on this host, which is also why a clean run and a crashed one were indistinguishable from outside.
+Refusals now remove the root before exiting. The two oracle files that create scratch directories in the
+shared temp directory leaked one per case as well, eight from `contract-integrity.test.cjs` and five from
+`contract-spec-conformance.test.cjs` after a single gate, and both now clean up. After a full gate and a full
+oracle run there are **zero** `dsh-contract-*` directories left -- the same assertion the new oracle makes for
+its own run, so a regression is caught by the suite rather than by looking.
+
+The new oracle is `plugin/tests/oracles/contract-null-mirror-containment.test.cjs`: six cases, measured
+against HEAD's checker before the fix, including the cross-drive refusal (constructed with `subst`, and
+skipped by name on a platform without drive letters) and the ordinary verdict for a contract outside the
+repository. Oracle suite 490 tests, 489 pass, 0 fail, 1 skip; the repository gate stays green across all five
+stages.
+
+Fixed at `ec88dca`.
+
