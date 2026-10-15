@@ -29,11 +29,14 @@ one mutable root are not two independent principals, and the document must not i
    their names and meaning. There is no `target` (that is `artifacts[0].path`), and `worker.stdoutHash`
    is not new — it already exists as `verification.stdoutHash`, the digest of the redacted output. 1.2
    adds `worker{}` and `reviewer{}` blocks; it does not rename what is already recorded.
-3. **Both envelopes are signed over canonical JSON**, `sha256(canonicalizeJson(payload minus that
-   signature))`, using the existing `canonicalizeJson` (RFC 8785) and `hashBuffer`. **No concatenated
-   tuple.** The proposed `SHA-256(baseCommit ∥ artifactHashes ∥ contractHashes ∥ …)` hashes
-   variable-length fields with no delimiters, so different field splits collide (`"ab"+"c"` vs
-   `"a"+"bc"`). One hashing discipline, already in the tree, already tested.
+3. **Both envelopes are signed over canonical JSON**, `canonicalizeJson(payload minus that signature)`
+   via the existing RFC 8785 canonicaliser — **signing the canonical BYTES directly, not a digest of
+   them.** The plan specified `sha256(canonicalizeJson(...))`; Ed25519 hashes the message internally
+   (RFC 8032) so an extra SHA-256 buys nothing, and the repository's existing envelope scheme
+   (`signManifest` / `verifyEnvelope`) signs the payload string rather than a digest of it. One signing
+   convention, because a signer that hashes first and an auditor that does not would reject every 1.2
+   note silently and totally. **No concatenated tuple**: hashing variable-length fields with no
+   delimiters collides across field splits (`"ab"+"c"` vs `"a"+"bc"`).
 4. **Ed25519 PEM keys, not OpenSSH wire format.** There is no SSH public-key parsing anywhere in the
    plugin or `scripts/`, and Node cannot verify an OpenSSH key without conversion. Supporting
    `id_ed25519.pub` would add a key-format axis to a PEM-only toolchain for no gain.
