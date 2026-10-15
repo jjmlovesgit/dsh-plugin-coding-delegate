@@ -39,12 +39,13 @@ export interface TestResults {
  * (stack frames, expected/actual, diff markers, quoted code) is discarded by omission
  * rather than by pattern-matching each leak shape.
  */
-export declare function redactVerificationOutput(raw: string): RedactedFailure[];
+export declare function redactVerificationOutput(raw: string, workspaceRoot?: string): RedactedFailure[];
 /** One line per failure: kind, name, location, code, prose message. Never source. */
 export declare function describeFailures(failures: RedactedFailure[]): string[];
 export declare function parseTestOutput(output: string, exitCode?: number, options?: {
     redact?: boolean;
     rawOutputPath?: string;
+    workspaceRoot?: string;
 }): TestResults;
 /**
  * The bound on how long a verification command may run, in milliseconds.

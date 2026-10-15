@@ -87,7 +87,7 @@ function sanitizeRetainedField(value, maxLength = 200) {
  * (stack frames, expected/actual, diff markers, quoted code) is discarded by omission
  * rather than by pattern-matching each leak shape.
  */
-function redactVerificationOutput(raw) {
+function redactVerificationOutput(raw, workspaceRoot) {
     if (!raw)
         return [];
     const failures = [];
@@ -106,7 +106,7 @@ function redactVerificationOutput(raw) {
             flush();
             failures.push({
                 kind: 'compile',
-                location: compile[1] + ':' + compile[2] + ':' + compile[3],
+                location: sanitizeLocation(compile[1] + ':' + compile[2] + ':' + compile[3], workspaceRoot),
                 code: compile[4],
                 message: cleanMessage(compile[5]),
             });
@@ -134,7 +134,7 @@ function redactVerificationOutput(raw) {
         if (current) {
             const loc = /^location:\s*(.+)$/.exec(t);
             if (loc) {
-                current.location = loc[1].replace(/^['"]|['"]$/g, '').trim();
+                current.location = sanitizeLocation(loc[1], workspaceRoot);
                 continue;
             }
             const code = /^code:\s*(.+)$/.exec(t);
@@ -188,6 +188,61 @@ function redactVerificationOutput(raw) {
         return bounded;
     })
         .filter((failure) => Boolean(failure.name || failure.location || failure.code || failure.message));
+}
+/**
+ * A failure location, named without the host's directory layout.
+ *
+ * WHY THIS IS A BOUNDARY CONCERN AND NOT COSMETIC. MEASURED by driving this module over a real failing
+ * `node:test` run: the runner reports `location: 'C:\\Users\\<name>\\AppData\\Local\\Temp\\...\\x.test.cjs:4:11'`
+ * and the redactor forwarded it verbatim, so EVERY failure line carried the drive letter and the account
+ * name across to the cloud model. The diagnostic value is the file and the position, not whose machine
+ * the run happened on.
+ *
+ * Inside the workspace the path is kept in full and made relative to it, because that is what a reader
+ * acts on. Anything outside it -- a temporary directory, the runner's own frame -- is reduced to its
+ * basename for the same reason: the file name is the diagnosis, the directory is the host.
+ *
+ * TAP doubles backslashes in the paths it reports, so they are collapsed first, and the result is
+ * emitted with forward slashes to match how every other path in this repository is displayed.
+ */
+function sanitizeLocation(rawLocation, workspaceRoot) {
+    // MEASURED shapes that reached the model: `location: 'C:\\Users\\<name>\\...\\x.test.cjs:4:11'` from one
+    // runner and `location: 'C:/Users/<name>/.../x.test.cjs:4:11'` from another. So the value arrives
+    // quoted, and its separators may be either kind -- which is why the quotes come off first and both
+    // separators are normalised before anything asks whether the path is absolute. Without the quote strip,
+    // `path.isAbsolute` answered false for a drive path and the whole check passed it through.
+    const unescaped = String(rawLocation || '')
+        .trim()
+        .replace(/^['"]|['"]$/g, '')
+        .replace(/\\\\/g, '\\')
+        .trim();
+    if (!unescaped)
+        return unescaped;
+    const position = /(:\d+(?::\d+)?)$/.exec(unescaped);
+    const suffix = position ? position[1] : '';
+    const rawPath = suffix ? unescaped.slice(0, unescaped.length - suffix.length) : unescaped;
+    const root = workspaceRoot ? path.resolve(String(workspaceRoot)) : '';
+    const absolute = path.isAbsolute(rawPath) ? path.resolve(rawPath) : '';
+    let shown = rawPath;
+    if (absolute && root && (absolute === root || absolute.startsWith(root + path.sep))) {
+        shown = path.relative(root, absolute);
+    }
+    else if (absolute) {
+        shown = path.basename(absolute);
+    }
+    return shown.split(/[\\/]/).join('/') + suffix;
+}
+/**
+ * The raw log, named without the host's home directory or drive.
+ *
+ * The pointer exists so a reader knows the full text was kept locally rather than sent, and
+ * `C:\Users\<name>\.dsh\local-router\last-verification.log` delivers the account name and the directory
+ * layout along with that assurance. `local-router/last-verification.log` says the same thing to anyone
+ * who has the data directory, which is the only reader the pointer is for.
+ */
+function rawLogLabel(rawPath) {
+    const target = String(rawPath || '');
+    return path.basename(path.dirname(target)) + '/' + path.basename(target);
 }
 /** One line per failure: kind, name, location, code, prose message. Never source. */
 function describeFailures(failures) {
@@ -272,7 +327,7 @@ function parseTestOutput(output, exitCode, options = {}) {
     // Raw output is a source-egress channel, so by default only structure is returned.
     // The full text is on disk (rawOutputPath) for the delegated worker to work from.
     const redact = options.redact !== false;
-    const failures = redact ? redactVerificationOutput(output) : [];
+    const failures = redact ? redactVerificationOutput(output, options.workspaceRoot) : [];
     const described = describeFailures(failures);
     const headline = failed + ' failed, ' + passed + ' passed' + (exitCode !== undefined ? ' (exit ' + exitCode + ')' : '');
     const body = redact
@@ -283,7 +338,9 @@ function parseTestOutput(output, exitCode, options = {}) {
                 : failed > 0
                     ? ['- [unknown] no structured failure could be extracted; see the raw log']
                     : []),
-            ...(options.rawOutputPath ? ['raw output: ' + options.rawOutputPath] : []),
+            // Named without the host's layout: the pointer's job is "the full text was kept locally", and an
+            // absolute path delivers the account name and the directory structure along with that assurance.
+            ...(options.rawOutputPath ? ['raw output: ' + rawLogLabel(options.rawOutputPath)] : []),
         ].join('\n')
         : output.slice(0, 2000);
     const summarySource = redact
@@ -473,6 +530,7 @@ function runSandboxVerification(verificationCommand, workspaceDir = process.cwd(
             ...parseTestOutput(refusal, exitCode, {
                 redact: options.redact,
                 rawOutputPath: persistRaw(refusal, options.rawLogPath),
+                workspaceRoot: workspaceDir,
             }),
             exitCode,
         };
@@ -481,6 +539,7 @@ function runSandboxVerification(verificationCommand, workspaceDir = process.cwd(
         ...parseTestOutput(output, exitCode, {
             redact: options.redact,
             rawOutputPath: persistRaw(output, options.rawLogPath),
+            workspaceRoot: workspaceDir,
         }),
         exitCode,
     };
