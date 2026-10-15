@@ -47,6 +47,12 @@ export interface DeclarationEgressInput {
    */
   commandReadsDirectoryScope?: (cmd: string) => boolean
   /**
+   * Could this command's quoting not be parsed deterministically? A tokenizer that cannot say which
+   * arguments a command names cannot say which of them are directories either, so the shell route fails
+   * closed on it rather than guessing (SECURITY-REVIEW-5 [2]).
+   */
+  commandScopeUnparseable?: (cmd: string) => boolean
+  /**
    * Is this scope a DIRECTORY rather than a file?
    *
    * WHY THE SEARCH BRANCH NEEDS IT, and what it closes. `isCodeExtension` answers with the scope's
@@ -273,6 +279,35 @@ export function evaluateDeclarationEgress(input: DeclarationEgressInput): Declar
     return { action: 'serve-declaration', skeleton }
   }
 
+  // FAIL CLOSED WHEN THE BASE ITSELF IS A GUESS. Defined once and asked in two places, because the answer
+  // does not depend on where in the decision tree the question is put -- only on whether the base is the
+  // session workspace or the process working directory.
+  //
+  // `workspaceRoot` can be the cwd rather than a session workspace, because the host may expose no
+  // workspace at all (`resolveWorkspaceDir` says which one it used). On that base, "the scope does not
+  // resolve" says nothing about what the host will search: the search runs against the session's own root,
+  // and a BARE directory scope carries no extension for the resolver to test. Measured with the cwd outside
+  // the workspace: `grep { path: 'src' }` fell through to the allow and the raw results passed, while the
+  // same scope against the true root is served as declarations (SECURITY-REVIEW-4 [2]).
+  //
+  // The cost is stated rather than hidden: on a host that exposes no workspace, a phrase-shaped scope is
+  // refused here too, because nothing distinguishes it from a directory the search really would reach.
+  // That is the fail-closed direction, and the message names the thing the operator has to fix.
+  //
+  // A caller that names no workspace at all still gets the old answer, which the committed oracle pins.
+  const refuseUnverifiedBase = (scope: string): DeclarationEgressVerdict | null => {
+    if (!input.workspaceRoot || input.workspaceVerified) return null
+    return {
+      action: 'block',
+      reason:
+        "Searching '" +
+        scope +
+        "' was refused: sourceReadEgress is 'declarations' and the session workspace could not be " +
+        'established, so this scope was resolved against the process working directory -- a guess -- and ' +
+        'its reach cannot be shown to avoid source. Check the path, or give the session a workspace.',
+    }
+  }
+
   // 4. SEARCHES. A search returns matching LINES, so there is no whole file to substitute: the matched
   //    bytes are implementation bodies wherever they land. The scope decides, because a search confined
   //    to prose cannot reach code. An UNSTATED scope cannot be shown to be harmless and is refused --
@@ -288,6 +323,19 @@ export function evaluateDeclarationEgress(input: DeclarationEgressInput): Declar
           'path directly.',
       }
     }
+
+    // THE PROVENANCE QUESTION IS ASKED FIRST, BEFORE ANY FILESYSTEM QUESTION (SECURITY-REVIEW-5 [3]).
+    //
+    // This refusal used to sit after the directory branch, which is too late for it to be a control. The
+    // injected `directoryScope` resolves the scope against `workspaceRoot` -- and when that is the cwd
+    // fallback, the directory it finds belongs to the cwd, not to the session. An empty directory there
+    // resolves to zero source files and returns the positive control's allow, so the provenance refusal
+    // further down was never reached while the host ran the search against the real workspace. A
+    // provenance check that runs after filesystem guesses is a check on the guesses. Asking here also
+    // covers the code-extension and existence branches below, which are the same kind of claim about a
+    // tree the base does not describe.
+    const unverifiedSearch = refuseUnverifiedBase(scope)
+    if (unverifiedSearch) return unverifiedSearch
 
     // A scope that names a source FILE keeps the rule the committed oracle pins for it -- a search over a
     // code file is refused rather than answered with the file's whole skeleton, which would answer a
@@ -395,29 +443,11 @@ export function evaluateDeclarationEgress(input: DeclarationEgressInput): Declar
       }
     }
 
-    // FAIL CLOSED WHEN THE BASE ITSELF IS A GUESS.
-    //
-    // `workspaceRoot` can be the process cwd rather than a session workspace, because the host may expose
-    // no workspace at all (`resolveWorkspaceDir` says which one it used). On that base, "the scope does not
-    // resolve" says nothing about what the host will search: the search runs against the session's own
-    // root, and a BARE directory scope carries no extension for the resolver to test. Measured with the cwd
-    // outside the workspace: `grep { path: 'src' }` fell through to the allow below and the raw results
-    // passed, while the same scope against the true root is served as declarations (SECURITY-REVIEW-4 [2]).
-    //
-    // The cost is stated rather than hidden: on a host that exposes no workspace, a phrase-shaped scope is
-    // refused here too, because nothing distinguishes it from a directory the search really would reach.
-    // That is the fail-closed direction, and the message names the thing the operator has to fix.
-    if (input.workspaceRoot && !input.workspaceVerified) {
-      return {
-        action: 'block',
-        reason:
-          "Searching '" +
-          scope +
-          "' was refused: sourceReadEgress is 'declarations' and the session workspace could not be " +
-          'established, so this scope was resolved against the process working directory -- a guess -- and ' +
-          'its reach cannot be shown to avoid source. Check the path, or give the session a workspace.',
-      }
-    }
+    // The fallthrough shapes -- prose, a path that resolves to nothing, a path that exists but is neither a
+    // directory nor a code file -- reach the same provenance refusal, asked of the one helper so the two
+    // sites cannot drift apart (SECURITY-REVIEW-4 [2], SECURITY-REVIEW-5 [3]).
+    const unverifiedFallthrough = refuseUnverifiedBase(scope)
+    if (unverifiedFallthrough) return unverifiedFallthrough
 
     // Prose: no separator, no extension, nothing on disk. It cannot reach source.
     return { action: 'allow' }
@@ -466,6 +496,21 @@ export function evaluateDeclarationEgress(input: DeclarationEgressInput): Declar
           "' was refused: sourceReadEgress is 'declarations' and this command searches a directory, " +
           'which reads source content by another route. Search a scope whose reach avoids source, or read ' +
           'the declaration path directly instead.',
+      }
+    }
+
+    // FAIL CLOSED ON QUOTING THE TOKENIZER COULD NOT RESOLVE (SECURITY-REVIEW-5 [2]). An unclosed quote
+    // means the argument list is not knowable, and an argument this route cannot name is one it cannot
+    // clear. Refused rather than treated as "no directory found", which is what the whitespace split did.
+    if (reads && input.commandScopeUnparseable?.(target) === true) {
+      return {
+        action: 'block',
+        reason:
+          "Shell command '" +
+          target +
+          "' was refused: sourceReadEgress is 'declarations' and its quoting could not be parsed " +
+          'deterministically, so the arguments it names cannot be shown to avoid source. Close the ' +
+          'quotes, or read the declaration path directly instead.',
       }
     }
     return { action: 'allow' }

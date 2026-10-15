@@ -1,5 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.effectiveDestinationFor = effectiveDestinationFor;
 exports.classifyDestination = classifyDestination;
 /**
  * Where an outbound request will actually land, and whether that is allowed.
@@ -21,11 +22,36 @@ exports.classifyDestination = classifyDestination;
  * high-confidence hits do not. Only an explicit 'block' changes that, and only 'local' authorises a
  * reroute for a high-confidence hit.
  */
+/**
+ * Where a request whose provider id is `provider` actually lands, given the operator's configured local
+ * and cloud ids.
+ *
+ * ONE DEFINITION, ASKED TWICE (SECURITY-REVIEW-5 [1]). `classifyDestination` asks this about the provider
+ * the HOST selected; `index.ts` must ask it again about the provider the request is actually sent with,
+ * because the architect role repins `provider` to `cloudProvider` after the classifier has already
+ * answered (`applyAgentRole` -> `applyArchitectConfig`). A destination taken from the classification
+ * alone describes a route the request no longer takes: measured, a session whose host provider is the
+ * local worker and whose role repins to the cloud carried a 'local' destination into
+ * `evaluateSourceEgress`, which allowed the payload out with the reason "nothing is leaving the machine".
+ *
+ * The `isCloudOnly` half is load-bearing: in the documented cloud-only setup `localProvider` and
+ * `cloudProvider` are the same id, so `provider === localProvider` is true while the payload still lands
+ * at the cloud. That comparison is the second opinion SECURITY-REVIEW-4 [5] removed; this is the answer
+ * it was replaced with, not a reintroduction of it.
+ */
+function effectiveDestinationFor(provider, localProvider, cloudProvider) {
+    const norm = (s) => String(s || '').trim().toLowerCase();
+    const local = norm(localProvider);
+    const cloud = norm(cloudProvider);
+    const dest = norm(provider);
+    // No local provider, or one that IS the cloud provider, means there is nowhere local to go.
+    const isCloudOnly = !local || (Boolean(cloud) && local === cloud);
+    return !isCloudOnly && dest === local ? 'local' : 'cloud';
+}
 function classifyDestination(input) {
     const norm = (s) => String(s || '').trim().toLowerCase();
     const local = norm(input.localProvider);
     const cloud = norm(input.cloudProvider);
-    const dest = norm(input.provider);
     // No local provider, or one that IS the cloud provider, means there is nowhere local to go.
     const isCloudOnly = !local || (Boolean(cloud) && local === cloud);
     // 1. Is a reroute to local required, and was it authorised?
@@ -77,9 +103,9 @@ function classifyDestination(input) {
                 "'local'. It was not, so nothing was transmitted.",
         };
     }
-    // 3. No reroute: classify where the payload actually lands. In a cloud-only setup it is cloud
-    //    regardless of whether the provider string happens to equal localProvider.
-    const effectiveDestination = !isCloudOnly && dest === local ? 'local' : 'cloud';
+    // 3. No reroute: classify where the payload actually lands, with the one definition of that question.
+    //    In a cloud-only setup it is cloud regardless of whether the provider string equals localProvider.
+    const effectiveDestination = effectiveDestinationFor(input.provider, input.localProvider, input.cloudProvider);
     return {
         destination: effectiveDestination,
         decision: 'proceed',

@@ -11,7 +11,7 @@ import { resolveDataDir, trace } from './logging'
 import { canonicalisePath, isPathWithin, CODE_EXTENSIONS } from './paths'
 import { handleDeclarationPostExecute } from './declaration-egress-hook'
 import { resolveWorkspaceContainment } from './containment'
-import { classifyDestination } from './routing'
+import { classifyDestination, effectiveDestinationFor } from './routing'
 import {
   FileEmissionResult,
   evaluateEmissionPath,
@@ -1691,7 +1691,14 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
       // bounded corpus has scrolled that turn out of the window (SECURITY-REVIEW-4 [6]). The marker is set
       // from the same scan that produces `dlpResult`, so the two cannot disagree about what was seen.
       const remembered = sensitiveSessions.has(corpusKey)
-      if (dlpResult.hasSensitiveData) sensitiveSessions.add(corpusKey)
+      // PINNED ONLY BY A PATTERN MATCH (SECURITY-REVIEW-5, additional regression). `hasSensitiveData` is
+      // true for an entropy-only hit too -- a UUID, a base64 blob, a digest in a log -- and pinning on that
+      // turned a medium-confidence heuristic into a permanent hard block: `remembered` forces `entropyOnly`
+      // false below, which sends the classifier into its high-confidence refusal, so every later prompt of
+      // the session was refused, including ones holding nothing sensitive at all. A credential that was
+      // actually matched is what this marker is for; the entropy-only case keeps the per-turn soft landing
+      // it was designed with (rerouted local, so never transmitted).
+      if (dlpResult.highConfidence) sensitiveSessions.add(corpusKey)
       const dlpTripped = config.enforceDLP && (dlpResult.hasSensitiveData || remembered)
       // Entropy-only hits are medium confidence: always rerouted local (so they are
       // never transmitted) but never hard-blocked, because digests and base64 payloads
@@ -1778,14 +1785,24 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
       // contextFiles injects into the worker; this covers the blunt route — source sitting in the
       // outbound payload because it was typed into a cloud-bound conversation.
       //
-      // The destination is the classifier's answer, not a second opinion about it (SECURITY-REVIEW-4 [5]).
-      // Recomputing it here from `provider === localProvider` dropped the classifier's `isCloudOnly`
-      // condition, and in the documented cloud-only setup -- localProvider and cloudProvider carrying the
-      // same id -- that comparison is true while the payload still lands at the cloud. This gate then read
-      // the request as "nothing is leaving the machine" and allowed detected source out. The classifier
-      // reports 'local' only when it actually reroutes, so the reroute case this expression also handled is
-      // covered -- by the same input the decision was made from, rather than by a second guess at it.
-      const destination: 'cloud' | 'local' = classification.destination
+      // The destination is the routing module's answer about the provider THIS REQUEST IS SENT WITH --
+      // not a second opinion about it, and not the pre-role answer (SECURITY-REVIEW-4 [5],
+      // SECURITY-REVIEW-5 [1]).
+      //
+      // Two distinct mistakes met here. Recomputing the destination from `provider === localProvider`
+      // dropped the classifier's `isCloudOnly` condition, and in the documented cloud-only setup --
+      // localProvider and cloudProvider carrying the same id -- that comparison is true while the payload
+      // still lands at the cloud. Taking `classification.destination` instead fixed that and introduced the
+      // opposite error: the classification above is made from `resolvedConfig.provider` BEFORE
+      // `applyAgentRole` repins the request to `config.cloudProvider` for the architect, so a session whose
+      // host provider is the local worker carried 'local' into this gate while the payload went to the
+      // cloud -- and `evaluateSourceEgress` allowed detected source out with the reason "nothing is leaving
+      // the machine". `mutatedConfig` is the config the host is handed, so it is the one to ask about.
+      const destination: 'cloud' | 'local' = effectiveDestinationFor(
+        mutatedConfig.provider,
+        config.localProvider,
+        config.cloudProvider
+      )
 
       const egressDetection = detectSourceEgress(dlpSubject, {
         minLines: options?.sourceEgressMinLines,

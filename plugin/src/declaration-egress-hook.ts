@@ -139,9 +139,50 @@ export function handleDeclarationPostExecute(
   // undefined while the command does read content. The search route has refused that shape since its
   // directory branch landed; this is the same test for the shell route (SECURITY-REVIEW-4 [7]). The
   // resolver is the one above, so the answer does not depend on where the host was launched.
+  // A QUOTE-AWARE TOKENIZER, because the whitespace split could not see a quoted argument
+  // (SECURITY-REVIEW-5 [2]). `rg SECRET "code space"` split into `"code` and `space"`, neither of which is
+  // a directory on disk, so the directory test below found nothing and the command fell through to the
+  // allow -- while the search really did run over a directory holding source. Quotes are also how a path
+  // with a space is written on this platform, so the shape is ordinary rather than exotic.
+  //
+  // `unterminated` is reported rather than guessed at: a tokenizer that cannot say which arguments a
+  // command names cannot say which of them are directories either, so the evaluator fails closed on it.
+  const shellTokens = (cmd: string): { tokens: string[]; unterminated: boolean } => {
+    const tokens: string[] = []
+    let token = ''
+    let quote: '"' | "'" | null = null
+    for (const ch of String(cmd || '')) {
+      if (quote) {
+        if (ch === quote) quote = null
+        else token += ch
+        continue
+      }
+      if (ch === '"' || ch === "'") {
+        quote = ch
+        continue
+      }
+      if (/\s/.test(ch)) {
+        if (token) tokens.push(token)
+        token = ''
+        continue
+      }
+      token += ch
+    }
+    if (token) tokens.push(token)
+    return { tokens, unterminated: quote !== null }
+  }
+
+  // The flag is about the COMMAND's quoting, not about the directory test, so it is answered even when no
+  // argument turns out to be a directory: `rg SECRET "code space` names an argument nobody can read.
+  const commandScopeUnparseable = (cmd: string): boolean =>
+    commandReadsContent(String(cmd || '')) === true && shellTokens(String(cmd || '')).unterminated
+
   const commandReadsDirectoryScope = (cmd: string): boolean => {
     if (commandReadsContent(String(cmd || '')) !== true) return false
-    const tokens = String(cmd || '').match(/[^\s"']+/g) || []
+    const { tokens, unterminated } = shellTokens(String(cmd || ''))
+    // An unclosed quote is refused by `commandScopeUnparseable`; answering "no directory here" would let
+    // the two predicates disagree about a command that is already known to be unreadable.
+    if (unterminated) return false
     for (const token of tokens) {
       if (token.startsWith('-')) continue
       try {
@@ -222,6 +263,7 @@ export function handleDeclarationPostExecute(
     commandReadsContent,
     commandNamesSource,
     commandReadsDirectoryScope,
+    commandScopeUnparseable,
     directoryScope,
     listSourceFiles,
     readDeclaration,

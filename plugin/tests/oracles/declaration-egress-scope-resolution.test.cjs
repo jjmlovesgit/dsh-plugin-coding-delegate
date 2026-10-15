@@ -211,3 +211,58 @@ test('a directory-scoped shell read is refused, and a listing is not (finding 7)
   )
   assert.equal(listed, null, 'a listing is not a content read and must remain allowed')
 });
+
+test('a QUOTED directory scope is refused, and quoting that cannot be parsed is refused too (finding 2)', () => {
+  // MEASURED (SECURITY-REVIEW-5 [2]): the hook split the command on whitespace, so `rg SECRET "code
+  // space"` produced the tokens `"code` and `space"`. Neither matches a directory on disk, so the
+  // directory predicate answered false and the raw matches were passed through -- the same leak finding 7
+  // closed, reachable again through a path with a space in it. Both halves are driven through the shipped
+  // hook, because the evaluator holds no filesystem view and cannot tokenise for itself.
+  const os = require('node:os')
+  const hook = require(path.join(__dirname, '..', '..', 'dist', 'declaration-egress-hook.js'))
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-quoted-scope-'))
+  const spaced = path.join(base, 'code space')
+  fs.mkdirSync(spaced, { recursive: true })
+  fs.writeFileSync(path.join(spaced, 'impl.ts'), 'export const secret = 1\n', 'utf8')
+  try {
+    // Precondition: the scope really is a directory with source in it, so the assertions below cannot pass
+    // by describing an empty fixture.
+    assert.ok(fs.statSync(spaced).isDirectory(), 'the fixture must be the directory the command names')
+    assert.match(fs.readFileSync(path.join(spaced, 'impl.ts'), 'utf8'), /export const secret/)
+
+    const options = {
+      sourceReadEgress: 'declarations',
+      declarationRoot: WS,
+      workspaceRoot: base,
+      workspaceVerified: true,
+    }
+
+    const quoted = hook.handleDeclarationPostExecute(
+      { name: 'pwsh', arguments: { command: 'rg SECRET "code space"' } },
+      options
+    )
+    assert.ok(quoted, 'a quoted directory scope still reads the files beneath it')
+    assert.equal(quoted.kind, 'accept')
+    assert.match(quoted.content[0].text, /searches a directory/)
+
+    // An unclosed quote has no deterministic tokenisation, so it is refused rather than guessed at: the
+    // guess is which of the tokens the shell would actually pass, and guessing it wrong is the leak above.
+    const unclosed = hook.handleDeclarationPostExecute(
+      { name: 'pwsh', arguments: { command: 'rg SECRET "code space' } },
+      options
+    )
+    assert.ok(unclosed, 'an unparseable command must not fall through to the raw allow')
+    assert.equal(unclosed.kind, 'accept')
+    assert.match(unclosed.content[0].text, /quoting could not be parsed deterministically/)
+
+    // CONTROL: tokenising correctly is not the same as refusing. A command whose scope resolves to nothing
+    // is left alone, or the fix would be a ban on shell searches rather than a rule about source.
+    const absent = hook.handleDeclarationPostExecute(
+      { name: 'pwsh', arguments: { command: 'rg SECRET missing-directory' } },
+      options
+    )
+    assert.equal(absent, null, 'a scope that names no directory is not an egress route')
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true })
+  }
+});

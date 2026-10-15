@@ -43,6 +43,12 @@ export interface DeclarationEgressInput {
      */
     commandReadsDirectoryScope?: (cmd: string) => boolean;
     /**
+     * Could this command's quoting not be parsed deterministically? A tokenizer that cannot say which
+     * arguments a command names cannot say which of them are directories either, so the shell route fails
+     * closed on it rather than guessing (SECURITY-REVIEW-5 [2]).
+     */
+    commandScopeUnparseable?: (cmd: string) => boolean;
+    /**
      * Is this scope a DIRECTORY rather than a file?
      *
      * WHY THE SEARCH BRANCH NEEDS IT, and what it closes. `isCodeExtension` answers with the scope's

@@ -32,4 +32,22 @@ export interface DestinationClassificationResult {
  * high-confidence hits do not. Only an explicit 'block' changes that, and only 'local' authorises a
  * reroute for a high-confidence hit.
  */
+/**
+ * Where a request whose provider id is `provider` actually lands, given the operator's configured local
+ * and cloud ids.
+ *
+ * ONE DEFINITION, ASKED TWICE (SECURITY-REVIEW-5 [1]). `classifyDestination` asks this about the provider
+ * the HOST selected; `index.ts` must ask it again about the provider the request is actually sent with,
+ * because the architect role repins `provider` to `cloudProvider` after the classifier has already
+ * answered (`applyAgentRole` -> `applyArchitectConfig`). A destination taken from the classification
+ * alone describes a route the request no longer takes: measured, a session whose host provider is the
+ * local worker and whose role repins to the cloud carried a 'local' destination into
+ * `evaluateSourceEgress`, which allowed the payload out with the reason "nothing is leaving the machine".
+ *
+ * The `isCloudOnly` half is load-bearing: in the documented cloud-only setup `localProvider` and
+ * `cloudProvider` are the same id, so `provider === localProvider` is true while the payload still lands
+ * at the cloud. That comparison is the second opinion SECURITY-REVIEW-4 [5] removed; this is the answer
+ * it was replaced with, not a reintroduction of it.
+ */
+export declare function effectiveDestinationFor(provider: string | undefined, localProvider: string | undefined, cloudProvider: string | undefined): 'cloud' | 'local';
 export declare function classifyDestination(input: DestinationClassificationInput): DestinationClassificationResult;

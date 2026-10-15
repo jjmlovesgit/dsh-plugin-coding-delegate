@@ -27,6 +27,16 @@ const assert = require("node:assert/strict");
 const path = require("node:path");
 
 const PLUGIN = path.resolve(__dirname, "..", "..");
+
+// The plugin resolves the session workspace itself (`resolveWorkspaceDir` in plugin/src/index.ts) and
+// OVERWRITES the `workspaceRoot` option below with its own answer, so this environment variable is what
+// actually decides whether a relative scope is trusted. Declaring it makes the base a workspace the host
+// NAMED -- which is what the mount below intends -- instead of the process working directory, which
+// `resolveWorkspaceDir` reports as unverified. That distinction is load-bearing since SECURITY-REVIEW-5
+// [3]: an unverified base cannot clear a scope, so without this line the controls in this file would be
+// asserting the value of the runner's cwd rather than the property they mean.
+process.env.DSH_WORKSPACE_ROOT = PLUGIN;
+
 const { apply } = require(PLUGIN + "/dist/index.js");
 
 const handlers = {};

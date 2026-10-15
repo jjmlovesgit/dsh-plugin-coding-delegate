@@ -235,8 +235,8 @@ test('finding 5: the source-egress destination is the classifier answer', () => 
   const src = fs.readFileSync(SRC_INDEX, 'utf8')
   assert.match(
     src,
-    /const\s+destination:\s*'cloud'\s*\|\s*'local'\s*=\s*classification\.destination/,
-    'index.ts must take the source-egress destination from classifyDestination'
+    /const\s+destination:\s*'cloud'\s*\|\s*'local'\s*=\s*effectiveDestinationFor\(\s*mutatedConfig\.provider/,
+    'index.ts must take the source-egress destination from the provider the request is actually sent with'
   )
   assert.doesNotMatch(
     src,
@@ -244,7 +244,45 @@ test('finding 5: the source-egress destination is the classifier answer', () => 
     'and must not recompute it from provider strings: that comparison is TRUE in a cloud-only setup'
   )
   const dist = fs.readFileSync(DIST_INDEX, 'utf8')
-  assert.match(dist, /classification\.destination/, 'dist/index.js must carry it; rebuild if this fails')
+  assert.match(dist, /effectiveDestinationFor/, 'dist/index.js must carry it; rebuild if this fails')
+})
+
+// ─── SECURITY-REVIEW-5 [1]: the destination must be read AFTER the role repins the provider ─────────
+//
+// MEASURED: `classification.destination` is computed at the top of the request hook from the provider the
+// HOST selected. `applyAgentRole` runs later and, for the architect, repins the request to `cloudProvider`
+// -- so in a hybrid setup whose host offered the local worker the classifier said 'local' while the exact
+// same request went to the cloud, and `evaluateSourceEgress` cleared detected source with the reason
+// "nothing is leaving the machine". The classifier was right about its own input and wrong about the
+// request; the fix is to classify the provider the request carries after the role is applied.
+
+test('finding 1: the destination is recomputed from the post-role provider', () => {
+  const { effectiveDestinationFor } = require(path.join(__dirname, '..', '..', 'dist', 'routing.js'))
+  assert.equal(
+    effectiveDestinationFor('deepseek-official', 'lm-studio', 'deepseek-official'),
+    'cloud',
+    'an architect repin to the cloud is a cloud destination, whatever the host originally offered'
+  )
+  assert.equal(
+    effectiveDestinationFor('lm-studio', 'lm-studio', 'deepseek-official'),
+    'local',
+    'a request left on the local worker is still local'
+  )
+  assert.equal(
+    effectiveDestinationFor('deepseek-official', 'deepseek-official', 'deepseek-official'),
+    'cloud',
+    'the cloud-only alias keeps its isCloudOnly answer, which the recomputation used to drop'
+  )
+})
+
+test('finding 1: the gate reads the post-role provider, never the pre-role classifier', () => {
+  const src = fs.readFileSync(SRC_INDEX, 'utf8')
+  assert.doesNotMatch(
+    src,
+    /=\s*classification\.destination/,
+    'the classifier answer is computed before the role runs, so it must not be what the gate uses'
+  )
+  assert.match(src, /effectiveDestinationFor/, 'the gate must ask the shared helper')
 })
 
 test('finding 5: a cloud-only alias is denied, not allowed, when source is in the payload', () => {

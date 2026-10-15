@@ -10,6 +10,7 @@
 
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
+const os = require("node:os");
 const path = require("node:path");
 
 const PLUGIN = path.resolve(__dirname, "..", "..");
@@ -181,5 +182,70 @@ test("case 16 (control): listing a directory is still allowed", () => {
 // `reads && !names`.
 test("case 17 (control): a command that reads no content stays allowed even when it names a directory", () => {
   const r = decide({ toolKind: "shell", target: "Set-Location src", commandReadsContent: () => false });
+  assert.equal(r.action, "allow");
+});
+
+// SECURITY-REVIEW-5 [3]: the provenance refusal used to sit BELOW the directory branch, so a scope that
+// resolved to an empty directory against the unverified cwd fallback returned the positive control's
+// allow before anything asked whether the base described the session. MEASURED pre-fix: the same call as
+// case 18 returned `allow` while the host searched the real workspace.
+test("case 18: a scope resolved against an unverified base is refused, not cleared by an empty directory", () => {
+  const r = decide({
+    toolKind: "search",
+    target: "src",
+    workspaceRoot: path.join(os.tmpdir(), "dsh-not-this-session"),
+    workspaceVerified: false,
+    directoryScope: () => true,
+    listSourceFiles: () => [],
+  });
+  assert.equal(r.action, "block", "an unverified base cannot clear a scope it guessed at");
+  assert.match(String(r.reason), /could not be established/);
+});
+
+// CONTROL: the provenance question is about the BASE, not about the scope. With a verified base the
+// positive control stands: a directory the resolver looked at and found no source beneath is allowed,
+// which is what keeps the directory route from passing by refusing every directory.
+test("case 19 (control): a verified base with genuinely no source beneath the scope is allowed", () => {
+  const r = decide({
+    toolKind: "search",
+    target: "docs",
+    workspaceRoot: path.join(os.tmpdir(), "dsh-verified-base"),
+    workspaceVerified: true,
+    directoryScope: () => true,
+    listSourceFiles: () => [],
+  });
+  assert.equal(r.action, "allow");
+});
+
+// CONTROL: naming no workspace at all is not the same failure, and the old answer stands. This is the
+// boundary the fix had to respect: only a base that was COMPUTED and found untrustworthy is refused.
+test("case 20 (control): a caller that names no workspace keeps the previous answer", () => {
+  const r = decide({ toolKind: "search", target: "src", directoryScope: () => true, listSourceFiles: () => [] });
+  assert.equal(r.action, "allow");
+});
+
+// SECURITY-REVIEW-5 [2]: the hook tokenised shell commands on whitespace, so `rg SECRET "code space"`
+// produced the tokens `"code` and `space"` -- no directory on disk matches either, the directory predicate
+// answered false, and the command fell through to the raw allow. The evaluator cannot tokenise for itself
+// (it holds no filesystem view), so the hook reports that it could not parse the quoting and this is the
+// refusal. MEASURED pre-fix through the shipped hook: the original output was passed through.
+test("case 21: a shell command whose quoting cannot be parsed is refused", () => {
+  const r = decide({
+    toolKind: "shell",
+    target: 'rg SECRET "code space',
+    commandScopeUnparseable: () => true,
+  });
+  assert.equal(r.action, "block");
+  assert.match(String(r.reason), /quoting could not be parsed deterministically/);
+});
+
+// CONTROL: the unparseable branch keys on the parse, not on the tool. A command that tokenises cleanly and
+// names no directory and no code file is still allowed, or the fix would be a ban on shell commands.
+test("case 22 (control): a parseable command that reaches no source stays allowed", () => {
+  const r = decide({
+    toolKind: "shell",
+    target: "rg SECRET docs/README.md",
+    commandScopeUnparseable: () => false,
+  });
   assert.equal(r.action, "allow");
 });
