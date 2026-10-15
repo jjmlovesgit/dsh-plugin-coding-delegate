@@ -1426,11 +1426,12 @@ regenerated, 8 of the new cases failed — the architect repin, the quoted direc
 the unverified empty directory, and four structural pins — and the suite returned to 512 tests, 511 pass, 0
 fail, 1 skip with the fixes restored.
 
-## A shell search never asked whether the workspace was established — open
+## A shell search never asked whether the workspace was established — fixed
 
-The provenance refusal added for the review-4 finding is asked on the read route and not on the shell route.
-Measured against the shipped hook with `workspaceVerified: false` and a base nowhere near the workspace, the
-same relative scope reached two ways:
+The provenance refusal added for the review-4 finding is asked on the read route and on the search route
+and was never asked on the shell route. Measured against the shipped hook with `workspaceVerified: false`
+and a base nowhere near the workspace, the same relative scope reached two ways — this is the behaviour
+when the gap was found:
 
 | command | base unverified | base verified |
 | --- | --- | --- |
@@ -1452,11 +1453,22 @@ shell route costs there is a refusal turned into a serve, not source escaping. T
 comfort. The guessed base is `process.cwd()`, which is whatever directory the server was started in, and a
 search of that tree is refused only when the guess happens to find the directory it names.
 
-Left open on purpose. It is a change to the shell branch's semantics, not a moved check: that branch already
-carries three refusals — a named source file, a directory scope, and quoting that cannot be parsed — and
-provenance belongs ahead of all three only if a shell command naming nothing but prose is willing to be
-refused whenever the base is unverified. That is the right fail-closed answer and it is a behaviour change a
-user will notice, so it wants its own RED-before-GREEN pair with a control for the proven base. No test pins
-either column of the table above, which is how it survived two reviews.
+Closed at `fdeb609`. A content-reading shell command is now refused when the base is unverified, through the
+same helper the read and search routes ask, with the verb passed in so the message names the act the
+operator performed rather than the route they did not use. The refusal is asked *after* the branch's three
+specific refusals and not before them, which is a deliberate deviation from the order a first reading
+suggests: those three are true whatever the base turns out to be, so putting the base question first would
+let a later change to that question hide a reason that does not depend on it. What was fail-open was the
+`allow` at the end of the branch; that is the line the fix replaced. It is gated on the content-read
+predicate, so a command that only lists a directory reads no bytes and keeps its allow.
+
+`plugin/tests/oracles/shell-egress-provenance.test.cjs` pins both columns, six of its nine cases being
+controls: the same prose read passes once the base is proven, the directory search is refused there for its
+own reason instead, the listing keeps its allow on a guessed base, a quoting refusal is not hidden behind
+the base question, and a caller that names no workspace at all still gets the old answer. That last one is
+the smaller sibling of this finding and is left alone on purpose — the hook always names a workspace, so
+the branch is reachable only by a direct API caller, and it is pinned rather than changed. With `plugin/src`
+stashed, exactly three of the nine cases are red and every control stays green, which is the shape the fix
+was supposed to have: it adds refusals and removes no allow that was doing work.
 
 

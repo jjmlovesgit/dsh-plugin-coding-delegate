@@ -362,7 +362,7 @@ Four of those are qualified and the qualifications matter more than the rows:
   operator did the reviewing. That is **tamper-evidence, not cryptographic non-repudiation** — there is no
   key, no signature, and no third party.
 
-### Two refusals that used to be fail-open
+### Three refusals that used to be fail-open
 
 Both of these are boundaries that reported success while the condition they exist to catch was true, so
 they are recorded as refusals rather than as features.
@@ -378,6 +378,16 @@ provenance rather than inferred from a path: the resolver now reports whether th
 (`DSH_WORKSPACE_ROOT` or a session workspace the host supplied) or merely *fell back*, and the evaluator
 fails closed on the unverified case. `contextFiles` injection is outside this control; it is governed by
 containment and credential checks instead.
+
+**A content-reading shell command is refused on an unverified base too.** A shell command is the one route
+where the scope the host will resolve never reaches the evaluator *as* a scope — it travels inside a
+command string — so `grep TODO docs/findings.md` was served on a guessed base while the search route
+refused the same file as unresolved, and `rg TODO docs` was allowed where a proven base refuses it,
+because the directory predicate answers against the guess as well. The question is now asked on this route
+too, and asked *after* the three specific shell refusals — a named source file, a directory scope, quoting
+that cannot be parsed — because those are true whatever the base turns out to be, and a later change to
+the base question must not be able to hide them. A command that only *lists* a directory reads no bytes
+and keeps its allow.
 
 **A context file larger than the byte ceiling is refused before it is read.** `contextFiles` requests
 carry a `maxBytes` budget, and the check that enforces it used to run only when the request asked for a
