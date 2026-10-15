@@ -118,6 +118,12 @@ it reads as enforced. The auditor must land before, or with, the signer.
   effective form puts it before `--test`.
 - **A pathspec that silently does not match.** `git checkout HEAD -- plugin/dist/x.js` run from `plugin/`
   fails and leaves the tree untouched, so a "before" and "after" measurement can be the same build.
+- **A swap-and-restore that stages the swap.** `git checkout <rev> -- <path>` writes the old blob into the
+  INDEX as well as the working tree, so a fail-before measurement that swaps a file that way and restores
+  only the working tree will commit the swapped version. MEASURED: it committed a reversion of the 1.2
+  branch and pushed it, with the new probes left unstaged beside it. Restore through the index (`git add`)
+  and confirm with `git show :<path>` before committing — three separate measurements in this session were
+  broken by a silent git mechanic rather than by the code under test.
 - **CRLF, anywhere near a hash.** The signer hashes bytes on disk; the auditor reads the blob from the
   commit. `.gitattributes` now pins `* text=auto eol=lf`, and `scripts/check-file-hygiene.cjs` fails the
   gate on CRLF, a missing trailing newline, or a BOM.
