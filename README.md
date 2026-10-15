@@ -287,8 +287,11 @@ Five things, in the order they act:
    before the cloud sees them. A hit is refused or rerouted to the local worker, never transmitted. The
    gate accumulates the user messages it has seen, so a credential from an earlier turn keeps it closed
    instead of scrolling out of view. The scanned window is bounded at 200,000 characters, and that
-   conclusion is not: once a session has carried a credential it stays local for the rest of the session,
-   because the flag recording it is not evicted along with the text.
+   conclusion is not — for a hit a **pattern** confirmed. Once a session has carried an API key, a token or
+   a private-key block it stays local for the rest of the session, because the flag recording it is not
+   evicted along with the text. A high-entropy string on its own does **not** pin the session: the entropy
+   backstop is a per-turn soft landing, so a random hash, a UUID or a base64 blob is rerouted for that turn
+   and re-decided on the next one rather than locking the session down permanently.
 3. **A code guard, in both directions.** Cloud-authored writes *and deletions* of source are denied or
    sent for approval — and so is reading back a file the worker wrote, since that pulls delegated code
    into the context delegation exists to keep it out of. Shell forms are covered, including inline program
@@ -407,6 +410,12 @@ read is refused rather than silently falling back to source:
 | no skeleton was emitted for the path | *"…was refused: sourceReadEgress is 'declarations' and no type skeleton exists at '…'"* |
 | the skeleton is older than its source | *"…its type skeleton at '…' is OLDER than the source, so it may describe a signature that has since changed"* |
 | a code extension no build can map (`.py`, `.go`, `.rs`, …) | *"…was refused: sourceReadEgress is 'declarations' and no type skeleton can be produced for …"* |
+
+These three are the conditions under which no declaration can be **served**. The same mode refuses for a
+different reason when a shell command searches a **directory** rather than naming a file — the arguments
+reach files the serve path never sees — and when a command's quoting cannot be parsed deterministically,
+so the arguments it names cannot be shown to avoid source at all. The first of those is the rule that makes
+`rg SECRET src` a refusal while `Get-ChildItem src` is still a listing.
 
 Staleness is decided on **file mtime**, not on content. It is evidence that a rebuild happened after an
 edit, and it is defeated by a `touch`, a `git checkout` or clock skew: it closes the common case —

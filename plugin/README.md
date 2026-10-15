@@ -405,6 +405,13 @@ The worker receives the `instruction`, the `targetFiles` **paths**, the verifica
 discover anything; it only ever sees what it was shown. What remains unsolved is cross-unit coherence:
 nothing decides which files a unit needs, and nothing checks that two units agree.
 
+A delegation settles its own registry entry as `UNIT_PASSED` or `UNIT_FAILED` — a machine-checked outcome —
+and never as `OPERATOR_ATTESTED`. The tool takes no operator or reviewer argument, so a model call cannot
+author a human claim at all. A second principal is added on the signed-note path instead
+(`scripts/attest-unit.cjs --prepare`, then `--approve --reviewer-identity`), and the ledger audit verifies
+it. `OPERATOR_ATTESTED` stays a value the registry can *hold* — the verifier still honours one, and an
+earlier version of this plugin could write one — it is simply not a value this tool can create.
+
 ### Where the files go
 
 - **`workspaceDir`** selects the destination explicitly. Automatic resolution
