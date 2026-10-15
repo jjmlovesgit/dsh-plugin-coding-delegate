@@ -51,6 +51,10 @@ const wire = (extra) =>
       sourceReadEgress: 'declarations',
       declarationRoot: WS,
       workspaceRoot: WS,
+      // WS is a workspace this oracle named AND created, so it is a verified base -- the same thing
+      // index.ts passes when the host named a workspace. An unverified base is the process-cwd fallback,
+      // which is a separate case at the end of this file because it is the one that must fail closed.
+      workspaceVerified: true,
       isCodeExtension: (p) => ['.ts', '.js'].includes(path.extname(String(p)).toLowerCase()),
       declarationPathFor: (src) => String(src).replace(/\.ts$/, '.d.ts'),
       // The hook resolves the STATED scope against the workspace with this same exported resolver, so the
@@ -145,4 +149,65 @@ test('resolveScopePath resolves relative scopes against the workspace and leaves
   assert.equal(resolveScopePath('src/deep/thing.ts', WS), path.resolve(WS, 'src', 'deep', 'thing.ts'));
   assert.equal(resolveScopePath(path.join(WS, 'src'), WS), path.normalize(path.join(WS, 'src')));
   assert.equal(resolveScopePath('   ', WS), '');
+});
+
+test('an UNVERIFIED workspace base refuses a scope it cannot resolve, instead of reading it as prose', () => {
+  // MEASURED (SECURITY-REVIEW-4 [2]): with the base set to the process cwd -- what resolveWorkspaceDir
+  // returns when the host names no workspace, which is the ordinary case on a host that sets no workspace
+  // environment variable and exposes no workspace service -- `grep { path: 'src' }` reached the prose
+  // allow, because the cwd had no `src` while the session's own search root did. The scope was never
+  // unresolvable; it was resolved against a directory nobody chose, and the raw matches then passed.
+  const os = require('node:os')
+  const hook = require(path.join(__dirname, '..', '..', 'dist', 'declaration-egress-hook.js'))
+  const other = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-unverified-'))
+  try {
+    const unverified = hook.handleDeclarationPostExecute(
+      { name: 'grep', arguments: { path: 'src' } },
+      { sourceReadEgress: 'declarations', declarationRoot: WS, workspaceRoot: other, workspaceVerified: false }
+    )
+    assert.ok(unverified, 'an unverified base must not clear a directory scope the search could reach')
+    assert.equal(unverified.kind, 'accept')
+    assert.match(unverified.content[0].text, /could not be established/)
+
+    // CONTROL: the same scope under the real workspace is served, not refused. The fix must refuse the
+    // GUESS, not the scope -- otherwise it is a ban on searching rather than a rule about provenance.
+    const verified = hook.handleDeclarationPostExecute(
+      { name: 'grep', arguments: { path: 'src' } },
+      { sourceReadEgress: 'declarations', declarationRoot: WS, workspaceRoot: WS, workspaceVerified: true }
+    )
+    assert.doesNotMatch(
+      JSON.stringify(verified || null),
+      /could not be established/,
+      'the true workspace must still resolve the scope'
+    )
+  } finally {
+    fs.rmSync(other, { recursive: true, force: true })
+  }
+});
+
+test('a directory-scoped shell read is refused, and a listing is not (finding 7)', () => {
+  // MEASURED: commandReadsContent('rg SECRET src') is true but the command names no code FILE, so the
+  // reads && names rule never fired and the raw results passed -- while the dedicated search route served
+  // the same directory as declarations. This drives the SHIPPED predicate through the shipped hook.
+  const hook = require(path.join(__dirname, '..', '..', 'dist', 'declaration-egress-hook.js'))
+  const options = {
+    sourceReadEgress: 'declarations',
+    declarationRoot: WS,
+    workspaceRoot: WS,
+    workspaceVerified: true,
+  }
+  for (const command of ['rg SECRET src', 'rg SECRET .']) {
+    const refused = hook.handleDeclarationPostExecute({ name: 'pwsh', arguments: { command } }, options)
+    assert.ok(refused, command + ' reads file contents and must not pass raw output through')
+    assert.equal(refused.kind, 'accept')
+    assert.match(refused.content[0].text, /searches a directory/)
+  }
+
+  // CONTROL: listing a directory reads no contents, so it is untouched. Without this the rule would be a
+  // ban on the shell tool rather than a rule about source.
+  const listed = hook.handleDeclarationPostExecute(
+    { name: 'pwsh', arguments: { command: 'Get-ChildItem src' } },
+    options
+  )
+  assert.equal(listed, null, 'a listing is not a content read and must remain allowed')
 });

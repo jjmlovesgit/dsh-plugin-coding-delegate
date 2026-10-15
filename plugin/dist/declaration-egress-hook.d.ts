@@ -39,6 +39,12 @@ export interface PostExecuteOptions {
      * evaluator allowed the search, while the same scope against the workspace was served as declarations.
      */
     workspaceRoot?: string;
+    /**
+     * Did `workspaceRoot` come from the host, or is it `resolveWorkspaceDir`'s cwd fallback? Forwarded to the
+     * evaluator, which refuses an unresolved scope on an unverified base instead of reading it as prose
+     * (SECURITY-REVIEW-4 [2]). Absent is unverified: a caller that does not say gets the fail-closed answer.
+     */
+    workspaceVerified?: boolean;
 }
 export interface EgressHookResult {
     kind: 'accept';

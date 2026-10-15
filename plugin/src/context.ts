@@ -67,20 +67,26 @@ export function resolveContextFiles(
       continue
     }
 
-    const declaresRange = request.startLine !== undefined || request.endLine !== undefined
-    if (!declaresRange) {
-      try {
-        const fileSize = fs.statSync(resolvedPath).size
-        if (fileSize > maxBytes - totalBytes) {
-          errors.push(
-            `context injection would exceed its ${maxBytes}-byte budget (${totalBytes + fileSize} bytes declared). ` +
-              `Narrow the line ranges or declare fewer files.`
-          )
-          continue
-        }
-      } catch {
-        // stat failed; fall through to the read attempt so the existing error path reports it
+    // The budget is checked against the FILE, not against the slice the request asks for, so a line range
+    // cannot buy a bigger read: a range bounds what is emitted, never how much is loaded. This check used to
+    // sit behind `if (!declaresRange)`, so a ranged request read and split the whole file before the byte
+    // check below discarded it (SECURITY-REVIEW-4 [4]) -- measured at 5 MiB read for a one-line request. That
+    // is memory and latency on a path the caller chooses, and it also left `statSync`'s other job undone: a
+    // FIFO or device inside the root would have blocked the read instead of being refused here.
+    //
+    // The trade is stated rather than hidden: a file larger than the whole remaining budget is now refused
+    // even when the requested range is tiny. No emitted range can justify loading more than the budget.
+    try {
+      const fileSize = fs.statSync(resolvedPath).size
+      if (fileSize > maxBytes - totalBytes) {
+        errors.push(
+          `context injection would exceed its ${maxBytes}-byte budget (${totalBytes + fileSize} bytes declared). ` +
+            `Narrow the line ranges or declare fewer files.`
+        )
+        continue
       }
+    } catch {
+      // stat failed; fall through to the read attempt so the existing error path reports it
     }
 
     let raw: string

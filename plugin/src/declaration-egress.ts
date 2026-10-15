@@ -42,6 +42,11 @@ export interface DeclarationEgressInput {
   commandReadsContent?: (cmd: string) => boolean
   commandNamesSource?: (cmd: string) => boolean
   /**
+   * Does this command read content out of a DIRECTORY it names? `rg SECRET src` reads source and names no
+   * file, so the extension test above cannot see it (SECURITY-REVIEW-4 [7]).
+   */
+  commandReadsDirectoryScope?: (cmd: string) => boolean
+  /**
    * Is this scope a DIRECTORY rather than a file?
    *
    * WHY THE SEARCH BRANCH NEEDS IT, and what it closes. `isCodeExtension` answers with the scope's
@@ -75,6 +80,12 @@ export interface DeclarationEgressInput {
    * same string, the same defect, one module over.
    */
   workspaceRoot?: string
+  /**
+   * Did `workspaceRoot` come from the host, or is it the process-cwd fallback? Only a root the host named
+   * makes "this scope does not resolve" mean anything (SECURITY-REVIEW-4 [2]). Absent is treated as
+   * unverified, so a caller that does not say gets the fail-closed answer rather than the leaky one.
+   */
+  workspaceVerified?: boolean
   /** Does this RESOLVED path exist? Decides whether a non-code scope is an ordinary file or nothing. */
   pathExists?: (resolvedPath: string) => boolean
 }
@@ -384,6 +395,30 @@ export function evaluateDeclarationEgress(input: DeclarationEgressInput): Declar
       }
     }
 
+    // FAIL CLOSED WHEN THE BASE ITSELF IS A GUESS.
+    //
+    // `workspaceRoot` can be the process cwd rather than a session workspace, because the host may expose
+    // no workspace at all (`resolveWorkspaceDir` says which one it used). On that base, "the scope does not
+    // resolve" says nothing about what the host will search: the search runs against the session's own
+    // root, and a BARE directory scope carries no extension for the resolver to test. Measured with the cwd
+    // outside the workspace: `grep { path: 'src' }` fell through to the allow below and the raw results
+    // passed, while the same scope against the true root is served as declarations (SECURITY-REVIEW-4 [2]).
+    //
+    // The cost is stated rather than hidden: on a host that exposes no workspace, a phrase-shaped scope is
+    // refused here too, because nothing distinguishes it from a directory the search really would reach.
+    // That is the fail-closed direction, and the message names the thing the operator has to fix.
+    if (input.workspaceRoot && !input.workspaceVerified) {
+      return {
+        action: 'block',
+        reason:
+          "Searching '" +
+          scope +
+          "' was refused: sourceReadEgress is 'declarations' and the session workspace could not be " +
+          'established, so this scope was resolved against the process working directory -- a guess -- and ' +
+          'its reach cannot be shown to avoid source. Check the path, or give the session a workspace.',
+      }
+    }
+
     // Prose: no separator, no extension, nothing on disk. It cannot reach source.
     return { action: 'allow' }
   }
@@ -413,6 +448,24 @@ export function evaluateDeclarationEgress(input: DeclarationEgressInput): Declar
           target +
           "' was refused: sourceReadEgress is 'declarations' and this command reads source content, " +
           'which is an implementation egress by another route. Read the declaration path directly instead.',
+      }
+    }
+
+    // A DIRECTORY SCOPE, which the reference test above cannot see: `rg SECRET src` reads content and names
+    // no extension-bearing file, so it used to reach the allow below while the search route had refused the
+    // same shape since its own directory branch landed (SECURITY-REVIEW-4 [7]).
+    //
+    // Deliberately narrower than `reads`: a command that lists a directory (`Get-ChildItem src`) reads no
+    // content and stays allowed, and one that reads a file it names is already refused above.
+    if (reads && input.commandReadsDirectoryScope?.(target) === true) {
+      return {
+        action: 'block',
+        reason:
+          "Shell command '" +
+          target +
+          "' was refused: sourceReadEgress is 'declarations' and this command searches a directory, " +
+          'which reads source content by another route. Search a scope whose reach avoids source, or read ' +
+          'the declaration path directly instead.',
       }
     }
     return { action: 'allow' }

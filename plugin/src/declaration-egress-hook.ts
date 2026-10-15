@@ -57,6 +57,12 @@ export interface PostExecuteOptions {
    * evaluator allowed the search, while the same scope against the workspace was served as declarations.
    */
   workspaceRoot?: string
+  /**
+   * Did `workspaceRoot` come from the host, or is it `resolveWorkspaceDir`'s cwd fallback? Forwarded to the
+   * evaluator, which refuses an unresolved scope on an unverified base instead of reading it as prose
+   * (SECURITY-REVIEW-4 [2]). Absent is unverified: a caller that does not say gets the fail-closed answer.
+   */
+  workspaceVerified?: boolean
 }
 
 export interface EgressHookResult {
@@ -128,6 +134,25 @@ export function handleDeclarationPostExecute(
     }
   }
 
+  // Does the command read content out of a DIRECTORY it names? `rg SECRET src` names no file, so the
+  // extension-bearing reference test cannot see it: measured, `longestCodeReference('rg SECRET src')` is
+  // undefined while the command does read content. The search route has refused that shape since its
+  // directory branch landed; this is the same test for the shell route (SECURITY-REVIEW-4 [7]). The
+  // resolver is the one above, so the answer does not depend on where the host was launched.
+  const commandReadsDirectoryScope = (cmd: string): boolean => {
+    if (commandReadsContent(String(cmd || '')) !== true) return false
+    const tokens = String(cmd || '').match(/[^\s"']+/g) || []
+    for (const token of tokens) {
+      if (token.startsWith('-')) continue
+      try {
+        if (fs.statSync(resolveScope(token)).isDirectory()) return true
+      } catch {
+        // Not a directory. The next token decides, and a command with none is not this case.
+      }
+    }
+    return false
+  }
+
   // Does the resolved scope exist at all? A non-code path that exists reads no source and stands; one that
   // does not exist is refused rather than waved through, because "not found" and "a phrase" are otherwise
   // the same string.
@@ -196,10 +221,12 @@ export function handleDeclarationPostExecute(
     declarationPathFor,
     commandReadsContent,
     commandNamesSource,
+    commandReadsDirectoryScope,
     directoryScope,
     listSourceFiles,
     readDeclaration,
     workspaceRoot: options?.workspaceRoot,
+    workspaceVerified: options?.workspaceVerified,
     pathExists,
   })
 

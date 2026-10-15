@@ -473,12 +473,17 @@ export interface LLMSession {
  * known shapes in order and report WHERE the answer came from: silently falling
  * back to process.cwd() writes files into the server's own directory instead of
  * the Session workspace, which is far worse than failing loudly.
+ *
+ * `verified` is part of the answer, not a detail of it (SECURITY-REVIEW-4 [2]): a caller that refuses an
+ * unresolved relative scope is only entitled to do that when the base is a workspace the host named. On the
+ * cwd fallback, "this scope does not resolve" is a statement about the wrong directory, and the egress
+ * evaluator must fail closed instead of reading it as prose.
  */
-function resolveWorkspaceDir(ctx: any): { dir: string; source: string } {
+function resolveWorkspaceDir(ctx: any): { dir: string; source: string; verified: boolean } {
   for (const key of ['DSH_WORKSPACE_ROOT', 'DSH_WORKSPACE', 'WORKSPACE_ROOT']) {
     const candidate = process.env[key]
     if (typeof candidate === 'string' && candidate && fs.existsSync(candidate)) {
-      return { dir: candidate, source: `env:${key}` }
+      return { dir: candidate, source: `env:${key}`, verified: true }
     }
   }
 
@@ -489,7 +494,7 @@ function resolveWorkspaceDir(ctx: any): { dir: string; source: string } {
       for (const prop of ['dir', 'cwd', 'root', 'path', 'workspaceDir']) {
         const value = (service as any)[prop]
         if (typeof value === 'string' && value && fs.existsSync(value)) {
-          return { dir: value, source: `ctx.get('${serviceName}').${prop}` }
+          return { dir: value, source: `ctx.get('${serviceName}').${prop}`, verified: true }
         }
       }
     }
@@ -497,7 +502,11 @@ function resolveWorkspaceDir(ctx: any): { dir: string; source: string } {
     // service unavailable in this context - fall through to the cwd fallback
   }
 
-  return { dir: process.cwd(), source: 'process.cwd() FALLBACK (not a Session workspace)' }
+  return {
+    dir: process.cwd(),
+    source: 'process.cwd() FALLBACK (not a Session workspace)',
+    verified: false,
+  }
 }
 export const name = 'dsh-plugin-coding-delegate'
 
@@ -843,6 +852,21 @@ const TURN_PROMPT_SEPARATOR = '\u0000'
 const sessionPromptCorpus = new Map<string, string>()
 const SESSION_CORPUS_MAX_CHARS = 200_000
 const GLOBAL_CORPUS_KEY = '__global__'
+
+/**
+ * Sessions where a credential has been seen at any point in this process.
+ *
+ * The corpus above is bounded, so a session that keeps talking eventually pushes an early credential out of
+ * the scanned window and the gate forgets why it was closed (SECURITY-REVIEW-4 [6]). Raising the cap only
+ * moves the distance. The gate's claim is "a credential that appeared in an earlier turn keeps blocking
+ * until the session is restarted", so the fact is remembered separately from the text it was found in.
+ *
+ * Keyed per session for the same reason the corpus is: `dlp-session-scope.test.cjs` pins that one session's
+ * credential must not pin another's, so this cannot be one process-wide flag. Nothing clears it but a
+ * restart, which is what "until the session is restarted" has always meant and is the only promise this
+ * gate can keep -- the plugin is never told that a sensitive turn has left the conversation.
+ */
+const sensitiveSessions = new Set<string>()
 
 function corpusKeyFor(payload: any): string {
   const id = payload?.agent?.id ?? payload?.agent?.session?.id ?? payload?.session?.id
@@ -1415,17 +1439,26 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
           // was therefore off in normal use). Reported rather than silent when it cannot be resolved, since
           // a control that quietly narrows to the cwd is how the first one survived.
           let sessionWorkspace: string | undefined
+          let sessionWorkspaceVerified = false
           try {
-            sessionWorkspace = resolveWorkspaceDir(ctx).dir
+            const resolvedWorkspace = resolveWorkspaceDir(ctx)
+            sessionWorkspace = resolvedWorkspace.dir
+            // The base's provenance travels with it, because an unresolved scope means something only when
+            // the base is the workspace the host named (SECURITY-REVIEW-4 [2]).
+            sessionWorkspaceVerified = resolvedWorkspace.verified
           } catch {
             console.warn(
               '[LOCAL_EGRESS] could not resolve the session workspace, so a relative search scope will be ' +
-                'resolved against the process cwd and an unresolved path-shaped scope will not be refused.'
+                'resolved against the process cwd; a scope that does not resolve there will be refused ' +
+                'rather than read as prose.'
             )
           }
           const egressDecision = handleDeclarationPostExecute(
             exec,
-            Object.assign({}, options, { workspaceRoot: sessionWorkspace })
+            Object.assign({}, options, {
+              workspaceRoot: sessionWorkspace,
+              workspaceVerified: sessionWorkspaceVerified,
+            })
           )
           if (egressDecision) return egressDecision
           if (!READ_TOOLS.has(name)) return decision
@@ -1650,18 +1683,28 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
       // Scan everything this session has said, not just the newest message: the host
       // re-sends the conversation on every request, so a clean latest message is not
       // evidence that the outbound payload is clean.
-      const corpus = sessionPromptCorpus.get(corpusKeyFor(payload)) || ''
+      const corpusKey = corpusKeyFor(payload)
+      const corpus = sessionPromptCorpus.get(corpusKey) || ''
       const dlpSubject = corpus.length > prompt.length ? corpus : prompt
       const dlpResult = scanDLP(dlpSubject, {
         entropyCheck: options?.entropyCheck,
         entropyMinBitsPerChar: options?.entropyMinBitsPerChar,
         entropyMinLength: options?.entropyMinLength,
       })
-      const dlpTripped = config.enforceDLP && dlpResult.hasSensitiveData
+      // A session that has ever shown a credential stays closed for the rest of the process, even after the
+      // bounded corpus has scrolled that turn out of the window (SECURITY-REVIEW-4 [6]). The marker is set
+      // from the same scan that produces `dlpResult`, so the two cannot disagree about what was seen.
+      const remembered = sensitiveSessions.has(corpusKey)
+      if (dlpResult.hasSensitiveData) sensitiveSessions.add(corpusKey)
+      const dlpTripped = config.enforceDLP && (dlpResult.hasSensitiveData || remembered)
       // Entropy-only hits are medium confidence: always rerouted local (so they are
       // never transmitted) but never hard-blocked, because digests and base64 payloads
       // are legitimate content that merely looks random.
-      const entropyOnly = dlpTripped && !dlpResult.highConfidence
+      //
+      // A remembered session is not that case. A credential was actually matched in it, so it must not take
+      // the soft landing that exists for medium-confidence heuristics -- otherwise evicting the corpus would
+      // quietly downgrade a block to a reroute, and the remedy for the eviction would be a new behaviour.
+      const entropyOnly = dlpTripped && !dlpResult.highConfidence && !remembered
       // WHERE THIS WILL ACTUALLY LAND, decided before the role is applied and before anything is
       // transmitted. The reroute used to be committed here on entropy alone, which in the documented
       // cloud-only setup pinned the payload to the provider it was meant to be kept away from.
@@ -1738,12 +1781,15 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
       // Rule 8: source may not reach the cloud. The read guard covers pulling delegated code back, and
       // contextFiles injects into the worker; this covers the blunt route — source sitting in the
       // outbound payload because it was typed into a cloud-bound conversation.
-      const destination: 'cloud' | 'local' =
-        rerouteLocal ||
-        String(mutatedConfig.provider || '').toLowerCase() ===
-          String(config.localProvider || '').toLowerCase()
-          ? 'local'
-          : 'cloud'
+      //
+      // The destination is the classifier's answer, not a second opinion about it (SECURITY-REVIEW-4 [5]).
+      // Recomputing it here from `provider === localProvider` dropped the classifier's `isCloudOnly`
+      // condition, and in the documented cloud-only setup -- localProvider and cloudProvider carrying the
+      // same id -- that comparison is true while the payload still lands at the cloud. This gate then read
+      // the request as "nothing is leaving the machine" and allowed detected source out. The classifier
+      // reports 'local' only when it actually reroutes, so the reroute case this expression also handled is
+      // covered -- by the same input the decision was made from, rather than by a second guess at it.
+      const destination: 'cloud' | 'local' = classification.destination
 
       const egressDetection = detectSourceEgress(dlpSubject, {
         minLines: options?.sourceEgressMinLines,

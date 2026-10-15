@@ -1,9 +1,11 @@
 // Oracle for the standalone defects in SECURITY-REVIEW-2.md.
 //
-// Four cases. A, B and D are RED against the current tree ON PURPOSE: they detect defects that are
-// documented and unfixed. C is GREEN and is a deliberate pin of accepted behaviour. A run in which all
-// four pass means the red cases were written to match the implementation, which is the defect this file
-// exists to prevent.
+// Five cases. A, B and E were RED when written, because they detect defects that were live at the time.
+// A and B are green now that their fixes have landed; E is the case for SECURITY-REVIEW-4 finding 4 and
+// was red until the size guard stopped being conditional on a declared range. C and D are GREEN and are
+// deliberate pins of accepted behaviour rather than assertions of a fix. A run in which every case passes
+// because the cases were written to match the implementation is the defect this file exists to prevent,
+// so each RED-when-written case records above itself what it measured.
 //
 // Conventions: exercise the plugin's real exports from dist/ and never reimplement a plugin decision
 // here. No backtick character appears anywhere in this file.
@@ -140,5 +142,43 @@ test("case D: registry cap is bounded and chronological", () => {
     merged.map((r) => r.path).sort(),
     ["/tmp/new1.ts", "/tmp/new2.ts"],
     "eviction must be chronological (newest retained): " + JSON.stringify(merged.map((r) => r.path))
+  );
+});
+
+// Case E - the budget guard also covers a request that DECLARES A RANGE (SECURITY-REVIEW-4 finding 4).
+//
+// MEASURED before the fix: a 5 MiB file requested as { path: "big.ts", startLine: 1, endLine: 1 } was READ
+// IN FULL -- 5 242 880 bytes observed by the readFileSync recorder -- and refused only afterwards, because
+// the size guard ran only when no range was declared. Case A covered the no-range shape, so the suite was
+// green while the same file was read in full down the other branch. A range makes the RESULT small; the
+// read is what costs, so the guard must not be conditional on how the result will later be narrowed.
+test("case E: budget is enforced before the read when a range IS declared", () => {
+  const { resolveContextFiles } = require(PLUGIN + "/dist/context.js");
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dsh-sr2-e-"));
+  fs.writeFileSync(path.join(dir, "big.ts"), "x".repeat(5 * 1024 * 1024));
+
+  const original = fs.readFileSync;
+  const observed = [];
+  fs.readFileSync = function (...args) {
+    observed.push(String(args[0]));
+    return original.apply(this, args);
+  };
+
+  let resolution;
+  try {
+    resolution = resolveContextFiles([{ path: "big.ts", startLine: 1, endLine: 1 }], dir, [], 32 * 1024);
+  } finally {
+    fs.readFileSync = original;
+  }
+
+  assert.equal(resolution.injected.length, 0, "an over-budget file must not be injected");
+  assert.ok(
+    resolution.errors.some((e) => /budget/i.test(e)),
+    "the refusal must be the budget one, not a range or containment refusal: " + JSON.stringify(resolution.errors)
+  );
+  assert.ok(
+    !observed.some((p) => p.includes("big.ts")),
+    "big.ts must not be read at all even though a range was declared; observed reads: " + JSON.stringify(observed)
   );
 });

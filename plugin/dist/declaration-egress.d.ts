@@ -38,6 +38,11 @@ export interface DeclarationEgressInput {
     commandReadsContent?: (cmd: string) => boolean;
     commandNamesSource?: (cmd: string) => boolean;
     /**
+     * Does this command read content out of a DIRECTORY it names? `rg SECRET src` reads source and names no
+     * file, so the extension test above cannot see it (SECURITY-REVIEW-4 [7]).
+     */
+    commandReadsDirectoryScope?: (cmd: string) => boolean;
+    /**
      * Is this scope a DIRECTORY rather than a file?
      *
      * WHY THE SEARCH BRANCH NEEDS IT, and what it closes. `isCodeExtension` answers with the scope's
@@ -71,6 +76,12 @@ export interface DeclarationEgressInput {
      * same string, the same defect, one module over.
      */
     workspaceRoot?: string;
+    /**
+     * Did `workspaceRoot` come from the host, or is it the process-cwd fallback? Only a root the host named
+     * makes "this scope does not resolve" mean anything (SECURITY-REVIEW-4 [2]). Absent is treated as
+     * unverified, so a caller that does not say gets the fail-closed answer rather than the leaky one.
+     */
+    workspaceVerified?: boolean;
     /** Does this RESOLVED path exist? Decides whether a non-code scope is an ordinary file or nothing. */
     pathExists?: (resolvedPath: string) => boolean;
 }

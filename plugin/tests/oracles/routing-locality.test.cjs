@@ -220,3 +220,45 @@ test('structural: the built bundle carries the classifier call', () => {
   assert.ok(dist.includes('classifyDestination'), 'dist/index.js must carry the call; rebuild if this fails')
 })
 
+// ─── Finding 5: the source-egress gate must take the classifier's answer, not recompute it ──────────
+//
+// MEASURED (SECURITY-REVIEW-4 [5]): index.ts recomputed the destination as
+// `rerouteLocal || provider === localProvider`, which drops the classifier's `isCloudOnly` condition. In the
+// documented cloud-only setup the two provider ids are EQUAL, so that expression said 'local' for a request
+// the classifier had already called cloud, and `evaluateSourceEgress` then allowed detected source out on
+// the grounds that nothing was leaving the machine.
+//
+// The cases above pin the classifier. These pin that the gate USES it -- a behaviourally correct classifier
+// that nothing consults is exactly the failure mode this file exists to catch.
+
+test('finding 5: the source-egress destination is the classifier answer', () => {
+  const src = fs.readFileSync(SRC_INDEX, 'utf8')
+  assert.match(
+    src,
+    /const\s+destination:\s*'cloud'\s*\|\s*'local'\s*=\s*classification\.destination/,
+    'index.ts must take the source-egress destination from classifyDestination'
+  )
+  assert.doesNotMatch(
+    src,
+    /String\(mutatedConfig\.provider/,
+    'and must not recompute it from provider strings: that comparison is TRUE in a cloud-only setup'
+  )
+  const dist = fs.readFileSync(DIST_INDEX, 'utf8')
+  assert.match(dist, /classification\.destination/, 'dist/index.js must carry it; rebuild if this fails')
+})
+
+test('finding 5: a cloud-only alias is denied, not allowed, when source is in the payload', () => {
+  // The two halves composed in the order the hook runs them: the classifier says where the payload lands,
+  // and the policy is read against that answer. This states the invariant; the test above is what ties it
+  // to the shipped code rather than to a correct helper nothing calls.
+  const { evaluateSourceEgress } = require(path.join(__dirname, '..', '..', 'dist', 'roles.js'))
+  const destination = classifyDestination({ ...CLOUD_ONLY, dlpTripped: false, entropyOnly: false }).destination
+  assert.equal(destination, 'cloud', 'the aliased setup has nowhere local to land')
+  const detection = { found: true, blocks: 1, languages: ['typescript'] }
+  assert.equal(
+    evaluateSourceEgress('deny', detection, destination).kind,
+    'deny',
+    'so detected source must be refused rather than cleared as a local request'
+  )
+})
+

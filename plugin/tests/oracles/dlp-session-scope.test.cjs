@@ -112,3 +112,48 @@ test("each session's own turn-1 prompt decides its own request, in either arriva
   assert.equal(secondConfig.provider, "deepseek-official", "the clean session goes to the cloud");
   assert.equal(firstConfig.provider, "lm-studio", "the credential-bearing session stays local");
 });
+
+test("a session stays pinned after the credential leaves the scanned window (finding 6)", async () => {
+  // MEASURED before the fix (SECURITY-REVIEW-4 finding 6): the subject this gate scans is the session's
+  // accumulated prompt text, capped at SESSION_CORPUS_MAX_CHARS and truncated to its NEWEST characters, so
+  // a session that disclosed a credential and then worked normally for long enough had the credential
+  // evicted from the window. The next request went to the cloud provider with nothing refused: the gate
+  // had forgotten a secret this same session had sent, and one turn in the cloud is already the exposure.
+  //
+  // The shape matters. The text window is a WORKING SET -- bounding it is right. What must not be bounded
+  // away is the fact, so the pin is a per-session flag set when the gate fires, not more retained text.
+  const handlers = mount();
+  const session = { id: "session-long-haul" };
+
+  await preStep(handlers, session, 1, `here is my key ${SECRET}`);
+  assert.equal(
+    (await request(handlers, session, 1)).provider,
+    "lm-studio",
+    "the turn that discloses the credential is itself pinned"
+  );
+
+  // Enough ordinary text to push the credential out of the newest-200k window the subject is cut from.
+  await preStep(handlers, session, 2, "y".repeat(210 * 1024));
+  assert.equal(
+    (await request(handlers, session, 2)).provider,
+    "lm-studio",
+    "the session is still the one that sent a credential, even though the text no longer holds it"
+  );
+
+  await preStep(handlers, session, 3, "and now something entirely ordinary");
+  assert.equal(
+    (await request(handlers, session, 3)).provider,
+    "lm-studio",
+    "and it stays pinned for the rest of the session"
+  );
+
+  // CONTROL: the pin is per session, so an unrelated session with clean text is still routed to the cloud.
+  // Without this the flag could be global and every session would be pinned by one credential.
+  const elsewhere = { id: "session-unrelated" };
+  await preStep(handlers, elsewhere, 1, "rename the variable x to y in this function");
+  assert.equal(
+    (await request(handlers, elsewhere, 1)).provider,
+    "deepseek-official",
+    "one session's history must not pin another"
+  );
+});

@@ -50,6 +50,11 @@ function decide(fields) {
         declarationPathFor,
         commandReadsContent,
         commandNamesSource: (command) => /\.(ts|tsx|js|jsx|py|go|rs|sh|sql)\b/i.test(String(command)),
+        // Stands in for the hook's real predicate, which stats each token against the workspace. Here the
+        // tokens that name a directory in these cases are spelled out, and the shipped predicate is driven
+        // end to end in declaration-egress-scope-resolution.test.cjs so this cannot drift into a fiction.
+        commandReadsDirectoryScope: (command) =>
+          /(^|\s)(\.|src|lib)(\s|$)/.test(String(command)) && commandReadsContent(command),
       },
       fields
     )
@@ -142,9 +147,39 @@ test("case 14: every block carries a non-empty reason", () => {
     decide({ toolKind: "search", target: "" }),
     decide({ toolKind: "shell", target: "Get-Content src/guard.ts" }),
     decide({ toolKind: "shell", target: "Get-Content src/guard.ts", commandReadsContent: undefined }),
+    decide({ toolKind: "shell", target: "rg SECRET src" }),
   ];
   for (const r of blocked) {
     assert.equal(r.action, "block");
     assert.ok(typeof r.reason === "string" && r.reason.trim().length > 20, "reason too short: " + r.reason);
   }
+});
+
+// Finding 7 (SECURITY-REVIEW-4): a directory-scoped content read is an egress route even though it names
+// no code FILE. MEASURED: commandReadsContent("rg SECRET src") is true and commandNamesSource("rg SECRET
+// src") is false, so the `reads && names` rule never fired and the raw matches passed -- while the
+// dedicated search route served the very same scope as declarations. The revision's discrimination is
+// tested here; the hook's own predicate is tested end to end in the scope-resolution oracle.
+test("case 15: a shell command that READS a directory is refused", () => {
+  for (const command of ["rg SECRET src", "grep -rn foo src", "rg SECRET ."]) {
+    const r = decide({ toolKind: "shell", target: command });
+    assert.equal(r.action, "block", command + " reads file contents and must be refused");
+    assert.match(String(r.reason), /searches a directory/);
+  }
+});
+
+// CONTROL: naming a directory without reading its contents is not an egress route. Without this the rule
+// would be a ban on shell tools rather than a rule about source, and the honest listing case would sit
+// green in no test at all.
+test("case 16 (control): listing a directory is still allowed", () => {
+  const r = decide({ toolKind: "shell", target: "Get-ChildItem src" });
+  assert.equal(r.action, "allow");
+});
+
+// CONTROL: the new branch must key on the READ, not on the directory. A command that cannot read contents
+// is not an egress route whatever it names, which is why the branch is `reads && directory` rather than
+// `reads && !names`.
+test("case 17 (control): a command that reads no content stays allowed even when it names a directory", () => {
+  const r = decide({ toolKind: "shell", target: "Set-Location src", commandReadsContent: () => false });
+  assert.equal(r.action, "allow");
 });
