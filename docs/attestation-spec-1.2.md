@@ -63,6 +63,17 @@ one mutable root are not two independent principals, and the document must not i
     finished note exactly once. A half-formed 1.2 note must never reach the ref, because a 1.2 payload
     missing its reviewer block now fails the audit — the ledger would go red between the two phases.
     Pushing the ref stays the operator's explicit step.
+12. **Signer-side ledger invariance.** `--prepare` records the tip of `refs/notes/delegations` before the
+    contract runs and re-reads it before staging the pending file; any tip delta is a fatal abort and the
+    draft is not written. A signer that writes into a ledger someone else moved is attesting to a state it
+    never observed. The assertion runs in **every** mode, so the one-shot form is covered by it too.
+13. **Read-back before unlink.** `--approve` re-reads the attached note out of the object database
+    (`git notes --ref=refs/notes/delegations show <commit>`) and compares it, trimmed, against the exact
+    envelope it signed; `.git/dsh-attestation-pending.json` is unlinked only after that comparison passes.
+    `git notes add` exiting 0 reports that a note was written, not that it is the note that was signed, and
+    unlinking first would destroy the only copy of an approval that did not land. On mismatch the draft
+    stays in place and the abort names the pre-attach tip, so the failure stays recoverable. Both sides are
+    trimmed because git terminates a note message with a newline.
 
 ## Trigger semantics: the declared version, not an ancestry cutoff
 
@@ -101,6 +112,11 @@ it reads as enforced. The auditor must land before, or with, the signer.
 6. **End-to-end in a throwaway clone.** Create a real 1.2 note there and check that it is accepted, and
    that each of the four attacks is rejected. **No 1.2 note touches the published ledger without
    explicit operator approval** — the note is a published record and the ref is pushed deliberately.
+   This is no longer manual. `tests/attest-unit-lifecycle.test.cjs` performs the clone, both phases, and
+   all three trust-root runs, and `npm run gate` calls it. It **skips** with a named reason when the
+   signing keys are absent, which is always the case in CI: a workflow cannot hold the operator or
+   reviewer private key, so the gate pays the verification cost wherever signing is possible and nothing
+   where it is not. The skip is reported, never silent.
 7. Gate, oracles, probes, `dist` parity. Release as `v0.5.3` only if wanted; `v0.5.2` is immutable.
 
 ## Tranche 3: the three-signature ordering (pinned before implementation)
