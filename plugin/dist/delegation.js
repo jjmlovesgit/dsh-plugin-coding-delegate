@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.MIN_SEARCH_CHARS = exports.DEFAULT_LOCAL_ENDPOINT = exports.MAX_VERIFICATION_REPEATS = exports.DEFAULT_VERIFICATION_REPEATS = exports.DELEGATE_WORKER_SCHEMA_COVERS_EVERY_PARAMETER = exports.DELEGATE_WORKER_SCHEMA = exports.DELEGATE_WORKER_OPENAI_SCHEMA = void 0;
+exports.MIN_SEARCH_CHARS = exports.DEFAULT_LOCAL_ENDPOINT = exports.MAX_VERIFICATION_REPEATS = exports.DEFAULT_VERIFICATION_REPEATS = exports.DELEGATE_WORKER_SCHEMA_COVERS_EVERY_PARAMETER = exports.CANONICAL_DELEGATE_WORKER_PARAMETERS = exports.DELEGATE_WORKER_SCHEMA = exports.DELEGATE_WORKER_OPENAI_SCHEMA = void 0;
 exports.resolveVerificationRepeats = resolveVerificationRepeats;
 exports.resolveChatCompletionsUrl = resolveChatCompletionsUrl;
 exports.parseSearchReplaceBlocks = parseSearchReplaceBlocks;
@@ -199,6 +199,42 @@ exports.DELEGATE_WORKER_OPENAI_SCHEMA = {
     },
 };
 exports.DELEGATE_WORKER_SCHEMA = exports.DELEGATE_WORKER_OPENAI_SCHEMA;
+/** Freeze a value and everything reachable from it. `Object.freeze` is shallow; a schema is not. */
+function deepFreeze(value) {
+    if (value && typeof value === 'object' && !Object.isFrozen(value)) {
+        for (const key of Object.keys(value)) {
+            deepFreeze(value[key]);
+        }
+        Object.freeze(value);
+    }
+    return value;
+}
+/**
+ * A deep-frozen SNAPSHOT of the canonical parameter block, taken once at module load.
+ *
+ * WHY A SNAPSHOT, WHEN REGISTRATION ALREADY REFERENCES THE CANONICAL OBJECT. index.ts used to assert that an
+ * INLINE copy of the parameter list agreed with this file's canonical one, because the two copies had already
+ * drifted once and the drift was silent: `attestTargets`/`attestEvidence` were added to the inline copy only,
+ * the tool call succeeded, and the parameters were stripped on the way in. The inline copy is gone now --
+ * index.ts passes `DELEGATE_WORKER_OPENAI_SCHEMA.function.parameters` -- and the assertion was left comparing
+ * that object to ITSELF. A check that cannot fail is worse than no check at all, because it is quoted as
+ * evidence: it was the one place in the repository where "drift" was claimed to be caught and could not be.
+ *
+ * What this catches is the residual risk that object IDENTITY cannot: the block handed to Cordis being
+ * MUTATED after load, by a monkey-patch, a misplaced `properties.x = ...`, or framework code decorating what
+ * it was given. Registration compares the live block against this frozen snapshot and refuses to register a
+ * surface that disagrees with the reviewed one.
+ *
+ * What it does NOT catch, stated so it is not quoted for more than it does: it cannot tell that the canonical
+ * list is WRONG. That is `DELEGATE_WORKER_SCHEMA_COVERS_EVERY_PARAMETER` below (a value, so it is always
+ * checked by the compiler) and the explicit parameter set in `tool-surface.oracle.mjs`. This one is about a
+ * good list staying good through registration.
+ */
+exports.CANONICAL_DELEGATE_WORKER_PARAMETERS = deepFreeze(
+// A JSON round-trip, not a shallow copy: the comparison is on CONTENT, so the reference has to be deep
+// enough that a mutation of the live block cannot reach into it. Frozen after, so neither side can be
+// edited by whoever notices the check exists.
+JSON.parse(JSON.stringify(exports.DELEGATE_WORKER_OPENAI_SCHEMA.function.parameters)));
 exports.DELEGATE_WORKER_SCHEMA_COVERS_EVERY_PARAMETER = true;
 /**
  * How many times a contract should run, from a caller-supplied value that cannot be trusted.

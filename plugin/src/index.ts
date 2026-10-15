@@ -63,7 +63,9 @@ import {
   resolveLeadProviders,
   roleForAgent,
 } from './roles'
+import { canonicalizeJson } from './canonical-json'
 import {
+  CANONICAL_DELEGATE_WORKER_PARAMETERS,
   DELEGATE_WORKER_OPENAI_SCHEMA,
   DELEGATE_WORKER_SCHEMA,
   DELEGATE_WORKER_SCHEMA_COVERS_EVERY_PARAMETER,
@@ -1278,41 +1280,35 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
         },
       }
 
-      // DRIFT ASSERTION for the duplicated tool schema, and it exists because the duplication already cost
-      // a false test. The parameters are declared twice: once inline here (the dev contract this file
-      // registers) and once in `DELEGATE_WORKER_OPENAI_SCHEMA` in delegation.ts, which is what the host
-      // receives. Adding `attestTargets`/`attestEvidence` to the inline copy alone left the tool listing
-      // unchanged, and the delegated call was SILENTLY stripped of both -- the tool reported success while
-      // the parameters never arrived.
+      // DRIFT ASSERTION against the FROZEN canonical snapshot, and it exists because the parameters were
+      // once declared twice. `attestTargets`/`attestEvidence` were added to the inline copy in this file
+      // alone, the tool listing was unchanged, and the delegated call was SILENTLY stripped of both -- the
+      // tool reported success while the parameters never arrived.
       //
-      // `delegation.ts` owns the canonical list. This asserts the local copy still agrees with it, so the
-      // next parameter added to one and not the other fails loudly at registration instead of quietly
-      // dropping an argument. Sorted key comparison plus the `required` list, because a missing parameter
-      // and a reordered one are not the same defect and only the first is worth waking anyone for.
+      // The duplication is gone: `parameters` above IS `DELEGATE_WORKER_OPENAI_SCHEMA.function.parameters`.
+      // That left this block comparing the canonical object to itself, which is a check that cannot fail --
+      // worse than no check, because it reads as evidence. It now compares the block being registered
+      // against `CANONICAL_DELEGATE_WORKER_PARAMETERS`, a deep-frozen snapshot taken at module load in
+      // delegation.ts, so what it detects is the residual risk identity cannot: the shared object being
+      // MUTATED after load, by a monkey-patch or by framework code decorating what it was handed.
+      //
+      // It cannot detect that the canonical list itself is wrong, and does not claim to: that is the
+      // compile-time set equality in delegation.ts and the explicit parameter set in the tool-surface
+      // oracle. Fail closed -- registration stops rather than presenting a surface nobody reviewed.
       {
-        const canonical = (DELEGATE_WORKER_OPENAI_SCHEMA as any)?.function?.parameters
-        const inlineParams = (dshToolDef as any)?.parameters
-        if (canonical && canonical.properties && inlineParams && inlineParams.properties) {
-          const a = Object.keys(canonical.properties).sort().join(',')
-          const b = Object.keys(inlineParams.properties).sort().join(',')
-          const reqA = JSON.stringify(canonical.required || [])
-          const reqB = JSON.stringify(inlineParams.required || [])
-          if (a !== b || reqA !== reqB) {
-            throw new Error(
-              'delegate_worker schema drift: the inline parameters in index.ts disagree with ' +
-                'DELEGATE_WORKER_OPENAI_SCHEMA in delegation.ts. ' +
-                'Canonical: [' +
-                a +
-                '] required ' +
-                reqA +
-                '. Inline: [' +
-                b +
-                '] required ' +
-                reqB +
-                '. Add the parameter to BOTH or neither -- a parameter present in only one is silently ' +
-                'dropped from the tool call, which is how attestTargets was lost the first time.'
-            )
-          }
+        const registered = (dshToolDef as any)?.parameters
+        const canonicalJson = canonicalizeJson(CANONICAL_DELEGATE_WORKER_PARAMETERS)
+        const registeredJson = canonicalizeJson(registered)
+        if (canonicalJson !== registeredJson) {
+          throw new Error(
+            'delegate_worker schema drift: the parameter block being registered is not the frozen canonical ' +
+              'block from delegation.ts. Either it was mutated after load, or registration stopped ' +
+              'referencing the canonical source. Refusing to register a tool surface that disagrees with ' +
+              'the reviewed one. Canonical: ' +
+              canonicalJson +
+              ' Registered: ' +
+              registeredJson
+          )
         }
       }
 

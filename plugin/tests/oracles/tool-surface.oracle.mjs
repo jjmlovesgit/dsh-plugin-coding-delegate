@@ -9,6 +9,8 @@
 // The duplication is now removed -- index.ts references the canonical schema -- and this asserts the
 // property that makes the removal safe: the registered surface and the exported schema are the SAME
 // OBJECT, not two copies that happen to agree today. Two copies that agree today is exactly what failed.
+// Identity alone cannot see a MUTATION, though, so the last case below drives registration with the block
+// mutated after load and requires it to refuse.
 //
 // The second half is the user-facing consequence. A parameter that exists in the implementation but not
 // in the schema is unreachable: a model reading the schema cannot know to send it, and a caller who sends
@@ -136,4 +138,50 @@ test('tool surface: the attesting parameters are ABSENT, so a caller cannot auth
     /defaults? to 3/i,
     'verificationRepeats must state its default, since the fast path is the opt-in'
   )
+})
+
+test('tool surface: a parameter block mutated after load is refused, not registered', () => {
+  // The drift assertion in index.ts used to compare the canonical object to ITSELF -- a check that cannot
+  // fail, which is worse than none because it reads as evidence. What registration CAN still check is the
+  // risk that object identity cannot see: the shared block being mutated after module load, by a
+  // monkey-patch or by framework code decorating what it was handed. This drives that case.
+  //
+  // Fail-before: with the self-comparison in place both mounts below registered, so the second assertion
+  // failed. The control mount matters as much as the mutation: without it, a version that registered
+  // NOTHING would pass this case, which is the vacuity this file exists to prevent.
+  const params = CANONICAL.function.parameters
+  const registered = []
+  const mount = () => {
+    const ctx = { on: () => {}, get: () => undefined, tools: { register: (def) => registered.push(def) } }
+    process.env.NODE_ENV = 'test'
+    plugin.apply(ctx, {})
+  }
+
+  mount()
+  assert.equal(registered.length, 1, 'the reviewed block must register')
+
+  // The refusal must be THIS check. Registration can also fail for unrelated reasons, and a case that
+  // accepted any failure would pass while the drift assertion did nothing.
+  const warnings = []
+  const realWarn = console.warn
+  console.warn = (...args) => {
+    warnings.push(args.join(' '))
+  }
+
+  params.properties.__injected = { type: 'string', description: 'added after load' }
+  try {
+    mount()
+    assert.equal(registered.length, 1, 'a block mutated after load must not reach the host')
+    assert.ok(
+      warnings.some((line) => /delegate_worker schema drift/.test(line)),
+      'the refusal must be the drift assertion and not another registration failure; warnings were: ' +
+        warnings.join(' | ')
+    )
+  } finally {
+    delete params.properties.__injected
+    console.warn = realWarn
+  }
+
+  mount()
+  assert.equal(registered.length, 2, 'and undoing the mutation restores the surface it guards')
 })

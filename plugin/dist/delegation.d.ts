@@ -136,6 +136,28 @@ export declare const DELEGATE_WORKER_SCHEMA: {
     };
 };
 /**
+ * A deep-frozen SNAPSHOT of the canonical parameter block, taken once at module load.
+ *
+ * WHY A SNAPSHOT, WHEN REGISTRATION ALREADY REFERENCES THE CANONICAL OBJECT. index.ts used to assert that an
+ * INLINE copy of the parameter list agreed with this file's canonical one, because the two copies had already
+ * drifted once and the drift was silent: `attestTargets`/`attestEvidence` were added to the inline copy only,
+ * the tool call succeeded, and the parameters were stripped on the way in. The inline copy is gone now --
+ * index.ts passes `DELEGATE_WORKER_OPENAI_SCHEMA.function.parameters` -- and the assertion was left comparing
+ * that object to ITSELF. A check that cannot fail is worse than no check at all, because it is quoted as
+ * evidence: it was the one place in the repository where "drift" was claimed to be caught and could not be.
+ *
+ * What this catches is the residual risk that object IDENTITY cannot: the block handed to Cordis being
+ * MUTATED after load, by a monkey-patch, a misplaced `properties.x = ...`, or framework code decorating what
+ * it was given. Registration compares the live block against this frozen snapshot and refuses to register a
+ * surface that disagrees with the reviewed one.
+ *
+ * What it does NOT catch, stated so it is not quoted for more than it does: it cannot tell that the canonical
+ * list is WRONG. That is `DELEGATE_WORKER_SCHEMA_COVERS_EVERY_PARAMETER` below (a value, so it is always
+ * checked by the compiler) and the explicit parameter set in `tool-surface.oracle.mjs`. This one is about a
+ * good list staying good through registration.
+ */
+export declare const CANONICAL_DELEGATE_WORKER_PARAMETERS: Readonly<Record<string, unknown>>;
+/**
  * Compile-time assertion that the schema's parameters are EXACTLY `DelegateWorkerParameter`.
  *
  * TWO earlier versions of this did nothing, and both failures are worth recording because they are the same
