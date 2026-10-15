@@ -11,5 +11,25 @@
 #
 # `text eol=lf` normalises the stored blob to LF too. The committed blobs are already LF, so this changes
 # no existing object -- it only stops a checkout from rewriting them.
+#
+# AND THE SAME REASON APPLIES TO EVERY SOURCE AND SCRIPT FILE, which is why the rule is now general rather
+# than limited to the key. MEASURED in a throwaway clone on this host, with global `core.autocrlf=true`:
+# tools/currency.ts arrived with 9 carriage returns, plugin/src/verification.ts with 558, README.md with
+# 761 -- and scripts/check-file-hygiene.cjs failed that checkout with exit 1. Two consequences, and the
+# second is the serious one. A clean clone could not pass `npm run gate` on Windows at all. And a SIGNER
+# running there would hash the CRLF bytes on disk and record a digest the anchored tree does not contain,
+# producing a note the audit then rejects; the audit itself is tree-backed and survives a CRLF checkout,
+# but the signer does not. That is the failure this rule prevents rather than detects.
+#
+# `text=auto` lets git decide what is text, so binary assets are untouched; `eol=lf` forces the CHECKOUT to
+# LF rather than to the platform default, which `text=auto` alone would leave as CRLF on Windows.
+# `git add --renormalize .` after adding this reported exactly ONE stored blob to rewrite --
+# experiments/delegation-ab/.verifier/verify-judge.cjs, committed with CRLF -- because every other blob was
+# already LF. That measurement is what makes renormalising safe here instead of a mass rewrite.
+* text=auto eol=lf
+
+# Listed AFTER the general rule because the last matching line wins, and the trust root keeps an
+# unconditional `text`: its whole reason for being here is that the key must never be re-encoded by a
+# content heuristic.
 *.pub text eol=lf
 *.pem text eol=lf
