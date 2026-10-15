@@ -110,8 +110,9 @@ A test that always passes is worse than no test at all. To guarantee contracts a
 ### 2. A Tamper-Evident Wax Seal (Cryptographic Provenance)
 When an authorized operator verifies and accepts a utility, the pipeline stamps a cryptographic certificate directly into the repository's Git history (`refs/notes/delegations`):
 * The record binds the exact SHA-256 fingerprints of the code, its contract, and the generating model.
-* It is digitally signed using an Ed25519 operator key.
-* The auditor cross-checks this key against a pinned fingerprint (`TRUSTED_OPERATOR_PUBKEY_SHA256`), ensuring any unauthorized key rotation is immediately flagged in code review.
+* It is digitally signed using an Ed25519 operator key, and the auditor cross-checks that key against a pinned fingerprint (`TRUSTED_OPERATOR_PUBKEY_SHA256`), so any rotation of the trust root is forced into a visible diff rather than happening silently.
+* **Two signatures, two principals (Spec 1.2).** A record can carry an execution receipt signed at the end of the worker run *and* a separate approval signed by a human reviewer. The two signatures are made by different keys, over different byte ranges, at two different times — the worker signs a record with no reviewer in it, the reviewer signs a record that already contains the worker's, and the outer envelope is sealed last.
+* **The reviewer's key is meant to be pinned out-of-band.** Only then is the second signature evidence about a second person rather than a second copy of the same secret. The in-repository key exists for local bootstrapping, and the audit says so out loud when it uses it.
 
 ### 3. A Time Machine That Audits History, Not Your Laptop (Tree-Accurate Auditing)
 Standard test runners check whatever loose files currently sit on your local hard drive. That allows "time-travel" bugs and race conditions, where a record claims to verify files that weren't even in that commit.
@@ -148,9 +149,10 @@ parity and negative discrimination across all utility modules:
   Both the signer (`scripts/attest-unit.cjs`) and the auditor (`scripts/verify-delegation-ledger.cjs`)
   refuse any contract not verified by the fixture discrimination gate.
 
-### 2. Git Object Ledger Audit (Spec 1.1)
+### 2. Git Object Ledger Audit (Spec 1.1 and 1.2)
 
-Attestations are signed with Ed25519 and stored in `refs/notes/delegations`:
+Attestations are signed with Ed25519 and stored in `refs/notes/delegations`. The auditor verifies every
+record in that ref, and one failure fails the gate:
 
 * **Commit-Tree Resolution (`git cat-file`)**:
   Substantive artifact and contract validation bypasses the current working tree. All payload artifact and
@@ -168,13 +170,61 @@ Attestations are signed with Ed25519 and stored in `refs/notes/delegations`:
 * **Ancestry-Gated Cutoff**:
   All records anchored at or after commit `c5bcc5a` must be self-describing (`specVersion >= 1.1`).
 
+#### Dual attestation: the worker receipt and the human reviewer (Spec 1.2)
+
+A 1.2 payload carries a `worker` block and a `reviewer` block, and it is rejected unless **both**
+signatures verify under the two different keys the record names. Signing is deliberately two-phase,
+because a half-formed 1.2 note must never reach the ref: a 1.2 payload missing its reviewer block fails
+the audit, so an interrupted one-phase signing would turn the ledger red.
+
+* **`--prepare <target> <contract>`** runs the contract, records what it observed (model, digest of the
+  redacted output, duration, timestamp, key fingerprint), signs the `worker` block, and writes an
+  untracked draft to `.git/dsh-attestation-pending.json`. It attaches nothing, and it refuses to continue
+  if the ledger ref moved while the contract was running.
+* **`--approve <target> --reviewer-identity "<name>"`** re-verifies the worker receipt and every recorded
+  artifact and contract digest *against the anchored tree*, adds the `reviewer` block, signs it, attaches
+  the note once, reads it back to confirm the bytes that landed are the bytes that were signed, and only
+  then removes the draft. It does **not** re-run the contract: the record must carry what phase one
+  actually saw, not a second opinion collected later.
+* **Three signatures, sealed in order.** `worker.signature` covers the canonical payload with the reviewer
+  block and the worker signature removed. `reviewer.signature` covers the canonical payload with only the
+  reviewer signature removed, so it also covers the frozen worker block. The outer envelope seal is
+  applied **last**, because it covers the completed payload string, and adding the reviewer block
+  afterwards would invalidate an earlier seal.
+* **Independence is enforced, not assumed.** If the worker and reviewer fingerprints are equal the audit
+  refuses with `self-approval refused`, and the fingerprint the record names must be the one the resolved
+  trust root actually verifies — not merely a value the record cares to assert.
+* **Reviewer trust root, out of band first.** Precedence is `DSH_REVIEWER_PUBKEY` (an inline PEM or a path
+  to one), then `DSH_REVIEWER_FINGERPRINT` (the digest to require), and only then
+  `keys/delegation-reviewer.pub`. Using the in-repo key is not silent: it prints
+  `[AUDIT_NOTICE: in-repo reviewer key used; out-of-band pin recommended for CI]`, and the per-note line
+  reads *reviewable rather than independent*. With none of the three present the audit fails closed.
+* **Timestamps are read as evidence, not enforced as a clock.** A reviewer timestamp that precedes the
+  worker timestamp is reported, but both values are self-asserted and neither is a trusted time source.
+
+**What 1.2 does not give you.** With the in-repo fallback in use, a committer who can edit both
+`keys/delegation-reviewer.pub` and the operator pin can substitute both roots, and the reviewer signature
+then proves nothing about a human. A second signature is evidence about a second principal only when its
+key is pinned somewhere the writer of the record cannot reach.
+
+**Scope.** 1.2 records are produced by the standalone signer `scripts/attest-unit.cjs`. The plugin's own
+in-process envelope (`attestationPrivateKeyPath`) still emits spec 1.1, because its planner does not
+construct the worker and reviewer blocks — `ATTESTATION_SPEC_VERSION` in `plugin/src/crypto-attestation.ts`
+remains `'1.1'`, and the auditor verifies those records on the 1.1 branch.
+
 ### 3. Red-Team Probes
 
 The integrity gate is validated against an active harness (`scripts/redteam-probe.cjs`, run manually
-because it mutates the ledger ref and restores it) covering six attack classes: a foreign key, payload
+because it mutates the ledger ref and restores it) covering ten attack classes: a foreign key, payload
 tampering, a post-cutoff spec regression, an orphan lineage, a valid note re-attached to a different
-commit, and an artifact present on disk but absent from the anchored commit's tree. Each probe asserts the
-specific refusal message *and* that the audit exited non-zero, so a probe cannot pass on a crash.
+commit, an artifact present on disk but absent from the anchored commit's tree, a 1.2 payload with no
+reviewer block, a genuine reviewer signature over different bytes, a signature from a key the record names
+but the trust root does not, and self-approval signed with the worker's own key. Each probe requires both
+the specific refusal message *and* a non-zero exit, so a probe cannot pass on a crash; two of them
+additionally require that the audit reported **exactly one** critical failure, so a probe that trips
+several checks at once cannot be read as evidence about the one under test. The harness restores the ledger
+ref after every probe rather than only at the end, and the restore itself is verified by re-running the
+audit and requiring a clean exit — a probe run that leaves the ledger damaged fails too.
 
 ## Verification and Integrity Gate
 
@@ -184,7 +234,7 @@ One command runs every check that stands between a change and a record of it:
 npm run gate
 ```
 
-It runs four steps in order, and a failure in any one of them stops the rest:
+It runs five steps in order, and a failure in any one of them stops the rest:
 
 1. **File hygiene** — `scripts/check-file-hygiene.cjs`. Refuses source under `tools/` and `plugin/src/`
    that is missing a trailing newline, is stored with CRLF, or carries a UTF-8 BOM. CRLF is not cosmetic
@@ -199,10 +249,20 @@ It runs four steps in order, and a failure in any one of them stops the rest:
 4. **Ledger attestation audit** — `scripts/verify-delegation-ledger.cjs`. Refuses a note whose Ed25519
    signature does not verify under the pinned operator key, that is attached to a different commit than the
    one its payload names, whose `baseCommit` is not an ancestor of `main`, whose artifact or contract
-   digests do not match the anchored commit's tree, or whose contract is not covered by step 2.
+   digests do not match the anchored commit's tree, or whose contract is not covered by step 2. It also
+   refuses a record that declares spec 1.2 without both blocks and a valid reviewer signature under the
+   resolved trust root, that names a reviewer fingerprint the root does not verify, or whose reviewer key
+   is the worker's own key.
+5. **Signer lifecycle** — `tests/attest-unit-lifecycle.test.cjs`, also `npm run test:lifecycle`. Creates a
+   throwaway clone, copies the working-tree scripts into it, and drives a real `--prepare` and `--approve`
+   there: the worker phase must leave the ledger ref exactly where it was, exactly one note must be added,
+   the audit must accept that note under an out-of-band reviewer pin, and must reject it under a pin that
+   does not match. The temporary clone is removed in a `finally`, and the repository's own ledger is never
+   written. On a host without the operator and reviewer private keys — always the case in a CI workflow,
+   which must not hold a signing key — it reports `# SKIP` with that reason rather than passing silently.
 
 Steps 1 and 3 are also available on their own as `npm run check:hygiene` and `npm run gate:wellformed`,
-with `npm run audit` for the ledger audit alone.
+with `npm run audit` for the ledger audit alone and `npm run test:lifecycle` for the signer lifecycle.
 
 ### Synchronising the ledger
 
@@ -510,6 +570,13 @@ a digest over `{path, sha256}` pairs the document never contained — so recompu
 knowing the input, and a record whose contract set could not be reconstructed was unverifiable rather
 than wrong. From 1.1 the payload carries the array beside the digest, so a reader reproduces the hash
 from the document itself and checks every contract against disk with no path convention involved.
+
+**Spec 1.2 adds a second principal, not a second copy of the first.** The plugin's planner still emits
+1.1; a 1.2 record is written by `scripts/attest-unit.cjs`, which signs an execution receipt at the end of
+the worker run and a separate reviewer approval afterwards, under two different keys. What that second
+signature is worth depends entirely on where its key is pinned — see *Dual attestation: the worker receipt
+and the human reviewer* above.
+
 The operator key is pinned by fingerprint rather than by the file alone: `TRUSTED_OPERATOR_PUBKEY_SHA256`
 in `scripts/operator-key.cjs` is computed over the LF-normalised public key, and both
 `keys/delegation-operator.pub` and the key derived from the local private key are checked against it. That

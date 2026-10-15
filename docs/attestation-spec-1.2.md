@@ -1,11 +1,18 @@
-# Attestation spec 1.2 — dual-signature provenance (PLAN, NOT YET IMPLEMENTED)
+# Attestation spec 1.2 — dual-signature provenance
 
-**Status: specification only. No 1.2 code, key, or note exists.** This document exists so the next
-session resumes at Step 1 with no context drift. Nothing here has been built; the plan is what was
-agreed, and the ordering is load-bearing.
+**Status: implemented and verified; no 1.2 note exists in the governed repository.** The auditor's 1.2
+branch (check 8), the reviewer keypair, the two-phase signer, four 1.2 red-team probes and an automated
+clone lifecycle all exist and pass. The published ledger still holds the same 7 records at spec 1.1 and
+earlier: a 1.2 note is a published record and creating one is an operator decision, so the lifecycle proves
+the mechanism in a throwaway clone instead. What follows is kept as the design record — the ordering is
+load-bearing, and the "traps already paid for" section is why.
+
+Two commands check the current state rather than this prose: `npm run test:lifecycle` drives the whole
+prepare → approve → audit lifecycle in a temporary clone, and `npm run audit` checks the published ledger.
 
 Baseline it was written against: `main` at `26ac54b`, tag `v0.5.2` → `314b8a4` (published to npm),
-ledger `refs/notes/delegations` at `fd4b2d2` with 7 notes, four-stage `npm run gate` green.
+ledger `refs/notes/delegations` at `fd4b2d2` with 7 notes, `npm run gate` green across the four stages it
+had at the time (it has five now).
 
 ## What 1.2 is for
 

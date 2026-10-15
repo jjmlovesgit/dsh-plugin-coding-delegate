@@ -837,6 +837,13 @@ checks the key EMBEDDED IN THE ENVELOPE, which is self-consistency, and pinning 
 attribution. `scripts/attest-unit.cjs` signs a unit and `scripts/verify-delegation-ledger.cjs` audits the
 whole ledger; `npm run gate` runs that audit together with the contract gates.
 
+**Spec 1.2 is not produced here.** The planner emits 1.1 (`ATTESTATION_SPEC_VERSION` in
+`plugin/src/crypto-attestation.ts`), because it does not construct the `worker` and `reviewer` blocks a 1.2
+record needs. Dual attestation — an execution receipt plus a separate, independently pinned human review —
+is written and verified by `scripts/attest-unit.cjs` (`--prepare`, then `--approve --reviewer-identity`)
+and read back by `scripts/verify-delegation-ledger.cjs`. Scope matters for anyone reasoning about trust:
+nothing on the plugin's own path touches the reviewer key.
+
 **What a signature here establishes, stated plainly because it is easy to overstate.** It binds a
 payload to a KEY: the holder of that key signed these bytes and nothing in them changed. It does
 **not** establish who holds the key. The key lives in this process, so the record is evidence against
