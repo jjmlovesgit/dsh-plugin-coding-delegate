@@ -58,9 +58,6 @@ test('tool surface: every parameter a caller may send is present in the schema',
     'contractFiles',
     'contextFiles',
     'workspaceDir',
-    'attestTargets',
-    'attestEvidence',
-    'attestOperator',
   ]
   const actual = Object.keys(params.properties)
   for (const name of expected) {
@@ -108,22 +105,32 @@ test('tool surface: the canonical parameter list lives in contracts.ts', () => {
   assert.equal(typeof plugin.DELEGATE_WORKER_SCHEMA_COVERS_EVERY_PARAMETER, 'boolean')
 })
 
-test('tool surface: each attesting parameter documents what it actually does', () => {
-  // The descriptions are the only documentation a model gets at call time, and this project has already
-  // shipped one that claimed a capability the code did not have. These assertions are deliberately weak --
-  // they check the claim is present, not that it is good -- because a stronger check would be a test of
-  // prose and would fail on rewording.
+test('tool surface: the attesting parameters are ABSENT, so a caller cannot author a human claim', () => {
+  // These three were REMOVED, and this case is the tripwire that keeps them removed.
+  //
+  // They let a caller choose who to name as the reviewing human and what evidence to record, and `index.ts`
+  // honoured them by writing an OPERATOR_ATTESTED registry record out of those values. Scoping the targets
+  // to files this unit had written never addressed the claim itself, because the identity and the evidence
+  // both came from the same caller who benefited from the record. A caller-authored attestation is not an
+  // attestation; it is the caller's claim about itself, and there is no version of that route a caller
+  // cannot author.
+  //
+  // Asserted against the SCHEMA and not merely the handler, because the schema is what makes a parameter
+  // reachable: a property in the schema is an invitation the model will accept, and the historical shape of
+  // this bug was a parameter present in one copy of the schema and silently dropped by the other.
   const props = CANONICAL.function.parameters.properties
-  assert.match(
-    props.attestTargets.description,
-    /refused for a unit that did not pass/i,
-    'attestTargets must say it is gated on a passing unit'
-  )
-  assert.match(
-    props.attestOperator.description,
-    /no fallback/i,
-    'attestOperator must say there is no agent-id fallback, because inventing one was the first bug'
-  )
+  for (const name of ['attestTargets', 'attestEvidence', 'attestOperator']) {
+    assert.ok(
+      !(name in props),
+      "'" +
+        name +
+        "' must NOT be a property of the tool schema: it made a human-review claim a model-settable value. " +
+        'If it is being reinstated deliberately, the reinstating change must also rewrite this assertion and ' +
+        'say what makes the new route unforgeable by the caller who benefits from it.'
+    )
+  }
+  // The one surviving prose check, which was never about attestation: a fast path that has to be opted into
+  // is only safe if its default is stated where the model reads it.
   assert.match(
     props.verificationRepeats.description,
     /defaults? to 3/i,

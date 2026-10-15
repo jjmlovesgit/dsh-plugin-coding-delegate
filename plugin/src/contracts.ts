@@ -201,9 +201,30 @@ export type DelegateWorkerParameter =
   | 'contractFiles'
   | 'contextFiles'
   | 'workspaceDir'
-  | 'attestTargets'
-  | 'attestEvidence'
-  | 'attestOperator'
+
+/**
+ * `attestTargets`, `attestEvidence` and `attestOperator` were REMOVED from this union deliberately.
+ *
+ * They were declared as caller-settable parameters and `index.ts` honoured them by writing an
+ * `OPERATOR_ATTESTED` record, which made a HUMAN-REVIEW CLAIM a model-settable value: a caller could name
+ * a person, write the evidence text, and have the registry record that a human had reviewed the file. The
+ * scope check that only this unit's own files could be attested narrowed the blast radius and never
+ * addressed the claim, because the identity and the evidence were supplied by the same caller who
+ * benefited from the record.
+ *
+ * Removing only the identity and the evidence would have left the TRIGGER. `attestTargets` plus an
+ * `operatorIdentity` from plugin config plus the canned default evidence string produced the same
+ * OPERATOR_ATTESTED record with no human involved, so all three go together.
+ *
+ * `OPERATOR_ATTESTED` remains a valid registry outcome and `guard.ts` still honours it, because the
+ * registry is a file that an earlier version or a human tool may have written. What is gone is any
+ * shipped path that PRODUCES one from a tool call. Note that `scripts/attest-unit.cjs --approve` is NOT
+ * that path: it writes a signed git note, which is a different record entirely.
+ *
+ * The removal is compile-enforced, not merely deleted: `delegation.ts` declares
+ * `DELEGATE_WORKER_SCHEMA_COVERS_EVERY_PARAMETER`, whose type requires the tool schema's keys and this
+ * union to be the SAME set, so re-adding a parameter to one and not the other fails the build.
+ */
 
 /** One delegated file as it is persisted: where it is, and what was written there. */
 export interface DelegatedRecord {

@@ -68,85 +68,78 @@ test('attestation scope: a missing filesWritten list is empty, not a crash', () 
   assert.deepEqual(r.attestable, [])
 })
 
-// ─── Structural assertions: the gate must actually USE this function ────────────────────────────────
+// ─── Structural assertions: NO shipped path may author a human attestation ──────────────────────────
 //
-// WHY THESE EXIST, and they are the most important cases in the file. Every case above tests the pure
-// decision, and every one of them passed while `index.ts` still looped over raw `attestTargets` -- the
-// fix was dead code and the vulnerability was open. Worse, the first wiring attempt landed ONLY the
-// import: an unused import compiles, so build passed, 374/374 passed, coherence passed, and the
+// WHY THESE EXIST, and why they now assert the OPPOSITE of what they used to. The cases above test a pure
+// decision function, and every one of them passed while `index.ts` still looped over raw `attestTargets` --
+// the fix was dead code and the vulnerability was open. Worse, the first wiring attempt landed ONLY the
+// import: an unused import compiles, so the build passed, 374/374 passed, coherence passed, and the
 // committed-dist check passed too, because dist had changed. A full green gate proved nothing.
 //
-// A pure function that passes while sitting unreferenced is the exact shape this repository keeps
-// finding, so the wire-up is asserted structurally rather than trusted. These read the source because
-// the source IS the artefact that failed: dist is generated from it, and a check on dist alone would
-// not say which side drifted.
+// A pure function that passes while sitting unreferenced is the exact shape this repository keeps finding,
+// so the wiring is asserted structurally rather than trusted.
+//
+// The wiring is now ABSENCE. Scoping the attestable set to files this unit had written narrowed the blast
+// radius and never addressed the claim: the caller still chose the human's name, still wrote the evidence,
+// and still triggered the record. A caller-authored attestation is the caller's claim about itself, so the
+// whole route was removed from the tool surface -- and "removed" is a property that decays silently the
+// moment someone re-adds the convenient-looking parameter, which is what these cases exist to prevent.
+//
+// `selectAttestableTargets` itself is KEPT and still tested above. It is a correct decision function with no
+// caller: the honest state after removing a route is a tested function that nothing wires, not a deleted
+// one whose reasoning is lost.
+//
 // (`fs` and `path` are already required at the top of this file.)
 
 const SRC_INDEX = path.join(__dirname, '..', '..', 'src', 'index.ts')
 const DIST_INDEX = path.join(__dirname, '..', '..', 'dist', 'index.js')
+const SRC_DELEGATION = path.join(__dirname, '..', '..', 'src', 'delegation.ts')
+const SRC_CONTRACTS = path.join(__dirname, '..', '..', 'src', 'contracts.ts')
 
-test('structural: index.ts imports AND invokes the scope function', () => {
+test('structural: index.ts never CALLS the recorder, so a tool call cannot write a human claim', () => {
   const src = fs.readFileSync(SRC_INDEX, 'utf8')
-  assert.match(
-    src,
-    /import\s*\{[^}]*\bselectAttestableTargets\b[^}]*\}\s*from\s*['"]\.\/attestation['"]/,
-    'index.ts must import selectAttestableTargets from ./attestation'
-  )
-  // Invocation, not just the name, AND as the direct source of `scope`.
-  //
-  // The catch that makes this precise: an earlier version of this check only looked for the name
-  // followed by `(`, and a mutation that rewrote the assignment to
-  //   const scope = ({ attestable: attestTargets }) || selectAttestableTargets({...})
-  // kept the name, kept the call syntactically, and left `scope` holding the RAW targets -- the original
-  // vulnerability restored, with every structural check still green. A `!==`/`||` guard is a trivial way
-  // to ensure a real fix is evaluated only when it never matters.
-  //
-  // So: `scope` must be assigned FROM a call to this function, with no expression before it.
-  assert.match(
-    src,
-    /const\s+scope\s*=\s*selectAttestableTargets\s*\{?\s*\(/,
-    'index.ts must assign `scope` directly from a call to selectAttestableTargets; a fallback expression before it defeats the fix'
-  )
-  // Belt and braces: no fallback operator may sit between the assignment and the call.
-  assert.doesNotMatch(
-    src,
-    /const\s+scope\s*=\s*[^\n]{0,80}(?:\|\||&&|\?\?|!==|===)\s*[^\n]{0,80}selectAttestableTargets/,
-    'selectAttestableTargets must not appear as the right-hand side of a fallback expression'
-  )
-})
-
-test('structural: the attestation loop iterates the SCOPED set, never raw attestTargets', () => {
-  const src = fs.readFileSync(SRC_INDEX, 'utf8')
+  // The identifier may appear in prose: the removal is documented in place, and a check that forbade the
+  // WORD would forbid the explanation. An invocation is what must not survive.
   assert.ok(
-    src.includes('for (const target of scope.attestable)'),
-    'the recording loop must iterate scope.attestable'
+    !/recordOperatorAttestation\s*\(/.test(src),
+    'index.ts must not CALL recordOperatorAttestation -- that call is how a model-authored OPERATOR_ATTESTED record was written'
   )
   assert.ok(
-    !src.includes('for (const target of attestTargets)'),
-    'the raw attestTargets loop must be GONE -- this is the loop that forged a review'
+    !/selectAttestableTargets\s*\(/.test(src),
+    'index.ts must not call selectAttestableTargets either: a scoped route is still a caller-authored claim'
   )
 })
 
-test('structural: refused targets are reported into attestationErrors', () => {
-  const src = fs.readFileSync(SRC_INDEX, 'utf8')
-  assert.match(
-    src,
-    /verdict\.attestationErrors\s*=\s*scope\.refused\.map\(/,
-    'scope.refused must be mapped into verdict.attestationErrors, not silently dropped'
-  )
+test('structural: the attesting parameters are gone from BOTH the schema and the canonical list', () => {
+  // Both halves are checked because the two are coupled by a compile-time set-equality assertion: removing
+  // one alone fails the build, and this case says so in a place a reader will find before the compiler.
+  const delegation = fs.readFileSync(SRC_DELEGATION, 'utf8')
+  const contracts = fs.readFileSync(SRC_CONTRACTS, 'utf8')
+  for (const name of ['attestTargets', 'attestEvidence', 'attestOperator']) {
+    assert.ok(
+      !new RegExp('^\\s+' + name + ':\\s*\\{', 'm').test(delegation),
+      name + ' must not be a property of the tool schema in delegation.ts'
+    )
+    assert.ok(
+      !new RegExp("^\\s*\\|\\s*'" + name + "'", 'm').test(contracts),
+      name + ' must not be a member of DelegateWorkerParameter in contracts.ts'
+    )
+  }
 })
 
-test('structural: the built bundle carries the scoped loop, so src and dist agree', () => {
-  // The published artefact is dist. Asserting only the source would pass on a tree whose build was
-  // stale -- the failure mode that made this repository commit a dist-in-sync CI step in the first place.
+test('structural: the built bundle carries the removal, so src and dist agree', () => {
+  // The published artefact is dist. Asserting only the source would pass on a tree whose build was stale --
+  // the failure mode that made this repository commit a dist-in-sync CI step in the first place. The
+  // compiled call site reads `(0, contracts_1.recordOperatorAttestation)(`, so the pattern is the name
+  // followed by a closing parenthesis; a bare name match would find the require() binding and the export.
   const dist = fs.readFileSync(DIST_INDEX, 'utf8')
   assert.ok(
-    dist.includes('scope.attestable'),
-    'dist/index.js must iterate scope.attestable; rebuild if this fails'
+    !/recordOperatorAttestation\)\(/.test(dist),
+    'dist/index.js must not CALL the recorder; rebuild from the fixed source if this fails'
   )
   assert.ok(
-    !dist.includes('for (const target of attestTargets)'),
-    'dist/index.js must not contain the old raw-target loop'
+    !dist.includes('scope.attestable'),
+    'dist/index.js must not contain the removed scoped attestation loop'
   )
 })
 

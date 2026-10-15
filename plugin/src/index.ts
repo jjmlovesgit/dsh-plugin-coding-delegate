@@ -12,7 +12,6 @@ import { canonicalisePath, isPathWithin, CODE_EXTENSIONS } from './paths'
 import { handleDeclarationPostExecute } from './declaration-egress-hook'
 import { resolveWorkspaceContainment } from './containment'
 import { classifyDestination } from './routing'
-import { selectAttestableTargets } from './attestation'
 import {
   FileEmissionResult,
   evaluateEmissionPath,
@@ -89,7 +88,6 @@ import {
   parseDelegatedRegistry,
   pruneDelegatedRecords,
   rememberDelegated,
-  recordOperatorAttestation,
   resolveContractFiles,
   resolveDelegatedRegistryPath,
   saveDelegatedRegistry,
@@ -249,14 +247,15 @@ export interface PluginConfig {
   /**
    * Who to name as the operator when an attestation is recorded through `delegate_worker`.
    *
-   * An attestation is a HUMAN claim about content, so it needs a human to name. There is deliberately no
-   * fallback to the calling agent's id: an autonomous session identifier cannot stand in for a person, and
-   * stamping one into the registry would produce a record LESS attributable than a typed name while looking
-   * like more. A delegation that asks for an attestation with no identity available is refused, with the
-   * unit's own verdict left intact -- the delegation succeeded, and only the attestation did not.
+   * Retained, but NO LONGER CONSUMED BY `delegate_worker`. It used to be the ambient half of the
+   * attestation identity, with a call's `attestOperator` overriding it -- and `attestOperator` was a
+   * MODEL-SETTABLE tool argument, which is what made an OPERATOR_ATTESTED record authorable by the very
+   * caller it claimed to describe. Both that argument and the tool-call attestation route are gone.
    *
-   * Set once per environment or developer seat. A call may override it with `attestOperator`, which is the
-   * explicit-over-ambient precedence.
+   * It stays in the options shape because dropping a documented config key is a breaking change for
+   * existing configurations, and because a future HUMAN-run attestation tool would legitimately need to
+   * read a configured identity. Nothing in the tool path reads it today, and that is asserted structurally
+   * in plugin/tests/oracles/attestation-scope.test.cjs rather than left to trust.
    */
   operatorIdentity?: string
   localCodeGuard?: boolean
@@ -1151,11 +1150,20 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
           // `endpoint` is not a declared tool argument and is deliberately dropped:
           // delegateWorker would otherwise POST the task to whatever URL a caller named.
           const { endpoint: _ignoredEndpoint, ...callerArgs } = args || {}
-          // Attestation is a SEPARATE act from delegation and must not be smuggled into it. A caller may
-          // name paths to attest here so the operator's own review can be recorded through a tool call
-          // rather than a shell one-liner -- the manual route was the only one available, which is exactly
-          // why the promotion socket sat patched-but-unattested for so long.
-          const { attestTargets, attestEvidence, attestOperator, ...delegationArgs } = callerArgs as any
+          // ATTESTATION IS NOT A CALLER-RUNNABLE ACT, and this line is the enforcement.
+          //
+          // `attestTargets`/`attestEvidence`/`attestOperator` used to be declared in the tool schema and
+          // honoured here, which let the MODEL name a human, write the evidence text, and have
+          // OPERATOR_ATTESTED written into the registry -- a machine-authored claim of human review, the one
+          // record this plugin must never be able to manufacture. The schema no longer declares them, and
+          // they are stripped here as well: a caller who sends them by hand, past the schema, is ignored
+          // rather than obeyed. The schema is the API; this is the boundary.
+          const {
+            attestTargets: _refusedAttestTargets,
+            attestEvidence: _refusedAttestEvidence,
+            attestOperator: _refusedAttestOperator,
+            ...delegationArgs
+          } = callerArgs as any
           const policy = resolveVerificationPolicy(options)
           // The workspaceDir ARGUMENT chooses the base directory for every containment check, and it is
           // model-visible. Containment of the emitted files was always sound; what was missing is that
@@ -1223,81 +1231,25 @@ export function apply(ctx: Context, options: PluginConfig = {}) {
             },
             tracker
           )
-          if (Array.isArray(attestTargets) && attestTargets.length > 0) {
-            // Only a PASSING unit may be attested from here. An attestation is a human claim about content;
-            // attaching one to a unit that failed or was never verified would launder a machine outcome
-            // into a human statement, which is the one thing this verdict must not become.
-            //
-            // The gate is `status === 'SUCCESS'`, NOT 'UNIT_PASSED'. The first version of this compared
-            // against 'UNIT_PASSED' and refused every attestation, because `resolveDelegateStatus` returns
-            // 'SUCCESS' / 'INCOHERENT' / 'VERIFICATION_FAILED' / 'UNVERIFIED' / 'FLAKY' and never emits the
-            // registry's outcome vocabulary at all. The two vocabularies are genuinely different, and the
-            // mistake was silent in the worst way: the tool reported success while quietly skipping the
-            // attestation, and the skip message blamed the unit rather than the comparison.
-            //
-            // `SUCCESS` is also the stricter of the two candidate gates, and correctly so: it requires the
-            // project coherence check to have passed as well, and attesting a unit whose tree is broken
-            // would certify content in a state nothing verified.
-            if (verdict && verdict.status === 'SUCCESS') {
-              // OPERATOR IDENTITY, and the first version of this got it exactly wrong. It fell back to
-              // `exec.agent.id`, which stamped an ephemeral session UUID into the audit ledger as though a
-              // human had signed off -- inverting the separation of duties the verdict exists to record,
-              // and producing a record LESS attributable than a typed name rather than more.
-              //
-              // There is deliberately NO fallback to the agent. An autonomous agent id cannot attest human
-              // review, so the absence of an identity is a refusal, not a value to invent. Precedence is
-              // the call's `attestOperator`, then the plugin's `operatorIdentity` -- explicit over ambient.
-              const operator = String(attestOperator || options?.operatorIdentity || '').trim()
-              // Scope before attesting: a path may be attested only if this unit actually wrote it.
-              // Attesting anything else is how a caller forged a human review over a file the unit
-              // never touched. Placed after `operator` because the helper needs it.
-              const scope = selectAttestableTargets({
-                requested: Array.isArray(attestTargets) ? attestTargets : [],
-                filesWritten: Array.isArray(verdict?.filesWritten) ? verdict.filesWritten : [],
-                operator,
-              })
-              if (scope.refused.length > 0) {
-                verdict.attestationErrors = scope.refused.map(
-                  (p) => 'attestTargets must be written and verified in the current unit: ' + p
-                )
-              }
-              if (!operator) {
-                // Refused, and the unit's own verdict is left INTACT. Throwing here would destroy a passing
-                // unit's result over a bookkeeping failure, which is not what failing closed means at this
-                // seam: the delegation succeeded, and only the attestation did not.
-                verdict.attestationSkipped =
-                  'attestTargets was provided but no operator identity is available, so nothing was attested. ' +
-                  "Pass attestOperator on the call, or set 'operatorIdentity' in the plugin configuration. " +
-                  'An autonomous agent id cannot attest human review, so it is never used as a fallback.'
-                console.warn('[LOCAL_EGRESS] attestation refused: no operator identity (attestOperator or operatorIdentity)')
-              } else {
-              const evidence =
-                String(attestEvidence || '').trim() ||
-                'operator reviewed the passing unit from delegation ' + String(verdict.taskName || '')
-              const attested: string[] = []
-              // Only what this unit wrote, so an answer-only delegation attests nothing.
-              for (const target of scope.attestable) {
-                try {
-                  const record = recordOperatorAttestation(String(target), operator, evidence)
-                  if (record) attested.push(record.path)
-                } catch (err: any) {
-                  // The recorder throws when the registry cannot be written, deliberately: an unpersisted
-                  // attestation must not be reported as one. Surfacing it here keeps that contract.
-                  console.warn('[LOCAL_EGRESS] attestation failed for', target, err?.message || err)
-                }
-              }
-              verdict.attested = attested
-              if (attested.length > 0) {
-                verdict.summary = String(verdict.summary || '') + '\nAttested: ' + attested.join(', ') + '.'
-              }
-              }
-            } else {
-              verdict.attestationSkipped =
-                'attestTargets was provided but the unit status was ' +
-                String(verdict && verdict.status) +
-                ', not SUCCESS, so nothing was attested'
-            }
-          }
+          // REMOVED: the whole `attestTargets` attestation block that stood here.
+          //
+          // It recorded an OPERATOR_ATTESTED verdict from caller-supplied values. Three successive attempts
+          // to make it safe are left out on purpose rather than reverted, because each one shows why the
+          // route itself had to go:
+          //
+          //   1. The first version fell back to `exec.agent.id` for the operator, stamping an ephemeral
+          //      session UUID into an audit ledger as though a human had signed off.
+          //   2. Removing that fallback left the identity caller-supplied, so a caller could still name a
+          //      person.
+          //   3. Scoping the targets to files this unit had written (`selectAttestableTargets`) stopped a
+          //      caller attesting somebody else's file, and still left the caller choosing the identity and
+          //      the evidence -- and one structural test showed the scope check could be DISARMED by
+          //      prefixing the scope call with a `||` fallback to the raw target list, so the expression
+          //      yielded `attestTargets` again with every structural check still green.
+          //
+          // The record was always the caller's own claim about itself. There is no version of this route
+          // that a caller cannot author, so the route is gone and `selectAttestableTargets` is left
+          // unreferenced (still unit-tested) rather than half-wired.
           return verdict
         },
       }

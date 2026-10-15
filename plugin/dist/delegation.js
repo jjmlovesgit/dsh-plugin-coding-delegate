@@ -158,19 +158,19 @@ exports.DELEGATE_WORKER_OPENAI_SCHEMA = {
                     type: 'number',
                     description: 'How many times to run runVerification. Defaults to 3 and is capped at 20. Raise it for a rare race condition. Pass 1 ONLY for a suite you have measured as deterministic and whose three-fold cost you are deliberately declining -- a contract that runs once cannot disagree with itself, so a flaky oracle becomes invisible again.',
                 },
-                attestTargets: {
-                    type: 'array',
-                    items: { type: 'string' },
-                    description: 'Paths to record an OPERATOR_ATTESTED verdict for, IF this unit passes. A separate act from delegation, and refused for a unit that did not pass, because an attestation is a human claim about content and attaching one to a failed or unverified unit would launder a machine outcome into a human statement. Use it to settle a hand-edited file: the registry records the file current SHA-256, the attesting agent and the evidence, with no keys and no signature, so it is tamper-evidence rather than cryptographic non-repudiation.',
-                },
-                attestEvidence: {
-                    type: 'string',
-                    description: 'What was actually checked, recorded verbatim against the attestation. An attestation that does not say what it covers is an anonymous stamp, so this is worth supplying even though the field is optional.',
-                },
-                attestOperator: {
-                    type: 'string',
-                    description: 'The human to name for the attestation, overriding the plugin operatorIdentity. Required in practice: there is NO fallback to the calling agent id, because an autonomous session identifier cannot attest human review, and recording one would produce a LESS attributable audit entry while looking like more. If neither this nor operatorIdentity is set, the attestation is refused and the unit verdict is left intact.',
-                },
+                // REMOVED ON PURPOSE: `attestTargets`, `attestEvidence`, `attestOperator`.
+                //
+                // They let a MODEL choose who to name as the reviewing human and what evidence to record, and
+                // `index.ts` then wrote an OPERATOR_ATTESTED record out of those values. An attestation is a claim
+                // that a PERSON reviewed content, and a value the caller supplies cannot support that claim -- the
+                // more of the record the caller controls, the more convincing the forgery. Removing only the
+                // identity and the evidence would have left the TRIGGER: `attestTargets` present, `operatorIdentity`
+                // set in plugin config, and the canned default evidence string still produced the record.
+                //
+                // All three are gone, from here and from `DelegateWorkerParameter` in contracts.ts, and
+                // `DELEGATE_WORKER_SCHEMA_COVERS_EVERY_PARAMETER` below makes the removal compile-enforced: the
+                // schema's keys and that union must be the same set, so a parameter re-added to one alone fails the
+                // build rather than silently returning to the tool surface.
                 contractFiles: {
                     type: 'array',
                     items: { type: 'string' },

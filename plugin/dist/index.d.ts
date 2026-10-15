@@ -77,14 +77,15 @@ export interface PluginConfig {
     /**
      * Who to name as the operator when an attestation is recorded through `delegate_worker`.
      *
-     * An attestation is a HUMAN claim about content, so it needs a human to name. There is deliberately no
-     * fallback to the calling agent's id: an autonomous session identifier cannot stand in for a person, and
-     * stamping one into the registry would produce a record LESS attributable than a typed name while looking
-     * like more. A delegation that asks for an attestation with no identity available is refused, with the
-     * unit's own verdict left intact -- the delegation succeeded, and only the attestation did not.
+     * Retained, but NO LONGER CONSUMED BY `delegate_worker`. It used to be the ambient half of the
+     * attestation identity, with a call's `attestOperator` overriding it -- and `attestOperator` was a
+     * MODEL-SETTABLE tool argument, which is what made an OPERATOR_ATTESTED record authorable by the very
+     * caller it claimed to describe. Both that argument and the tool-call attestation route are gone.
      *
-     * Set once per environment or developer seat. A call may override it with `attestOperator`, which is the
-     * explicit-over-ambient precedence.
+     * It stays in the options shape because dropping a documented config key is a breaking change for
+     * existing configurations, and because a future HUMAN-run attestation tool would legitimately need to
+     * read a configured identity. Nothing in the tool path reads it today, and that is asserted structurally
+     * in plugin/tests/oracles/attestation-scope.test.cjs rather than left to trust.
      */
     operatorIdentity?: string;
     localCodeGuard?: boolean;
@@ -445,21 +446,6 @@ declare const pluginExport: {
                         type: string;
                         description: string;
                     };
-                    attestTargets: {
-                        type: string;
-                        items: {
-                            type: string;
-                        };
-                        description: string;
-                    };
-                    attestEvidence: {
-                        type: string;
-                        description: string;
-                    };
-                    attestOperator: {
-                        type: string;
-                        description: string;
-                    };
                     contractFiles: {
                         type: string;
                         items: {
@@ -523,21 +509,6 @@ declare const pluginExport: {
                         description: string;
                     };
                     verificationRepeats: {
-                        type: string;
-                        description: string;
-                    };
-                    attestTargets: {
-                        type: string;
-                        items: {
-                            type: string;
-                        };
-                        description: string;
-                    };
-                    attestEvidence: {
-                        type: string;
-                        description: string;
-                    };
-                    attestOperator: {
                         type: string;
                         description: string;
                     };

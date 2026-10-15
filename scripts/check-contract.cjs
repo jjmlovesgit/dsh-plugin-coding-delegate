@@ -104,6 +104,14 @@ function runTests(file) {
   const run = spawnSync(process.execPath, ['--test', file], { stdio: ['ignore', fd, fd], env })
   fs.closeSync(fd)
   const output = fs.readFileSync(outFile, 'utf8')
+  // The capture has been read into memory, so the directory holding it is finished with.
+  //
+  // It used to be left behind: one `dsh-contract-run-*` directory per runner invocation, two per contract,
+  // so a full gate run scattered fourteen of them into the shared temp directory and nothing ever removed
+  // them. Captured test output is not a secret, but this script's whole claim is that it judges a
+  // CONTROLLED condition, and a guard that cannot clean up after itself is not exercising the control it
+  // asserts. Found while measuring the mirror-containment defect next door, and fixed in the same pass.
+  fs.rmSync(dir, { recursive: true, force: true })
   const number = (re) => {
     const m = output.match(re)
     return m ? Number(m[1]) : 0
@@ -137,18 +145,88 @@ let failed = 0
 
 // ---- A. the controlled condition, and the only thing judged -----------------------------------------
 const mirrorRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-contract-null-'))
-// A test reaches its module by a path relative to its own directory, so the stub is placed at the same relative position.
+/**
+ * True when `candidate` is strictly inside `base`, by PATH ARITHMETIC rather than by string prefix.
+ *
+ * A `startsWith` comparison is not sufficient on Windows: `C:\tmp\dsh-1x` is a prefix of
+ * `C:\tmp\dsh-1xyz`, and the separator is the difference between a containment test and a coincidence.
+ */
+const isStrictlyInside = (base, candidate) => {
+  const rel = path.relative(path.resolve(base), path.resolve(candidate))
+  return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel)
+}
+// A test reaches its module by a path RELATIVE to its own directory, so the null stub has to be placed at
+// that same relative position -- and the mirror has to be deep enough to absorb the `..` ascents in it.
+//
+// The previous version mirrored the test one level down, at `<root>/<basename of its directory>/<basename>`.
+// A contract in `tests/contracts` reaches its module by `../../tools/x.ts`, so two ascents from a one-level
+// mirror resolved OUTSIDE the temporary root: at `<tmpdir>/tools/x.ts`, a directory every process on the
+// machine shares, where the stub then stayed, because the `rmSync(mirrorRoot)` below cannot reach outside
+// its own root. Measured on this machine before the fix: seven 432-byte null stubs in `%TEMP%\tools\`, one
+// per contract in the repository, plus six abandoned mirror roots.
+//
+// That is worse than a leak of scratch files. This guard's entire premise is that it judges the contract
+// against a CONTROLLED condition, and the module it judged was a file outside its control that outlived the
+// run -- a later process could have created that path first, and the null run would have judged ITS stub.
+//
+// And the wrong path was not merely wrong, it was ATTACKER-SHAPED. The stub location is
+// `resolve(mirrorDir, relative)`, and `relative` is derived from the `--module` argument, so a hostile
+// invocation could aim the write at any path on the drive (`../../../..` and onward) with no containment
+// test anywhere in the script. The content is only ever the null stub, but overwriting a file the caller
+// names is still a write primitive, handed to the caller by the guard.
+//
+// The fix mirrors the test at a depth EQUAL TO THE NUMBER OF ASCENTS in its own module path, so the ascents
+// always arrive back inside the mirror root. That holds for a test anywhere on the drive -- including
+// outside the repository, which `contract-spec-conformance.test.cjs` exercises -- and it needs no assumption
+// about where the repository is. The containment assertions after each resolve are then belt and braces:
+// they should be unreachable, and they refuse loudly rather than passing quietly if they are not.
+const mirrorDepthOf = (fromDir, toFile) => {
+  const rel = path.relative(fromDir, toFile)
+  // A different drive has no relative path at all, so no amount of nesting can contain the stub.
+  if (path.isAbsolute(rel)) return null
+  let depth = 0
+  const parts = rel.split(path.sep)
+  while (depth < parts.length && parts[depth] === '..') depth += 1
+  return { rel, depth }
+}
+
 const mirrorTestFile = (testFile) => {
-  const mirrorPath = path.join(
-    mirrorRoot,
-    path.basename(path.dirname(testFile)),
-    path.basename(testFile)
-  )
-  fs.mkdirSync(path.dirname(mirrorPath), { recursive: true })
+  const plan = mirrorDepthOf(path.dirname(testFile), modulePath)
+  if (plan === null) {
+    console.error(
+      '  FAIL  ' + modulePath + ' and ' + testFile + ' are on different drives, so no relative mirror can ' +
+        'contain the null stub. Refusing rather than writing outside the mirror.'
+    )
+    process.exit(1)
+  }
+  // One `mirror` directory per ascent: whatever the test's real location, resolving its module path from
+  // the bottom of this nest lands inside `mirrorRoot`.
+  const mirrorDir = path.join(mirrorRoot, ...Array(plan.depth).fill('mirror'))
+  let mirrorPath = path.join(mirrorDir, path.basename(testFile))
+  // A contract and its specification suite can share a basename, which would silently run one where the
+  // other was meant. The mirrored NAME does not matter to the module resolution -- only the depth does --
+  // so a collision is resolved by renaming rather than by refusing.
+  for (let n = 1; fs.existsSync(mirrorPath); n += 1) {
+    mirrorPath = path.join(mirrorDir, 'mirror-' + n + '-' + path.basename(testFile))
+  }
+  if (!isStrictlyInside(mirrorRoot, mirrorPath)) {
+    console.error(
+      '  FAIL  cannot place ' + testFile + ' inside ' + mirrorRoot + '. Without a controlled mirror the ' +
+        'null run would judge a module this guard does not own, so it is refused rather than attempted.'
+    )
+    process.exit(1)
+  }
+  fs.mkdirSync(mirrorDir, { recursive: true })
   fs.copyFileSync(testFile, mirrorPath)
 
-  const relative = path.relative(path.dirname(testFile), modulePath)
-  const mirrorModule = path.resolve(path.dirname(mirrorPath), relative)
+  const mirrorModule = path.resolve(mirrorDir, plan.rel)
+  if (!isStrictlyInside(mirrorRoot, mirrorModule)) {
+    console.error(
+      '  FAIL  the null stub for ' + modulePath + ' resolves to ' + mirrorModule + ', which is outside ' +
+        mirrorRoot + '. Refusing to write a stub outside the mirror.'
+    )
+    process.exit(1)
+  }
   fs.mkdirSync(path.dirname(mirrorModule), { recursive: true })
   fs.writeFileSync(mirrorModule, NULL_IMPLEMENTATION, 'utf8')
 
