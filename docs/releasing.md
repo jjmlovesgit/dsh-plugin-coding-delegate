@@ -69,29 +69,27 @@ npm view dsh-plugin-coding-delegate@0.5.2 gitHead
 git rev-parse 'v0.5.2^{commit}'
 ```
 
-Stronger, and the check that actually proves the artifact: download the published tarball and compare
-each file against the tagged tree by **Git blob hash**. Comparing hashes this way avoids every
-line-ending and encoding trap that hash-of-a-string comparisons fall into:
+Stronger, and the check that actually proves the artifact: compare the published tarball against the
+tagged tree by **Git blob hash**. A blob hash is a function of content alone, which avoids every
+line-ending and encoding trap that a hash-of-a-string comparison falls into. That check has a script, so
+a release no longer depends on someone retyping it correctly:
 
 ```powershell
-$tmp = Join-Path $env:TEMP ("npmverify-" + [guid]::NewGuid().ToString('N').Substring(0,8))
-New-Item -ItemType Directory -Path $tmp | Out-Null
-Set-Location $tmp
-npm pack dsh-plugin-coding-delegate@0.5.2
-tar -xzf (Get-ChildItem -Filter *.tgz | Select-Object -First 1).Name
-
-$pkg = Join-Path $tmp 'package'
-foreach ($f in Get-ChildItem -Recurse -File $pkg) {
-  $rel = $f.FullName.Substring($pkg.Length + 1).Replace('\', '/')
-  $published = git -C C:\Projects\DSHLaya hash-object $f.FullName
-  $tagged = git -C C:\Projects\DSHLaya rev-parse "v0.5.2:plugin/$rel"
-  if ($published -ne $tagged) { Write-Output "DIFFERS: $rel" }
-}
+./scripts/verify-release-tarball.ps1 -Version 0.5.3 -Tag v0.5.3
 ```
 
-For v0.5.2 that reported 55 files compared, 55 identical. Comparing `dist.unpackedSize` and
-`dist.fileCount` against `npm pack --dry-run` in `plugin/` is a faster smoke check -- 633729 bytes and 55
-files on both sides -- but it cannot tell you the bytes are the same, only that the count is.
+It downloads and extracts the published tarball and compares in **both** directions: every published file
+must exist in the tag and hash identically, and every file the tag says the package ships must be present
+in the tarball. The second direction is the easy one to leave out, and leaving it out means a tarball that
+simply omitted a file still reports success. It also cross-checks `gitHead` against the tag's commit and
+`dist.fileCount` against the number of files it unpacked, prints `[VERIFIED]` or the list of mismatches,
+removes its scratch directory, and exits 1 on any mismatch. It is deliberately not part of `npm run gate`,
+which has to run offline.
+
+For v0.5.3 it printed `published : 55 file(s)`, `expected : 55 file(s) from v0.5.3`, no mismatches.
+Checking `dist.unpackedSize` and `dist.fileCount` against `npm pack --dry-run` in `plugin/` is a faster
+smoke check -- 656011 bytes and 55 files on both sides -- but it cannot tell you the bytes are the same,
+only that the count is.
 
 **The shasum is not reproducible across re-packs.** npm embeds file timestamps, so a tarball built from
 an unchanged tree at a later moment can hash differently. Compare a published shasum against a fresh
