@@ -33,7 +33,8 @@
     "test": "npm --prefix plugin test",
     "test:oracles": "npm --prefix plugin run test:oracles",
     "audit": "node scripts/verify-delegation-ledger.cjs",
+    "check:hygiene": "node scripts/check-file-hygiene.cjs",
     "gate:wellformed": "node scripts/check-contracts.cjs",
-    "gate": "node scripts/check-contract-fixtures.cjs && node scripts/check-contracts.cjs && node scripts/verify-delegation-ledger.cjs"
+    "gate": "node scripts/check-file-hygiene.cjs && node scripts/check-contract-fixtures.cjs && node scripts/check-contracts.cjs && node scripts/verify-delegation-ledger.cjs"
   }
 }
