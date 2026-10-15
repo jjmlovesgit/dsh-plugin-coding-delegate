@@ -295,12 +295,17 @@ export function evaluateDeclarationEgress(input: DeclarationEgressInput): Declar
   // That is the fail-closed direction, and the message names the thing the operator has to fix.
   //
   // A caller that names no workspace at all still gets the old answer, which the committed oracle pins.
-  const refuseUnverifiedBase = (scope: string): DeclarationEgressVerdict | null => {
+  //
+  // Asked a third time for the shell branch, where the scope travels inside a command string instead of in
+  // a field of its own. The verb is a parameter only so the refusal names the act the operator performed;
+  // the condition is one helper so the three sites cannot drift apart.
+  const refuseUnverifiedBase = (scope: string, act = 'Searching'): DeclarationEgressVerdict | null => {
     if (!input.workspaceRoot || input.workspaceVerified) return null
     return {
       action: 'block',
       reason:
-        "Searching '" +
+        act +
+        " '" +
         scope +
         "' was refused: sourceReadEgress is 'declarations' and the session workspace could not be " +
         'established, so this scope was resolved against the process working directory -- a guess -- and ' +
@@ -512,6 +517,26 @@ export function evaluateDeclarationEgress(input: DeclarationEgressInput): Declar
           'deterministically, so the arguments it names cannot be shown to avoid source. Close the ' +
           'quotes, or read the declaration path directly instead.',
       }
+    }
+
+    // FAIL CLOSED WHEN THE BASE ITSELF IS A GUESS, and this is the last door it was standing open in
+    // (docs/findings.md, "A shell search never asked whether the workspace was established"). A shell
+    // command is the one route where the scope the host will resolve never reaches this evaluator as a
+    // scope: `grep TODO docs/findings.md` carries a path inside a command string. Measured with the cwd
+    // outside the workspace -- the ordinary case, since the fallback is what `resolveWorkspaceDir` returns
+    // when the host exposes no workspace -- the search route refused that same file as unresolved against a
+    // base nobody had established, while this route served it, and `rg TODO docs` was allowed where a
+    // proven base refuses it because the directory predicate answers against the same guess.
+    //
+    // Asked AFTER the three refusals above, not before. Those three are true whatever the base turns out to
+    // be, so a later change to the base question must not be able to hide them behind itself. What was
+    // fail-open here is the `allow` this replaces; that is the line that had to stop being reachable.
+    //
+    // Gated on `reads`, so a command that only lists (`Get-ChildItem src`) keeps its allow -- there are no
+    // bytes to leak and the base is irrelevant to it.
+    if (reads) {
+      const unverifiedShell = refuseUnverifiedBase(target, 'Shell command')
+      if (unverifiedShell) return unverifiedShell
     }
     return { action: 'allow' }
   }
