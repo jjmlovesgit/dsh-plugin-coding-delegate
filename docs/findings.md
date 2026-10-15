@@ -1236,3 +1236,107 @@ stages.
 
 Fixed at `ec88dca`.
 
+## An unestablished workspace was used as a workspace — fixed
+
+`resolveWorkspaceDir` answers with `process.cwd()` when the host names no workspace: no
+`DSH_WORKSPACE_ROOT`, no `DSH_WORKSPACE`, no `WORKSPACE_ROOT`, and no workspace service on the context. The
+review treated that as an unusual state. Measured in this session's own environment, **none of those variables
+is set**, and the comment beside the function records that `ctx.workspace` does not exist in Cordis — so the
+fallback is the ordinary answer here, and the code even says so in its own `source` string, which ends
+`FALLBACK (not a Session workspace)`. Nothing consumed that string.
+
+The evaluator then used the guess as a base. Measured with the base set to a cwd that holds no `src`:
+`grep { path: 'src' }` reached the prose allow and the raw results passed, while `grep { path: 'src/impl.ts' }`
+was refused by the extension rule. So the hole was not the exotic shape — it was the scopes a session names
+most often, and the same scope under the true workspace was either served as declarations or refused by rule.
+The guess never had to be right to be load-bearing; it only had to be wrong in a directory that lacked the
+path.
+
+**The fix carries provenance rather than guessing better.** `resolveWorkspaceDir` already computed where the
+answer came from, so it now returns a `verified` flag alongside the directory, the call site forwards it, and
+the evaluator refuses a scope whose reach cannot be shown when the base is unverified. The fallback itself is
+unchanged: returning an empty base would silently disable resolution for the delegation call site and
+contradict the contract that pins `workspaceRoot: undefined`. The cost is stated in the message the operator
+sees — with an unverified base, a prose scope that happens to resolve is refused too, which is the fail-closed
+direction, and the message names the fix (give the session a workspace).
+
+`plugin/tests/oracles/declaration-egress-scope-resolution.test.cjs` pins both directions: an unverified base
+refuses a directory scope, and the true workspace still serves the same scope. Case 143 in the suite was the
+control that caught the first version of this change — the guard had to move from "block when I cannot
+resolve" to "block when I cannot show that I resolved against a base I trust".
+
+Fixed at `1e9f754`.
+
+## The context budget did not apply when a range was asked for — fixed
+
+The size guard in the context reader ran only when the request declared no line range. A request that named
+`startLine` and `endLine` skipped it and read the file in full, refusing it afterwards on the budget it had
+already blown. Measured with a 5 MiB file requested as one line: **5 242 880 bytes observed by the read
+recorder, 0 bytes injected**, and the refusal arriving after the read. A range makes the RESULT small; the
+read is what costs, so a guard conditional on how the result will later be narrowed is not a guard on the
+work.
+
+The guard is now unconditional. The trade is deliberate and one-directional: a file larger than the entire
+budget is refused even when the caller wants a single line of it, because the caller cannot get the line
+without the read. The suite was green while this branch read the file in full, because the existing case
+covered the no-range shape — which is why the new case states the range explicitly and records the byte count
+it used to observe (`case E` in `plugin/tests/oracles/security-review-2-regressions.test.cjs`).
+
+Fixed at `1e9f754`.
+
+## The egress destination was recomputed from the provider strings — fixed
+
+The source-egress gate asked where a request was going, and answered by recomputing it:
+`rerouteLocal || String(mutatedConfig.provider) === localProvider`. That expression drops the classifier's
+own condition. In the documented cloud-only setup the local and cloud provider ids are deliberately **equal**,
+so the comparison was true, the destination was reported as `local`, and `evaluateSourceEgress` cleared
+detected source on the grounds that nothing was leaving the machine — for a request the classifier had already
+called cloud.
+
+The classifier was correct throughout, which is exactly why this needed its own test: a right answer nothing
+consults is the failure mode, not a wrong answer. The gate now takes `classification.destination`, and the
+oracle asserts the shipped source says so and no longer compares provider strings (the comparison site was the
+only one in the file), plus the composition of the two halves in the order the hook runs them. Both are in
+`plugin/tests/oracles/routing-locality.test.cjs`.
+
+Fixed at `1e9f754`.
+
+## A disclosed credential was forgotten once the prompt window moved past it — fixed
+
+The subject the gate scans is the session's accumulated prompt text, capped and truncated to its **newest**
+200 000 characters. Bounding that working set is right. Forgetting what it proved is not: measured with a
+credential in turn 1 and 210 000 characters of ordinary text in turn 2, the credential was evicted from the
+window and the next request went to the **cloud** provider. One turn in the cloud is already the exposure, so
+there is no window size at which the text can be the memory.
+
+The fact is now remembered per session — the classifier's verdict pins the session, and the memory does not
+downgrade to entropy-only routing the way a bare low-confidence hit does. The text window stays bounded,
+because the pin is a flag rather than more retained prompt. The case in
+`plugin/tests/oracles/dlp-session-scope.test.cjs` runs three turns (disclose, overflow, ordinary) and adds the
+control that an unrelated clean session still goes to the cloud, so a global flag cannot pass it.
+
+Fixed at `1e9f754`.
+
+## A shell search of a directory named no code file — fixed
+
+The shell branch refused a command only when it both read content and named a source file. A command like
+`rg SECRET src` reads content and names a DIRECTORY, so it did neither by that rule: measured,
+`commandReadsContent('rg SECRET src')` is true and the code-reference match is undefined, and the raw matches
+passed through. The dedicated search route, asked for the same scope, served declarations instead — the
+asymmetry between two routes to the same files was the hole, and it was reachable with the documented pattern
+for searching a tree.
+
+A directory content read is now refused in declarations mode. The branch keys on the read and the directory,
+not on the absence of a file name, so `Get-ChildItem src` — which reads no contents — stays allowed; the new
+case asserts that control explicitly, because a rule that keyed on `reads && !names` would be a ban on the
+shell tool rather than a rule about source. The predicate is injected from the hook, where the workspace is
+known, so the whole shell policy stays in one place. `plugin/tests/oracles/declaration-egress-scope.test.cjs`
+covers the evaluator's discrimination and `declaration-egress-scope-resolution.test.cjs` drives the shipped
+predicate through the shipped hook on the real workspace.
+
+**All five sections above were verified RED before GREEN.** With the source changes stashed and the build
+regenerated, the affected cases failed exactly as written — seven of them, including both new controls'
+counterparts — and the full suite returned to 499 tests, 498 pass, 0 fail, 1 skip with the fixes restored.
+
+Fixed at `1e9f754`.
+
