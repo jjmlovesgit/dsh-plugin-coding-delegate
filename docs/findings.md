@@ -1340,3 +1340,92 @@ counterparts — and the full suite returned to 499 tests, 498 pass, 0 fail, 1 s
 
 Fixed at `1e9f754`.
 
+## The destination was decided before the request was repinned — fixed
+
+A re-scan of the previous round's fixes (SECURITY-REVIEW-5) found that the source-egress gate had been
+changed to trust the classifier and that the classifier was being asked the wrong question. The
+classification is made at the top of the request hook from the provider the HOST offered. `applyAgentRole`
+runs later, and for the architect it repins the request to `cloudProvider`. In a hybrid setup whose host
+offered the local worker, the gate therefore read `'local'` — and `evaluateSourceEgress` allowed detected
+source out with the reason "nothing is leaving the machine" — while the very same request went to the cloud.
+Measured through the mounted plugin: the architect request resolved with the source still in it, and the
+identical prompt on a lead left local was the only shape the old check cleared honestly.
+
+The earlier fix had replaced a recomputation that dropped the classifier's `isCloudOnly` condition. Taking
+the classifier's answer fixed that and introduced this, so the two mistakes are now written down together at
+the site. The destination is taken from the provider the request is actually sent with, through one exported
+`effectiveDestinationFor` in the routing module that both the classifier and the gate call, so there is one
+rule rather than two that have to agree — and the cloud-only alias condition travels with it.
+
+Fixed at `efe0138`.
+
+## A quoted path defeated the shell tokenizer — fixed
+
+The shell branch decides whether a command reads a directory by tokenising it and asking the filesystem
+about each token. That tokeniser split on whitespace, so `rg SECRET "code space"` produced `"code` and
+`space"`; neither names anything, the directory question answered false, and the raw matches passed through.
+The leak closed in the previous round for `rg SECRET src` was therefore still open for any directory with a
+space in its name, which is ordinary on a desktop. Reproduced through the shipped hook before it was
+changed.
+
+Tokenising now scans for quoted spans instead of splitting on whitespace. A command whose quoting cannot be
+parsed deterministically — an unclosed quote — is refused rather than guessed at, because the guess is which
+tokens the shell would really pass and guessing it wrong is the leak. The decision stays in the evaluator,
+which holds no filesystem view, so the hook reports `commandScopeUnparseable` and the policy remains in one
+place; the control that a parseable command reaching no source is still allowed keeps the rule from becoming
+a ban on shell tools.
+
+Fixed at `efe0138`.
+
+## The provenance question was asked after the guess — fixed
+
+The refusal that exists for an unverified workspace base sat below the directory branch in the search path.
+That is too late for it to be a control: the injected `directoryScope` resolves the scope against
+`workspaceRoot` — and when that is the cwd fallback, the directory it finds belongs to the cwd, not to the
+session. An empty directory there resolved to zero source files and returned the positive control's allow, so
+the provenance refusal further down was never reached while the host ran the search against the real
+workspace. Measured pre-fix: the same call returned `allow`.
+
+The question is now asked before any filesystem question, which is what makes it a check on the base rather
+than on the guesses made from it. The cost is stated at the site rather than hidden: on a host that exposes
+no workspace at all, declarations mode now refuses relative searches instead of clearing them, and the
+message names the thing the operator has to fix. The caller that names no workspace keeps the old answer,
+which the committed oracle pins.
+
+That consequence reached further than the new cases: `declaration-egress-integration.test.cjs` mounts the
+real plugin, and the plugin resolves the session workspace itself and OVERWRITES the `workspaceRoot` option
+the oracle passed. Its controls were therefore asserting the runner's working directory — a base the plugin
+correctly reports as unverified — and they failed. The repair was to give the oracle the workspace it always
+meant to have by naming it in the environment, which is also what makes the file independent of where the
+runner is started, the fragility its own header warns about.
+
+Fixed at `efe0138`.
+
+## The sticky credential marker fired on entropy alone — fixed
+
+The previous round added a session marker so that a credential could not be forgotten once the bounded
+corpus scrolled it out of the scanned window. It was set from `hasSensitiveData`, which is true for an
+entropy-only hit too — a base64 blob, a digest, a UUID, a long hash in a log. A remembered session is forced
+out of the medium-confidence branch, which means `entropyOnly` becomes false and the classifier's
+high-confidence refusal applies, so ONE random-looking token turned every later prompt of that session into a
+hard block instead of the soft local landing (rerouted local, never transmitted) that the entropy backstop
+exists to give. The review called it poisoning, and the name is right: the remedy for a heuristic is a
+weaker answer, not a permanent one.
+
+The marker is now set by a pattern match only. The pair of cases in
+`plugin/tests/oracles/source-egress-role-destination.test.cjs` states both directions — an entropy-only hit
+keeps its per-turn soft landing, and a matched credential still pins the session after 210,000 benign
+characters push it out of the 200,000-character window. The first case runs with no `dlpAction` of `local` on
+purpose: with a reroute authorised a pinned session and an unpinned one both land local, so the poisoning is
+invisible, and a test written against the comfortable configuration would have passed either way.
+
+Fixed at `efe0138`.
+
+**The four sections above were verified RED before GREEN.** With `plugin/src` stashed and the build
+regenerated, 8 of the new cases failed — the architect repin, the quoted directory, the unparseable quoting,
+the unverified empty directory, and four structural pins — and the suite returned to 512 tests, 511 pass, 0
+fail, 1 skip with the fixes restored. One difference remains between the two shell paths and is recorded
+rather than closed: a shell command naming a prose path is not put through the provenance question the way a
+directory read is, because the directory read is refused for a different reason.
+
+
