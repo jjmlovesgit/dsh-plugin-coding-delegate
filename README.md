@@ -176,6 +176,47 @@ tampering, a post-cutoff spec regression, an orphan lineage, a valid note re-att
 commit, and an artifact present on disk but absent from the anchored commit's tree. Each probe asserts the
 specific refusal message *and* that the audit exited non-zero, so a probe cannot pass on a crash.
 
+## Verification and Integrity Gate
+
+One command runs every check that stands between a change and a record of it:
+
+```bash
+npm run gate
+```
+
+It runs four steps in order, and a failure in any one of them stops the rest:
+
+1. **File hygiene** — `scripts/check-file-hygiene.cjs`. Refuses source under `tools/` and `plugin/src/`
+   that is missing a trailing newline, is stored with CRLF, or carries a UTF-8 BOM. CRLF is not cosmetic
+   here: the signer hashes the bytes on disk while the auditor reads the blob from the commit, so a CRLF
+   checkout produces a note the audit then rejects.
+2. **Negative discrimination** — `scripts/check-contract-fixtures.cjs`. Refuses a contract that passes its
+   real module but *also* passes `tests/contracts/fixtures/<name>.negative.ts`, a contract with no fixture
+   at all, or a fixture that fails every case — which is a malfunction rather than discrimination.
+3. **Module ↔ contract parity** — `scripts/check-contracts.cjs`. Refuses a contract with no
+   `tools/<name>.ts`, a `tools/*.ts` with no contract, or a contract that is not well-formed against its
+   module.
+4. **Ledger attestation audit** — `scripts/verify-delegation-ledger.cjs`. Refuses a note whose Ed25519
+   signature does not verify under the pinned operator key, that is attached to a different commit than the
+   one its payload names, whose `baseCommit` is not an ancestor of `main`, whose artifact or contract
+   digests do not match the anchored commit's tree, or whose contract is not covered by step 2.
+
+Steps 1 and 3 are also available on their own as `npm run check:hygiene` and `npm run gate:wellformed`,
+with `npm run audit` for the ledger audit alone.
+
+### Synchronising the ledger
+
+Git does not push `refs/notes/*` by default, and a repository that gates on verdicts without publishing
+them keeps its audit trail to itself:
+
+```bash
+git push origin refs/notes/delegations
+```
+
+A clone does not receive the notes either — `git fetch origin refs/notes/delegations:refs/notes/delegations`
+is what makes the audit runnable on a fresh checkout. Without it the audit fails closed rather than
+reporting success over an empty ledger, because an empty ledger and a deleted one are indistinguishable.
+
 ## What it does
 
 Five things, in the order they act:
