@@ -103,6 +103,45 @@ it reads as enforced. The auditor must land before, or with, the signer.
    explicit operator approval** — the note is a published record and the ref is pushed deliberately.
 7. Gate, oracles, probes, `dist` parity. Release as `v0.5.3` only if wanted; `v0.5.2` is immutable.
 
+## Tranche 3: the three-signature ordering (pinned before implementation)
+
+A 1.2 note carries **three** signatures, not two, and the order is forced rather than stylistic.
+
+| signature | produced by | signed over |
+|---|---|---|
+| `worker.signature` | `--prepare` | `canonicalizeJson(payload \ {reviewer, worker.signature})` |
+| `reviewer.signature` | `--approve` | `canonicalizeJson(payload \ {reviewer.signature})` — includes the frozen worker block |
+| envelope `signature` (check 1) | **`--approve`, last** | the completed payload string |
+
+**THE ENVELOPE MUST BE SEALED LAST.** Check 1 (`verifyEnvelope`) runs on every note, 1.2 included, so the
+envelope signature has to exist — but it can only be computed once the payload is final, and appending the
+reviewer block changes the canonical payload. A `--prepare` that seals the envelope would therefore
+invalidate itself the moment `--approve` adds the reviewer, and every 1.2 note would fail check 1. So
+`--prepare` writes a payload that is deliberately **unsigned at the envelope level**: worker block signed,
+envelope open. `--approve` adds the reviewer block, signs it, and only then seals the envelope with the
+operator key.
+
+Each signature is excluded from its own signing payload. That is what stops the second signature
+invalidating the first: the worker signs a record without the reviewer block, so its signature survives
+the review, while the reviewer signs a record *including* the worker's signature, so it binds to the
+worker's receipt rather than to some later form of it.
+
+**`--approve` REQUIRES an explicit `--reviewer-identity`.** Deriving the identity from the environment is
+how a session UUID gets recorded as a human reviewer — the failure `attestation-identity.oracle.mjs` exists
+to catch — so an absent or empty flag is a refusal, not a default.
+
+### Clone lifecycle test protocol
+
+Two constraints, both learned the hard way in this repository:
+
+1. **Copy the uncommitted scripts into the clone.** `git clone` yields committed code, so a lifecycle test
+   that runs in a fresh clone exercises `HEAD`, not the signer under test. Three measurements in this
+   session were broken by exactly this; the clone must receive `scripts/attest-unit.cjs`,
+   `scripts/verify-delegation-ledger.cjs` and `scripts/redteam-probe.cjs` before anything runs.
+2. **Fetch the ledger explicitly.** `git clone` does not carry `refs/notes/*`, and the audit now fails
+   closed on an empty ledger, so `git fetch origin refs/notes/delegations:refs/notes/delegations` seeds
+   the 7 existing notes and lets the empty-ledger rule pass legitimately rather than be worked around.
+
 ## Traps this repository has already paid for, worth not repeating
 
 - **A test that passes vacuously.** Assert the extraction is non-empty *before* inspecting it, or an
