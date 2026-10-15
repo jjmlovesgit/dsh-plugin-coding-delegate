@@ -112,6 +112,8 @@ const {
 
 const REPO_ROOT = path.resolve(__dirname, '..')
 const NOTES_REF = 'refs/notes/delegations'
+const REPO_REVIEWER_KEY_PATH = path.join(REPO_ROOT, 'keys', 'delegation-reviewer.pub')
+const AUDIT_NOTICE = '[AUDIT_NOTICE: in-repo reviewer key used; out-of-band pin recommended for CI]'
 const KEYS_DIR = path.join(os.homedir(), '.dsh', 'keys')
 const PRIVATE_KEY_PATH = path.join(KEYS_DIR, 'delegation_ed25519.pem')
 const PUBLIC_KEY_PATH = path.join(KEYS_DIR, 'delegation_ed25519.pub')
@@ -330,6 +332,104 @@ if (coveredContracts.size === 0) {
       'nothing. Either the gate would fail closed on its own, or its discovery has been broken.'
   )
   process.exit(1)
+}
+
+/**
+ * Resolve the reviewer trust root for a 1.2 note, with the out-of-band pin authoritative.
+ *
+ * PRECEDENCE IS THE POINT. A key pinned only by a file in the repository being verified is exposed to
+ * whoever can commit to that repository: they can substitute the key and the records that satisfy it in
+ * one diff. The whole value of a second signature is that a committer cannot produce it, so the trust
+ * root comes from outside the tree whenever one is offered:
+ *
+ *   DSH_REVIEWER_PUBKEY       a PEM, or a path to one -- the key itself, supplied out of band
+ *   DSH_REVIEWER_FINGERPRINT  the fingerprint to require; the key may still come from the repository,
+ *                             because the DECISION to trust it did not
+ *
+ * With neither set, keys/delegation-reviewer.pub is accepted for local bootstrapping and the run says so
+ * in its own output. With neither and no repository key this returns an error and the note fails closed:
+ * a 1.2 claim that cannot be checked must not be accepted on the weaker 1.1 rules instead.
+ */
+function resolveReviewerKey() {
+  const envPubkey = String(process.env.DSH_REVIEWER_PUBKEY || '').trim()
+  const envFingerprint = String(process.env.DSH_REVIEWER_FINGERPRINT || '').trim()
+
+  let pem = null
+  let source = null
+  if (envPubkey) {
+    if (envPubkey.includes('-----BEGIN')) {
+      pem = envPubkey
+      source = 'DSH_REVIEWER_PUBKEY (inline PEM)'
+    } else {
+      try {
+        pem = fs.readFileSync(envPubkey, 'utf8')
+        source = 'DSH_REVIEWER_PUBKEY (' + envPubkey + ')'
+      } catch {
+        return { error: 'DSH_REVIEWER_PUBKEY names a file that could not be read: ' + envPubkey }
+      }
+    }
+  } else if (fs.existsSync(REPO_REVIEWER_KEY_PATH)) {
+    pem = fs.readFileSync(REPO_REVIEWER_KEY_PATH, 'utf8')
+    source = 'keys/delegation-reviewer.pub (in-repo fallback)'
+  }
+
+  if (!pem) {
+    return {
+      error:
+        'no reviewer trust root: set DSH_REVIEWER_PUBKEY or DSH_REVIEWER_FINGERPRINT, or provide ' +
+        'keys/delegation-reviewer.pub for local use. A 1.2 note cannot be verified without one, and it ' +
+        'is not accepted on the 1.1 rules instead.',
+    }
+  }
+
+  const fingerprint = keyFingerprint(pem)
+  if (envFingerprint && fingerprint !== envFingerprint) {
+    return {
+      error:
+        'the resolved reviewer key does not match DSH_REVIEWER_FINGERPRINT: resolved=' + fingerprint +
+        ' required=' + envFingerprint + '. The key in use is not the one pinned out of band.',
+    }
+  }
+  if (!envPubkey && !envFingerprint) console.warn('  ' + AUDIT_NOTICE)
+  return { pem, fingerprint, source, outOfBand: Boolean(envPubkey || envFingerprint) }
+}
+
+/**
+ * Verify one Ed25519 signature over the canonical bytes of its signing payload.
+ *
+ * THE CANONICAL BYTES ARE SIGNED DIRECTLY, not a digest of them, which is a deliberate departure from the
+ * plan's `SHA-256(canonicalizeJson(...))` formulation. Ed25519 hashes the message internally (RFC 8032),
+ * so an extra SHA-256 buys nothing, and the existing envelope scheme (`signManifest` / `verifyEnvelope`)
+ * signs the payload string rather than a digest of it. One signing convention, so the signer written next
+ * and this auditor cannot disagree about what was signed -- which would be a silent, total failure of
+ * every 1.2 check.
+ */
+function verifyCanonicalSignature(signingPayload, signatureBase64, publicKeyPem) {
+  let canonical
+  try {
+    canonical = canonicalizeJson(signingPayload)
+  } catch (err) {
+    return {
+      ok: false,
+      reason: 'signing payload is not canonicalisable: ' + (err && err.message ? err.message : err),
+    }
+  }
+  let signature
+  try {
+    signature = Buffer.from(String(signatureBase64 || ''), 'base64')
+  } catch {
+    return { ok: false, reason: 'signature is not valid base64' }
+  }
+  if (signature.length === 0) return { ok: false, reason: 'signature is empty' }
+  try {
+    const valid = crypto.verify(null, Buffer.from(canonical, 'utf8'), publicKeyPem, signature)
+    return valid ? { ok: true } : { ok: false, reason: 'signature does not verify' }
+  } catch (err) {
+    return {
+      ok: false,
+      reason: 'the key could not be used to verify: ' + (err && err.message ? err.message : err),
+    }
+  }
 }
 
 let listing = ''
@@ -634,6 +734,112 @@ for (const { noteBlob, commitSha } of entries) {
       console.log(
         '  ok    ' + payload.contracts.length + ' recorded contract(s) covered by the discrimination gate'
       )
+    }
+  }
+
+  // ---- 8. spec 1.2: dual attestation, against a trust root that need not be in this tree -----
+  //
+  // TRIGGERED BY THE DECLARED VERSION, not by an ancestry cutoff. A cutoff exists for 1.0 because 1.0
+  // notes were legitimate before 1.1 and must stay grandfathered by ancestry; there is no legacy 1.2. A
+  // payload that claims 1.2 and cannot show an independent reviewer signature is a lie about its own
+  // format, so it is refused on sight rather than checked on the weaker rules. The 1.0 and 1.1 branches
+  // above are untouched, and the seven notes recorded before 1.2 existed verify exactly as they did.
+  if (payload.specVersion === '1.2') {
+    const workerBlock = payload.worker
+    const reviewerBlock = payload.reviewer
+    if (!workerBlock || typeof workerBlock !== 'object' || !reviewerBlock || typeof reviewerBlock !== 'object') {
+      fail(
+        'a 1.2 payload must carry both a worker and a reviewer block, and this one is missing at least ' +
+          'one of them, so it claims a dual attestation it cannot show'
+      )
+    } else {
+      const workerFingerprint = String(workerBlock.keyFingerprint || '')
+      const reviewerFingerprint = String(reviewerBlock.keyFingerprint || '')
+      const pinnedFingerprint = TRUSTED_OPERATOR_PUBKEY_SHA256.slice(0, 8)
+
+      // The independence check is what makes a second signature mean anything: a reviewer holding the
+      // worker's key is not a second principal, it is the same one signing twice.
+      if (workerFingerprint && reviewerFingerprint && workerFingerprint === reviewerFingerprint) {
+        fail(
+          'self-approval refused: the worker and reviewer key fingerprints are identical (' +
+            workerFingerprint + '), so this review is the worker approving its own output'
+        )
+      } else if (workerFingerprint !== pinnedFingerprint) {
+        fail(
+          'the worker block names key fingerprint ' + (workerFingerprint || '(none)') +
+            ', but the pinned operator key is ' + pinnedFingerprint
+        )
+      }
+
+      const reviewer = resolveReviewerKey()
+      if (reviewer.error) {
+        fail('reviewer trust root unresolved: ' + reviewer.error)
+      } else {
+        // THE RECORD MUST NAME THE KEY THAT VERIFIES IT. Without this check a payload could name any
+        // fingerprint it liked -- a third key's, or none at all -- and still be verified under the
+        // resolved trust root, so the identity a reader sees and the key that actually verified would be
+        // free to differ. That is the gap a freshly generated third key would otherwise slip through,
+        // and it was found by writing probe 3 rather than by reading this code.
+        const resolvedPrefix = reviewer.fingerprint.slice(0, 8)
+        if (!reviewerFingerprint) {
+          fail(
+            'the reviewer block names no key fingerprint, so its signature cannot be attributed to a key ' +
+              'and the record cannot be checked against an authorized reviewer'
+          )
+        } else if (reviewerFingerprint !== resolvedPrefix) {
+          fail(
+            'the reviewer block names key fingerprint ' + reviewerFingerprint + ' but the resolved trust ' +
+              'root is ' + resolvedPrefix + ', so the record does not name the key that would verify it'
+          )
+        }
+
+        console.log('  ok    reviewer key resolved from ' + reviewer.source)
+        if (!reviewer.outOfBand) {
+          console.log('  --    the reviewer trust decision came from this repository, so it is reviewable rather than independent')
+        } else {
+          console.log('  ok    reviewer trust root supplied out of band (' + reviewer.fingerprint.slice(0, 8) + ')')
+        }
+
+        // THE TWO ENVELOPES ARE INDEPENDENT, NOT CIRCULAR. The worker signs the record WITHOUT the
+        // reviewer block, so its signature survives the reviewer signing afterwards; the reviewer signs
+        // everything except its own signature, which binds it to the worker's receipt rather than to some
+        // later form of it. Each signature is excluded from its own payload -- that is what stops the
+        // second signature invalidating the first.
+        const workerPayload = Object.assign({}, payload)
+        delete workerPayload.reviewer
+        const workerInner = Object.assign({}, payload.worker)
+        delete workerInner.signature
+        workerPayload.worker = workerInner
+        const workerCheck = verifyCanonicalSignature(workerPayload, payload.worker.signature, pinnedPublicKeyPem)
+        if (workerCheck.ok) {
+          console.log('  ok    worker signature valid over the canonical record, reviewer block excluded')
+        } else {
+          fail('worker signature invalid: ' + workerCheck.reason)
+        }
+
+        const reviewerPayload = Object.assign({}, payload)
+        const reviewerInner = Object.assign({}, payload.reviewer)
+        delete reviewerInner.signature
+        reviewerPayload.reviewer = reviewerInner
+        const reviewerCheck = verifyCanonicalSignature(reviewerPayload, payload.reviewer.signature, reviewer.pem)
+        if (reviewerCheck.ok) {
+          console.log('  ok    reviewer signature valid over the canonical record under the resolved key')
+        } else {
+          fail('reviewer signature invalid: ' + reviewerCheck.reason)
+        }
+
+        // ORDERING IS REPORTED, NOT TRUSTED. Both timestamps are asserted by the side that signed them,
+        // so this catches a record that is internally inconsistent, not a dishonest clock. Stated here
+        // because a reader could otherwise take the comparison for a security property.
+        const workerAt = Number(workerBlock.timestamp)
+        const reviewerAt = Number(reviewerBlock.timestamp)
+        if (Number.isFinite(workerAt) && Number.isFinite(reviewerAt) && reviewerAt < workerAt) {
+          fail(
+            'the reviewer timestamp ' + reviewerAt + ' precedes the worker timestamp ' + workerAt +
+              ', so the record claims review before the run it reviews'
+          )
+        }
+      }
     }
   }
 

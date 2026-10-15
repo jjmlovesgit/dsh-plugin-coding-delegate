@@ -253,6 +253,136 @@ try {
     'FAIL  artifact is not in the anchored tree',
     { onlyOneFailure: true }
   );
+  // ---- Schema 1.2 probes: the failure modes the dual-attestation branch exists to refuse ----------
+  //
+  // Each builds a REAL 1.2 record from the ca05be7 payload, so baseCommit, the artifact digests and the
+  // contract set all still match their anchored tree and the only thing that can reject them is the 1.2
+  // branch. Canonical JSON sorts keys, so the order these blocks are assembled in cannot make a signature
+  // disagree with the auditor's reconstruction -- which is why the plan chose it over a concatenated
+  // tuple, and this file is where that choice is exercised rather than assumed.
+  const { keyFingerprint } = require('./operator-key.cjs');
+  const REVIEWER_PRIVATE_KEY = path.join(os.homedir(), '.dsh', 'keys', 'delegation-reviewer.pem');
+  const operatorFingerprint = keyFingerprint(operatorPub).slice(0, 8);
+  const reviewerPem = fs.readFileSync(REVIEWER_PRIVATE_KEY, 'utf8');
+  const reviewerFingerprint = keyFingerprint(String(publicKeyFromPrivate(reviewerPem))).slice(0, 8);
+
+  function note12(options) {
+    const opts = options || {};
+    const envelope = JSON.parse(git(['notes', '--ref=' + NOTES_REF, 'show', 'ca05be7']).trim());
+    const payload = JSON.parse(envelope.payload);
+    payload.specVersion = '1.2';
+
+    const worker = Object.assign(
+      {
+        model: 'qwen/qwen3.8-27b',
+        stdoutHash: payload.verification.stdoutHash,
+        durationMs: 1420,
+        timestamp: 1792015000000,
+        keyFingerprint: operatorFingerprint,
+      },
+      opts.worker || {}
+    );
+    payload.worker = worker;
+    // The worker signs the record WITHOUT the reviewer block, so its signature survives the review.
+    worker.signature = crypto
+      .sign(null, Buffer.from(canonicalizeJson(payload), 'utf8'), operatorPem)
+      .toString('base64');
+
+    if (!opts.omitReviewer) {
+      const reviewer = Object.assign(
+        {
+          identity: 'Jim <local>',
+          keyType: 'ed25519',
+          keyFingerprint: opts.reviewerFingerprint || reviewerFingerprint,
+          timestamp: 1792015050000,
+        },
+        opts.reviewer || {}
+      );
+      payload.reviewer = reviewer;
+      // The reviewer signs everything except its own signature, which binds it to the worker's receipt.
+      reviewer.signature = opts.reviewerSignature
+        ? opts.reviewerSignature
+        : crypto
+            .sign(
+              null,
+              Buffer.from(opts.reviewerSignOver || canonicalizeJson(payload), 'utf8'),
+              opts.reviewerSigningPem || reviewerPem
+            )
+            .toString('base64');
+    }
+
+    const body = JSON.stringify(payload);
+    return {
+      envelope: {
+        payload: body,
+        payloadType: 'application/vnd.dsh-delegation-attestation+json',
+        // Re-signed with the real key so check 1 passes and only the 1.2 rules can refuse it.
+        signature: crypto.sign(null, Buffer.from(body, 'utf8'), operatorPem).toString('base64'),
+        publicKeyPem: operatorPub,
+      },
+    };
+  }
+
+  // Probe 7: a 1.2 claim with no reviewer block at all.
+  attach('ca05be7', JSON.stringify(note12({ omitReviewer: true }).envelope));
+  probe(
+    7,
+    'schema 1.2 payload claiming dual attestation with no reviewer block',
+    'must carry both a worker and a reviewer block',
+    { onlyOneFailure: false }
+  );
+  restoreLedger();
+
+  // Probe 8: a genuine signature by the genuine reviewer key, over DIFFERENT bytes. This is the shape
+  // that defeats a check comparing signatures instead of verifying them.
+  attach(
+    'ca05be7',
+    JSON.stringify(note12({ reviewerSignOver: 'a different canonical record entirely' }).envelope)
+  );
+  probe(
+    8,
+    'reviewer signature well-formed but signed over different bytes',
+    'reviewer signature invalid',
+    { onlyOneFailure: false }
+  );
+  restoreLedger();
+
+  // Probe 9: a legitimate third key. Its signature is real; it is simply not the pinned reviewer.
+  const third = crypto.generateKeyPairSync('ed25519');
+  const thirdFingerprint = keyFingerprint(String(third.publicKey.export({ type: 'spki', format: 'pem' }))).slice(0, 8);
+  attach(
+    'ca05be7',
+    JSON.stringify(
+      note12({
+        reviewerSigningPem: String(third.privateKey.export({ type: 'pkcs8', format: 'pem' })),
+        reviewerFingerprint: thirdFingerprint,
+      }).envelope
+    )
+  );
+  probe(
+    9,
+    'genuine signature from a third key the record names but the trust root does not',
+    'does not name the key that would verify it',
+    { onlyOneFailure: false }
+  );
+  restoreLedger();
+
+  // Probe 10: the worker approving its own output. The reviewer block is signed with the OPERATOR key and
+  // names the operator fingerprint, so the signature really is valid under a key the audit trusts --
+  // without the independence check this record would verify perfectly.
+  attach(
+    'ca05be7',
+    JSON.stringify(
+      note12({ reviewerSigningPem: operatorPem, reviewerFingerprint: operatorFingerprint }).envelope
+    )
+  );
+  probe(
+    10,
+    'self-approval: reviewer block signed with the worker (operator) key',
+    'self-approval refused',
+    { onlyOneFailure: false }
+  );
+  restoreLedger();
 } finally {
   fs.rmSync(NOTE_TMP, { force: true });
   restoreLedger();
@@ -265,5 +395,5 @@ try {
 }
 
 console.log('');
-console.log(breached === 0 ? 'ALL 6 ATTACK VECTORS BLOCKED, LEDGER RESTORED' : breached + ' PROBE PROBLEM(S)');
+console.log(breached === 0 ? 'ALL 10 ATTACK VECTORS BLOCKED, LEDGER RESTORED' : breached + ' PROBE PROBLEM(S)');
 process.exit(breached === 0 ? 0 : 1);
