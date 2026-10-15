@@ -1424,8 +1424,39 @@ Fixed at `efe0138`.
 **The four sections above were verified RED before GREEN.** With `plugin/src` stashed and the build
 regenerated, 8 of the new cases failed — the architect repin, the quoted directory, the unparseable quoting,
 the unverified empty directory, and four structural pins — and the suite returned to 512 tests, 511 pass, 0
-fail, 1 skip with the fixes restored. One difference remains between the two shell paths and is recorded
-rather than closed: a shell command naming a prose path is not put through the provenance question the way a
-directory read is, because the directory read is refused for a different reason.
+fail, 1 skip with the fixes restored.
+
+## A shell search never asked whether the workspace was established — open
+
+The provenance refusal added for the review-4 finding is asked on the read route and not on the shell route.
+Measured against the shipped hook with `workspaceVerified: false` and a base nowhere near the workspace, the
+same relative scope reached two ways:
+
+| command | base unverified | base verified |
+| --- | --- | --- |
+| a read of `docs/findings.md` | refused — *"the session workspace could not be established…"* | served (prose, not source) |
+| `grep TODO docs/findings.md` | allowed | allowed |
+| `rg TODO docs` | allowed | refused — *"this command searches a directory"* |
+
+The first two rows are the finding. The read route refuses that scope because the base is a guess; the shell
+route serves the same scope because it never asks. It is the same shape as the directory-scope and
+quoted-path gaps before it: two routes to the same files, one asking a question the other does not.
+
+The third row is sharper, and it is the same defect from the other side rather than a second one. The
+directory predicate decides by resolving the token against the base, so a guess that does not contain the
+directory answers "not a directory" and turns a refusal into an allow — fail-open in the direction that
+matters, which is the class this file keeps returning to.
+
+The prose file is the mild case: `docs/findings.md` breaks no rule when it is served, so what the unverified
+shell route costs there is a refusal turned into a serve, not source escaping. The directory case has no such
+comfort. The guessed base is `process.cwd()`, which is whatever directory the server was started in, and a
+search of that tree is refused only when the guess happens to find the directory it names.
+
+Left open on purpose. It is a change to the shell branch's semantics, not a moved check: that branch already
+carries three refusals — a named source file, a directory scope, and quoting that cannot be parsed — and
+provenance belongs ahead of all three only if a shell command naming nothing but prose is willing to be
+refused whenever the base is unverified. That is the right fail-closed answer and it is a behaviour change a
+user will notice, so it wants its own RED-before-GREEN pair with a control for the proven base. No test pins
+either column of the table above, which is how it survived two reviews.
 
 
