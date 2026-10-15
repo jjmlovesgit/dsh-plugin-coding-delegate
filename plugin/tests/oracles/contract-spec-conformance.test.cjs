@@ -102,10 +102,26 @@ function workspace(name, { module, contract, spec }) {
 function guard(args) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dsh-contract-spec-out-"));
   const outFile = path.join(dir, "out.txt");
-  const fd = fs.openSync(outFile, "w");
-  const run = spawnSync(process.execPath, [SCRIPT, ...args], { stdio: ["ignore", fd, fd] });
-  fs.closeSync(fd);
-  return { status: run.status, output: fs.readFileSync(outFile, "utf8") };
+  let fd = null;
+  try {
+    fd = fs.openSync(outFile, "w");
+    const run = spawnSync(process.execPath, [SCRIPT, ...args], { stdio: ["ignore", fd, fd] });
+    fs.closeSync(fd);
+    fd = null;
+    return { status: run.status, output: fs.readFileSync(outFile, "utf8") };
+  } finally {
+    // The capture directory is scratch, and it used to outlive the run: five of them were measured in the
+    // shared temp directory after a single gate, one per call to this helper. `TMP` below was cleaned and
+    // these were not, which is how a directory named "spec-out" stayed in `%TEMP%` for ever.
+    if (fd !== null) {
+      try {
+        fs.closeSync(fd);
+      } catch (err) {
+        /* the descriptor is closed below by the removal regardless */
+      }
+    }
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 test("a contract that disagrees with the specification is refused", () => {

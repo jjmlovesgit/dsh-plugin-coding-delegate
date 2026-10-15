@@ -16,12 +16,13 @@
 // A later process could have created that path first, and the null run would have judged ITS stub while
 // reporting that the contract under test was discriminating.
 //
-// The fix mirrors the contract's path relative to the repository root, so the mirrored depth equals the real
-// depth and the ascents stay inside, and then asserts containment before every write. The cases below pin
-// the property in both directions: the stub must land inside the mirror, and a path that would leave it must
-// be refused rather than attempted. Case 1 is written so that it FAILS against the one-level mirror -- the
-// leaked `tools` directory is exactly what it looks for -- because a guard against a fixed bug that cannot
-// see the bug is not a guard.
+// The fix allocates the mirror's DEPTH from the number of ascents in the contract's own module path, so the
+// ascents always arrive back inside the mirror root -- for a contract in the repository and for one in a temp
+// workspace alike, which `contract-spec-conformance.test.cjs` depends on (the first version of this fix
+// mirrored at the repository-relative depth and refused those contracts; five of its cases failed to say so).
+// A pair spanning two drives has no relative path at all, and is refused by name. Case 1 is written so that
+// it FAILS against the one-level mirror -- the leaked `tools` directory is exactly what it looks for --
+// because a guard against a fixed bug that cannot see the bug is not a guard.
 //
 // (`spawnSync` with piped stdio is the only way to observe this: the writing happens in a child process.)
 
@@ -223,4 +224,65 @@ test('a contract outside the repository is mirrored and judged, and the module i
       'the guard modified the module under test'
     )
   })
+})
+
+test('a contract and a module on different drives are refused by name, and the refusal cleans up', (t) => {
+  // The last containment hole, and the one no `..` arithmetic can close: `path.relative` between two drives
+  // returns an absolute path, so there is no depth that would bring the stub back inside the mirror. The
+  // guard has to refuse instead, and it has to say which pair it refused.
+  //
+  // Windows-only, because drive letters are the only way to produce the case -- and `subst` produces one
+  // without a second physical disk. On any other platform the case is skipped by name rather than quietly
+  // passing, so a Linux CI run does not report coverage it never had.
+  if (process.platform !== 'win32') {
+    t.skip('drive letters only exist on Windows, so the cross-drive refusal cannot be constructed here')
+    return
+  }
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-mirror-drive-'))
+  let guest = null
+  for (const candidate of ['Z:', 'Y:', 'X:', 'W:', 'V:']) {
+    const mapped = spawnSync('subst', [candidate, dir], { encoding: 'utf8' })
+    if (mapped.status === 0) {
+      guest = candidate
+      break
+    }
+  }
+  if (guest === null) {
+    fs.rmSync(dir, { recursive: true, force: true })
+    t.skip('no free drive letter for subst, so the cross-drive pair cannot be constructed on this host')
+    return
+  }
+
+  try {
+    const target = guest + '\\dsh-cross-drive-target.ts'
+    const sentinel = '// sentinel: a file on another drive the guard must never write over\n'
+    fs.writeFileSync(target, sentinel, 'utf8')
+
+    const run = runChecker(['--contract', CONTRACT, '--module', target], dir)
+    assert.strictEqual(
+      run.status,
+      1,
+      'a cross-drive pair must be refused rather than mirrored; stdout:\n' + run.stdout + '\nstderr:\n' + run.stderr
+    )
+    assert.match(run.stderr, /are on different drives, so no relative mirror can contain the null stub/)
+    assert.strictEqual(
+      fs.readFileSync(target, 'utf8'),
+      sentinel,
+      'the guard wrote its null stub across drives, onto the file the caller named'
+    )
+
+    // The refusal happens after the temporary root exists, and `process.exit` runs no `finally`, so a refusal
+    // that just exits leaves a mirror root behind on every refused run. Measured on this host before the
+    // `refuse` helper: hundreds of abandoned `dsh-contract-*` directories in the shared temp directory.
+    const abandoned = fs.readdirSync(dir).filter((entry) => entry.startsWith('dsh-contract-'))
+    assert.deepStrictEqual(
+      abandoned,
+      [],
+      'the refusal left temporary directories behind: ' + abandoned.join(', ')
+    )
+  } finally {
+    spawnSync('subst', [guest, '/D'], { encoding: 'utf8' })
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
 })

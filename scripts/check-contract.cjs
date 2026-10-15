@@ -155,6 +155,19 @@ const isStrictlyInside = (base, candidate) => {
   const rel = path.relative(path.resolve(base), path.resolve(candidate))
   return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel)
 }
+/**
+ * Refuse from a position where the temporary mirror root already exists.
+ *
+ * The cleanup at the end of this file is a plain statement, not a `finally`, and `process.exit` runs no
+ * `finally` regardless -- so every refusal below has to remove the root itself. Measured before this helper:
+ * one abandoned `dsh-contract-null-*` directory per refused run, in the same shared temp directory the
+ * containment fix was about.
+ */
+const refuse = (message) => {
+  console.error('  FAIL  ' + message)
+  fs.rmSync(mirrorRoot, { recursive: true, force: true })
+  process.exit(1)
+}
 // A test reaches its module by a path RELATIVE to its own directory, so the null stub has to be placed at
 // that same relative position -- and the mirror has to be deep enough to absorb the `..` ascents in it.
 //
@@ -193,11 +206,10 @@ const mirrorDepthOf = (fromDir, toFile) => {
 const mirrorTestFile = (testFile) => {
   const plan = mirrorDepthOf(path.dirname(testFile), modulePath)
   if (plan === null) {
-    console.error(
-      '  FAIL  ' + modulePath + ' and ' + testFile + ' are on different drives, so no relative mirror can ' +
+    refuse(
+      modulePath + ' and ' + testFile + ' are on different drives, so no relative mirror can ' +
         'contain the null stub. Refusing rather than writing outside the mirror.'
     )
-    process.exit(1)
   }
   // One `mirror` directory per ascent: whatever the test's real location, resolving its module path from
   // the bottom of this nest lands inside `mirrorRoot`.
@@ -210,22 +222,20 @@ const mirrorTestFile = (testFile) => {
     mirrorPath = path.join(mirrorDir, 'mirror-' + n + '-' + path.basename(testFile))
   }
   if (!isStrictlyInside(mirrorRoot, mirrorPath)) {
-    console.error(
-      '  FAIL  cannot place ' + testFile + ' inside ' + mirrorRoot + '. Without a controlled mirror the ' +
+    refuse(
+      'cannot place ' + testFile + ' inside ' + mirrorRoot + '. Without a controlled mirror the ' +
         'null run would judge a module this guard does not own, so it is refused rather than attempted.'
     )
-    process.exit(1)
   }
   fs.mkdirSync(mirrorDir, { recursive: true })
   fs.copyFileSync(testFile, mirrorPath)
 
   const mirrorModule = path.resolve(mirrorDir, plan.rel)
   if (!isStrictlyInside(mirrorRoot, mirrorModule)) {
-    console.error(
-      '  FAIL  the null stub for ' + modulePath + ' resolves to ' + mirrorModule + ', which is outside ' +
+    refuse(
+      'the null stub for ' + modulePath + ' resolves to ' + mirrorModule + ', which is outside ' +
         mirrorRoot + '. Refusing to write a stub outside the mirror.'
     )
-    process.exit(1)
   }
   fs.mkdirSync(path.dirname(mirrorModule), { recursive: true })
   fs.writeFileSync(mirrorModule, NULL_IMPLEMENTATION, 'utf8')

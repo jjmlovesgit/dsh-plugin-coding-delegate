@@ -4,7 +4,7 @@
 // the one the whole loop rests on: a passing verdict has to mean *the architect's tests, unmodified,
 // passed*. A worker that can rewrite the test that scores it is marking its own homework, and a
 // contract the executor can edit is not a contract.
-const { test } = require("node:test");
+const { test, after } = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
@@ -13,7 +13,28 @@ const path = require("node:path");
 const PLUGIN = path.resolve(__dirname, "..", "..");
 const DIST = PLUGIN + "/dist/index.js";
 
-const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "dsh-contract-"));
+// Scratch directories for this file, removed when it finishes.
+//
+// They used to be left behind -- one per case, in the shared temp directory, on every run. Eight were
+// measured after a single `npm run gate`. Nothing reads them, so the only effect is that a directory named
+// `dsh-contract-<random>` accumulates for ever, and a crashed run becomes indistinguishable from a clean one
+// to anyone looking at the temp directory. The paths are unique per call, so a reader cannot even tell which
+// run left one.
+const scratchDirs = [];
+const tmp = () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dsh-contract-"));
+  scratchDirs.push(dir);
+  return dir;
+};
+after(() => {
+  for (const dir of scratchDirs) {
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+    } catch (err) {
+      /* a scratch directory that cannot be removed is not a test failure */
+    }
+  }
+});
 
 test("the tool declares contractFiles, so the architect can name the contract's tests", () => {
   const { DELEGATE_WORKER_OPENAI_SCHEMA } = require(DIST);
