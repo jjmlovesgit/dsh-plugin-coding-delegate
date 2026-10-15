@@ -105,6 +105,18 @@ const REQUIREMENTS = {
     "A null patch value deletes the key at any depth.",
     "Exactly one named export, no default exports, no imports, no console output.",
   ],
+  // Authored to the contract that actually judges this unit, and NOT to a richer design. The contract
+  // requires one export, `formatCurrency(cents: number): string`, and asserts nine rendered strings;
+  // anything the contract does not test is a requirement no verdict enforces, which is the failure this
+  // file's header already records for canonicalMerge.
+  "tools/currency.ts": [
+    "Exact signature: export function formatCurrency(cents: number): string. Exactly one named export, no default exports, no imports, no console output.",
+    "The input is an INTEGER number of minor units (cents), and the return value is a string.",
+    "The sign comes FIRST, before the currency symbol: -1050 must render '-$10.50', never '$-10.50'.",
+    "Cents are always two digits and zero-padded: 5 renders '$0.05' and 50 renders '$0.50'.",
+    "Whole dollars take no digit grouping: 999999 renders '$9999.99', not '$9,999.99'.",
+    "Zero renders '$0.00', and a positive value carries no leading '+'.",
+  ],
 };
 
 // Flags are separated from positionals first: `node tools/worker-build.mjs --attest` must not read
