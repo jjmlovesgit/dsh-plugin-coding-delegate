@@ -286,7 +286,9 @@ Five things, in the order they act:
 2. **A DLP gate on every outbound request.** Prompts are scanned for credentials and high-entropy tokens
    before the cloud sees them. A hit is refused or rerouted to the local worker, never transmitted. The
    gate accumulates the user messages it has seen, so a credential from an earlier turn keeps it closed
-   instead of scrolling out of view.
+   instead of scrolling out of view. The scanned window is bounded at 200,000 characters, and that
+   conclusion is not: once a session has carried a credential it stays local for the rest of the session,
+   because the flag recording it is not evicted along with the text.
 3. **A code guard, in both directions.** Cloud-authored writes *and deletions* of source are denied or
    sent for approval — and so is reading back a file the worker wrote, since that pulls delegated code
    into the context delegation exists to keep it out of. Shell forms are covered, including inline program
@@ -356,6 +358,32 @@ Four of those are qualified and the qualifications matter more than the rows:
   and two self-reported strings. Editing the file flips the socket to 1, but nothing verifies that the named
   operator did the reviewing. That is **tamper-evidence, not cryptographic non-repudiation** — there is no
   key, no signature, and no third party.
+
+### Two refusals that used to be fail-open
+
+Both of these are boundaries that reported success while the condition they exist to catch was true, so
+they are recorded as refusals rather than as features.
+
+**A scope resolved against an unestablished workspace is refused.** Under `sourceReadEgress:
+'declarations'`, a relative scope is resolved against the session workspace. When no workspace could be
+established — no `DSH_WORKSPACE_ROOT`, no workspace from the host — the base used to fall back to
+`process.cwd()`, which is a *guess*: it is whatever directory the server happened to start in. A relative
+scope resolved against a guess cannot be shown to avoid source, so it is refused instead, naming the
+condition (*"…this scope was resolved against the process working directory — a guess — and its reach
+cannot be shown to avoid source"*). Absolute paths are unaffected. The distinction is recorded as
+provenance rather than inferred from a path: the resolver now reports whether the base was *verified*
+(`DSH_WORKSPACE_ROOT` or a session workspace the host supplied) or merely *fell back*, and the evaluator
+fails closed on the unverified case. `contextFiles` injection is outside this control; it is governed by
+containment and credential checks instead.
+
+**A context file larger than the byte ceiling is refused before it is read.** `contextFiles` requests
+carry a `maxBytes` budget, and the check that enforces it used to run only when the request asked for a
+*whole file*. A request naming a line range — `startLine`/`endLine` — skipped it, so a 5 MiB file was read
+into memory in full and dropped afterwards when it overran the budget. The read, not the injection, was
+the exposure: the bytes were already resident before anything decided they were too many. The size check
+is now unconditional, so the refusal happens **before** the buffer is allocated. The trade is deliberate
+and worth stating: a file larger than the entire remaining budget is refused even when the request wanted
+one line of it, because the budget bounds a file's total size and there is no smaller read on that path.
 
 ### Declarations mode: what the read control actually does
 
