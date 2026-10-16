@@ -8,7 +8,8 @@ Technical controls for non-repudiation, separation of duties, and model provenan
 
 This document is written for a reviewer who has to decide whether an autonomous coding agent's output can be trusted as a change to a governed system: a compliance officer, an external auditor, or an engineer performing due diligence.
 
-It is **not** a certification claim and **not** a product brochure. Every control below names the file and the function that implements it, the command that exercises it, and the residual boundary that remains. Line references are as of commit `80889cbe` (release `v0.5.4`); the code is the authority, and where this document and the code disagree, the code wins.
+It is **not** a certification claim and **not** a product brochure. Every control below names the file and the function that implements it, the command that exercises it, and the residual boundary that remains. Line references are as of commit `ee5dddc` (release `v0.5.5`), whose `plugin/dist` is byte-identical to
+`v0.5.4`'s and whose only shipped change is metadata, so they hold for both; the code is the authority, and where this document and the code disagree, the code wins.
 
 This document extends `docs/governance.md` ("Governance: the attestation threat model"), which is the mechanism-level description of the key model, the subprocess boundary, fail-closed states, canonicalization and storage. That file already refuses a stronger claim than this one is entitled to make (`docs/governance.md:237`: *"such as Sigstore Rekor. A git ref does not, and this document will not call it one."*). Read them together: this file maps controls to obligations, `docs/governance.md` explains how each control is built.
 
@@ -270,10 +271,10 @@ Expected: `ALL 10 ATTACK VECTORS BLOCKED, LEDGER RESTORED`, `ledger restored to 
 **5. Verify the published release against its tag.**
 
 ```
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-release-tarball.ps1 -Version 0.5.4 -Tag v0.5.4
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-release-tarball.ps1 -Version 0.5.5 -Tag v0.5.5
 ```
 
-Expected: `[VERIFIED] every published file matches v0.5.4 blob-for-blob, and v0.5.4 ships nothing the tarball lacks.` Exit 0; on any mismatch, exit 1 with `HASH_MISMATCH`, `MISSING_FROM_PACKAGE` or `EXTRA_IN_PACKAGE` lines. Combine with `-Offline` to skip the registry cross-check.
+Expected (the tag you pass is echoed back; this example is the `v0.5.5` release): `[VERIFIED] every published file matches v0.5.5 blob-for-blob, and v0.5.5 ships nothing the tarball lacks.` Exit 0; on any mismatch, exit 1 with `HASH_MISMATCH`, `MISSING_FROM_PACKAGE` or `EXTRA_IN_PACKAGE` lines. Combine with `-Offline` to skip the registry cross-check.
 
 **6. Inspect the live registry binding.**
 
@@ -281,7 +282,7 @@ Expected: `[VERIFIED] every published file matches v0.5.4 blob-for-blob, and v0.
 npm view dsh-plugin-coding-delegate version gitHead dist.integrity time.modified
 ```
 
-Expected for `0.5.4`: `version = '0.5.4'`, `gitHead = '80889cbe512f43264428d0db228daaf6d3cae9de'` (the tag's commit), and a `time.modified` consistent with the release. Note that `dist.attestations` is absent — see §8.
+Expected for `0.5.5`: `version = '0.5.5'`, `gitHead = 'ee5dddc11ed09b5d44a52eb4f5e5be7a671cf573'` (the tag's commit), `dist.fileCount = 55`, and a `time.modified` consistent with the release. Note that `dist.attestations` is absent — see §8.
 
 ---
 

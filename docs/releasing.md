@@ -65,8 +65,8 @@ Do not stop at `dist-tags`. Two facts are worth checking, and one of them is not
 `gitHead` in the registry metadata is the commit npm recorded at publish time. It must equal the tag:
 
 ```powershell
-npm view dsh-plugin-coding-delegate@0.5.2 gitHead
-git rev-parse 'v0.5.2^{commit}'
+npm view dsh-plugin-coding-delegate@0.5.5 gitHead
+git rev-parse 'v0.5.5^{commit}'
 ```
 
 Stronger, and the check that actually proves the artifact: compare the published tarball against the
@@ -75,7 +75,7 @@ line-ending and encoding trap that a hash-of-a-string comparison falls into. Tha
 a release no longer depends on someone retyping it correctly:
 
 ```powershell
-./scripts/verify-release-tarball.ps1 -Version 0.5.3 -Tag v0.5.3
+./scripts/verify-release-tarball.ps1 -Version 0.5.5 -Tag v0.5.5
 ```
 
 It downloads and extracts the published tarball and compares in **both** directions: every published file
@@ -86,10 +86,10 @@ simply omitted a file still reports success. It also cross-checks `gitHead` agai
 removes its scratch directory, and exits 1 on any mismatch. It is deliberately not part of `npm run gate`,
 which has to run offline.
 
-For v0.5.3 it printed `published : 55 file(s)`, `expected : 55 file(s) from v0.5.3`, no mismatches.
+For v0.5.5 it printed `published : 55 file(s)`, `expected : 55 file(s) from v0.5.5`, no mismatches.
 Checking `dist.unpackedSize` and `dist.fileCount` against `npm pack --dry-run` in `plugin/` is a faster
-smoke check -- 656011 bytes and 55 files on both sides -- but it cannot tell you the bytes are the same,
-only that the count is.
+smoke check -- the two agree on both the count and the size -- but it cannot tell you the bytes are the
+same, only that the count is.
 
 **The shasum is not reproducible across re-packs.** npm embeds file timestamps, so a tarball built from
 an unchanged tree at a later moment can hash differently. Compare a published shasum against a fresh

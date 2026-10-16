@@ -82,10 +82,10 @@ release you are checking; it compares the tarball and the tag in both directions
 
 The same gate runs on every push in [`.github/workflows/ci.yml`](.github/workflows/ci.yml), with
 `fetch-depth: 0` and an explicit `refs/notes/delegations` fetch, because a depth-1 checkout would audit an
-empty ledger and report success. The most recent run —
-[run 202, on the `v0.5.4` release commit](https://github.com/jjmlovesgit/dsh-plugin-coding-delegate/actions/runs/38808098846)
-— concluded `success`. A CI workflow holds no signing key, so the signer lifecycle step reports a named
-`# SKIP` there rather than passing silently.
+empty ledger and report success. The `v0.5.5` release commit was gated by
+[run 204](https://github.com/jjmlovesgit/dsh-plugin-coding-delegate/actions/runs/38922481103), which concluded
+`success`. A CI workflow holds no signing key, so the signer lifecycle step reports a named `# SKIP` there
+rather than passing silently.
 
 ## How it works: a contract out, a verdict back
 
@@ -110,7 +110,7 @@ needs — nothing else — writes the code, and is discarded. A fresh context pe
 The verification command runs as an ordinary subprocess, with the operator's approval. Its raw output
 stays on the local machine; what travels back is the failure *structure*, with source stripped out.
 
-> **Status: 0.5.4**, published to npm and gated in CI. The mechanisms work and are tested, and their
+> **Status: 0.5.5**, published to npm and gated in CI. The mechanisms work and are tested, and their
 > **limits are documented rather than glossed**, including several that cannot be closed from inside the
 > process — see [What this control does not cover](#what-this-control-does-not-cover) and the consolidated
 > residual table in [docs/enterprise-governance.md](docs/enterprise-governance.md). Read those before
