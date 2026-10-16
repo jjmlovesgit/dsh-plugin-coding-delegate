@@ -77,8 +77,8 @@ node scripts/redteam-probe.cjs               # ten attack classes; restores the 
 A green run prints `AUDIT PASSED`, then the one limit that matters: *"this proves the records present are
 sound. It cannot detect a record that was deleted."* To check a **published** release against its tag — this
 one needs the network — run
-`powershell -File scripts/verify-release-tarball.ps1 -Version 0.5.4 -Tag v0.5.4`, which compares the tarball
-and the tag in both directions by Git blob hash.
+`powershell -File scripts/verify-release-tarball.ps1 -Version <version> -Tag v<version>`, substituting the
+release you are checking; it compares the tarball and the tag in both directions by Git blob hash.
 
 The same gate runs on every push in [`.github/workflows/ci.yml`](.github/workflows/ci.yml), with
 `fetch-depth: 0` and an explicit `refs/notes/delegations` fetch, because a depth-1 checkout would audit an
