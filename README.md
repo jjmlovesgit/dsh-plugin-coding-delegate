@@ -8,6 +8,9 @@ describes: the execution receipt and the human approval are two signatures made 
 the audit that checks both runs offline. Control mapping for SOC 2 CC8.1, ISO/IEC 42001 and the EU AI Act:
 [docs/enterprise-governance.md](docs/enterprise-governance.md).
 
+Who this is for — the roles that are blocked today, and the obligation each one is trying to discharge:
+[Target audience and market positioning](docs/target-audience.md).
+
 A [DeepSeek Harness](https://github.com/deepseek-ai) (DSH) plugin that separates **who specifies** work
 from **who implements** it, and refuses to let the first party write the second party's code. It is a
 technical control, not a policy: enforcement happens in a tool-call hook before a write lands, so it does
