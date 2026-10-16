@@ -1073,3 +1073,31 @@ require more than the specification states. Those seven assertions are in
   rule that lets the architect read finished work — and results cannot be filtered, because
   `tools/pre-execute` returns a decision rather than a result. A search the operator allows delivers its
   matches.
+
+## Self-verifying delegations need a top-level session
+
+**A delegated unit cannot verify itself from inside a subagent, and this is by design — not a bug to work
+around.** DSH pins a child agent's `approvalPolicy` to `'never'`, so the approval seam is absent and the
+verification command is refused deterministically. What you will see is `VERIFICATION_NOT_APPROVED` with
+the reason *"approval was not granted"*, and if your prompt forbids the architect from running the test
+itself, the unit will iterate without ever converging.
+
+Two things make the loop close:
+
+1. **Run the delegation from a top-level session**, not a subagent or a nested scope.
+2. **Allow the program.** A delegated verification command is refused unless its program is allowlisted or
+   approval is granted, and that is operator configuration rather than a tool argument — deliberately, so a
+   model cannot switch it off:
+
+```yaml
+- id: local-router
+  config:
+    verificationAllowlist: ['node']
+```
+
+The allowlist matches the **program, not its arguments**, so allowing `node` also allows
+`node -e "<anything>"`. Prefer it to `verificationApproval: 'allow'`, which is strictly wider.
+
+Without both, the architect falls back to running the judge itself — which, measured on one task, cost
+**179,840 tokens on the verification loop plus 440,500 around it**, against one delegation call when the
+loop stayed in the contract.

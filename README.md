@@ -165,46 +165,13 @@ stays on the local machine; what travels back is the failure *structure*, with s
   See SECURITY-REVIEW-2.md, findings 13 and 15.
 ```
     
-## Understanding the Audit System (The Plain-English View)
+## Understanding the audit system
 
-In conventional software development, we rely on an honor system: if code is checked into a folder and tests pass on a developer's computer, we trust it. In automated pipelines—especially where AI writes or refactors code—that honor system breaks down. AI agents can easily generate vacuous tests that pass even when code is broken, or a pipeline might test good code locally but record something different into history.
-
-This repository eliminates that honor system by acting as a **tamper-evident, automated notary for delegated code**. It enforces three concrete layers of verification:
-
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│                        THREE LAYERS OF PROOF                           │
-├────────────────────────────────────────────────────────────────────────┤
-│ 1. Proof the Tests Aren't Fake     → Negative Fixture Discrimination   │
-│ 2. Tamper-Evident Wax Seal         → Cryptographic Git Ledger (Ed25519)│
-│ 3. Time-Machine Verification       → Pure Git Object Trees (No Disk)   │
-└────────────────────────────────────────────────────────────────────────┘
-```
-
-### 1. Proof the Tests Aren't Fake (Negative Discrimination)
-A test that always passes is worse than no test at all. To guarantee contracts actually enforce correctness, every utility maintains an intentionally broken twin (a "negative fixture"):
-* Before a test contract is accepted, the gate forces it to run against the broken fixture.
-* If the contract doesn't catch the intentional defect and fail, **the contract itself is rejected**.
-* You can only certify working code if your test has proven it detects real failures.
-
-### 2. A Tamper-Evident Wax Seal (Cryptographic Provenance)
-When an authorized operator verifies and accepts a utility, the pipeline stamps a cryptographic certificate directly into the repository's Git history (`refs/notes/delegations`):
-* The record binds the exact SHA-256 fingerprints of the code, its contract, and the generating model.
-* It is digitally signed using an Ed25519 operator key, and the auditor cross-checks that key against a pinned fingerprint (`TRUSTED_OPERATOR_PUBKEY_SHA256`), so any rotation of the trust root is forced into a visible diff rather than happening silently.
-* **Two signatures, two principals (Spec 1.2).** A record can carry an execution receipt signed at the end of the worker run *and* a separate approval signed by a human reviewer. The two signatures are made by different keys, over different byte ranges, at two different times — the worker signs a record with no reviewer in it, the reviewer signs a record that already contains the worker's, and the outer envelope is sealed last.
-* **The reviewer's key is meant to be pinned out-of-band.** Only then is the second signature evidence about a second person rather than a second copy of the same secret. The in-repository key exists for local bootstrapping, and the audit says so out loud when it uses it.
-
-### 3. A Time Machine That Audits History, Not Your Laptop (Tree-Accurate Auditing)
-Standard test runners check whatever loose files currently sit on your local hard drive. That allows "time-travel" bugs and race conditions, where a record claims to verify files that weren't even in that commit.
-* The auditor ignores your working directory for the bytes it checks: no artifact or contract digest is read from disk.
-* Instead, it resolves each one directly from Git's internal object database (`git cat-file`) at the commit the record names.
-* It verifies that the code *as it existed in that exact historical commit* hashes to the digest inside the signature, preventing working-tree substitution attacks or retroactive claims.
-
-### What This Guarantees in Practice
-* **No Un-tested Code**: Every single module must have a corresponding contract, and every contract must have a module — both directions are enforced by `scripts/check-contracts.cjs`.
-* **No Tampered Commits**: Modifying even one byte of a file after it was signed stops matching the digest that the signature covers, and the audit fails.
-* **No Deleted Ledgers**: Deleting or emptying the audit log causes the gate to fail closed immediately.
-* **No False Greens**: The build passes only when proven tests, frozen Git history, and the operator's digital signature strictly align.
+The layer-by-layer explanation of what the gate proves — negative-fixture discrimination, the signed ledger,
+and tree-accurate auditing — is in
+[empirical-findings.md](docs/empirical-findings.md#appendix-the-audit-system-in-plain-english), kept beside
+the measurements that retired three of this project's own claims. The mechanisms are specified below, and
+the control mapping is in [enterprise-governance.md](docs/enterprise-governance.md).
 
 ## Cryptographic Provenance & Dual-Gate Contract Attestation
 
@@ -304,7 +271,9 @@ the specific refusal message *and* a non-zero exit, so a probe cannot pass on a 
 additionally require that the audit reported **exactly one** critical failure, so a probe that trips
 several checks at once cannot be read as evidence about the one under test. The harness restores the ledger
 ref after every probe rather than only at the end, and the restore itself is verified by re-running the
-audit and requiring a clean exit — a probe run that leaves the ledger damaged fails too.
+audit and requiring a clean exit — a probe run that leaves the ledger damaged fails too. Each of the ten
+probes, with the exact refusal string it expects, is tabulated in
+[enterprise-governance.md §7](docs/enterprise-governance.md#7-adversarial-verification).
 
 ## Verification and Integrity Gate
 
@@ -588,7 +557,7 @@ a worker, and the outbound payload the host assembles after these hooks run, sit
 build is **trusted, not verified** — staleness is checked by `mtime`, which a `touch`, a checkout or clock
 skew defeats — the option is **off by default** and needs a plugin restart, and the worker that implements
 is not governed by it at all. **It is a structural control, not a savings claim**: this plugin's cost and
-privacy claims were measured and retired — see [Retired claims](#retired-claims-and-why) — and nothing here
+privacy claims were measured and retired — see [Retired claims](docs/empirical-findings.md#retired-claims-and-why) — and nothing here
 changes those numbers.
 
 ### What an enterprise review will find missing
@@ -623,7 +592,7 @@ the reason to read this file rather than the feature list.
   external sink that the process cannot reach back into, which is outside this plugin.
 - **It does not make coding cheaper, more private, or longer.** This plugin was originally justified by
   those three claims. Each was tested and each failed; the measurements are in
-  [Retired claims](#retired-claims-and-why) rather than deleted, because a control whose author has
+  [Retired claims](docs/empirical-findings.md#retired-claims-and-why) rather than deleted, because a control whose author has
   published its disconfirming evidence is more useful than one with a clean feature list.
 - **The guard is not precise.** A shell command naming a directory that *contains* a delegated file is
   refused even when it only lists names, and a delete verb combined with a source filename anywhere on the
@@ -636,23 +605,6 @@ the reason to read this file rather than the feature list.
   resolve" and is silent about the rest.
 - **Nothing here is tamper-evident.** The registry and ledger are plain local JSON. Anyone with write
   access to the data directory can edit them.
-
-## Retired claims, and why
-
-Every row was measured on this repository's own work. They are kept because a control's credibility comes
-from what it discloses, and because each one is a trap for the next person building something similar.
-
-| claim | what the measurement said |
-| --- | --- |
-| *"Your plan is for thinking, your GPU does the typing"* | True as a mechanism, and close to worthless as a saving. Across 329 delegations the architect was billed **666,756,560** input tokens; the local worker's entire output was **548,106** — **0.08%** of the bill. Delegation cannot meaningfully reduce a total it contributes 0.08% to. |
-| *"Runs on your machine, so it's private"* | **Refuted.** The architect must read the codebase to engineer against it, and everything it reads is re-sent on every later turn — measured at ~8.5 read events per turn. What stays local is the typing, not the knowledge of what is being typed. Measured under the **default** `sourceReadEgress: 'source'`; the opt-in `'declarations'` mode narrows *what those reads carry* for four extensions (item 3 above) — it does not make this claim true, because the reads still happen, the served payload is still re-sent every turn, and every other extension is still served raw. |
-| *"Local routing saves money"* | **Refuted, and never claimed at the bottom of the file.** The delegated output is worth **$0.1047** of cloud-equivalent; the hardware payback is roughly **19,000×** this workload. |
-| *"Capacity, so the plan lasts"* | **Unsupported.** Session length is set by the context window filling, and that is dominated by the architect's reading, which the plugin does not reduce. Measured evidence that it extends sessions: none. |
-| A third tier would read the repository locally and keep the architect out of the code | **Built, measured, retired.** The tier's window did not fit; a per-model reasoning setting could not be overridden; offloading typing recovered far less than the reading it gave back; no lead-authored contract was ever dispatched and verified. The split of `src/index.ts` has since retired the first of those four, so the decision rests on the other three. See [`docs/ROADMAP.md`](docs/ROADMAP.md). |
-
-The general lesson, which outlives this plugin: **you cannot cut a session's metered cost by changing who
-types. You cut it by changing what the planning model has to hold.** Any architecture premised on the
-writing being expensive has the wrong cost model.
 
 ## The evidence trail
 
@@ -796,11 +748,11 @@ dsh plugin --profile <name> add ./plugin
 ### From a pinned tag, for a restricted or air-gapped host
 
 ```bash
-dsh plugin --profile web add github:jjmlovesgit/dsh-plugin-coding-delegate#v0.4.0
+dsh plugin --profile web add github:jjmlovesgit/dsh-plugin-coding-delegate#v0.5.5
 ```
 
-`v0.4.0` is the release that adds signed generation records. Pin an earlier tag only to run the
-control without them — see
+Pin the tag whose controls you have audited rather than tracking `main`. How a release is verified against
+its own tag is recorded in [`docs/releasing.md`](docs/releasing.md); the records themselves are covered in
 [Technical auditability and provenance](plugin/README.md#technical-auditability-and-provenance).
 
 ### Confirm it loaded
@@ -893,31 +845,14 @@ neither is reported as one — a delegated result is a verdict, not a claim.
 
 ## Operator requirement: self-verifying delegations need a top-level session
 
-**A delegated unit cannot verify itself from inside a subagent, and this is by design — not a bug to work
-around.** DSH pins a child agent's `approvalPolicy` to `'never'`, so the approval seam is absent and the
-verification command is refused deterministically. What you will see is
-`VERIFICATION_NOT_APPROVED` with the reason *"approval was not granted"*, and if your prompt forbids the
-architect from running the test itself, the unit will iterate without ever converging.
+A delegated unit cannot verify itself from inside a subagent — DSH pins a child agent's `approvalPolicy` to
+`'never'`, so the approval seam is absent and the verification is refused with `VERIFICATION_NOT_APPROVED`
+(*"approval was not granted"*). Run the delegation from a top-level session, and allowlist the program it
+calls in your profile. Measured cost of getting this wrong: **179,840 tokens on the verification loop plus
+440,500 around it**, against one delegation call when the loop stayed in the contract.
 
-Two things make the loop close:
-
-1. **Run the delegation from a top-level session**, not a subagent or a nested scope.
-2. **Allow the program.** A delegated verification command is refused unless its program is allowlisted or
-   approval is granted, and that is operator configuration rather than a tool argument — deliberately, so a
-   model cannot switch it off:
-
-```yaml
-- id: local-router
-  config:
-    verificationAllowlist: ['node']
-```
-
-The allowlist matches the **program, not its arguments**, so allowing `node` also allows
-`node -e "<anything>"`. Prefer it to `verificationApproval: 'allow'`, which is strictly wider.
-
-Without both, the architect falls back to running the judge itself — which, measured on one task, cost
-**179,840 tokens on the verification loop plus 440,500 around it**, against one delegation call when the
-loop stayed in the contract.
+The full explanation, the profile snippet, and the settings that widen the allowlist:
+[plugin/README.md](plugin/README.md#self-verifying-delegations-need-a-top-level-session).
 
 ## Checking that delegated work is verified
 
@@ -959,12 +894,15 @@ worker** wrote; one written by the architect or by hand has no record and report
 | --- | --- |
 | [`plugin/`](plugin/) | the plugin, its tests and its full documentation |
 | [`experiments/delegation-ab/`](experiments/delegation-ab/) | the A/B protocol that produced the retired claims, including the run that could not be taken and why || [`experiments/contract-first/`](experiments/contract-first/) | an unsatisfiable contract preserved as evidence, and its corrected sibling |
+| [`docs/enterprise-governance.md`](docs/enterprise-governance.md) | the control mapping: SOC 2 CC8.1, ISO/IEC 42001 and EU AI Act obligations against what is actually enforced |
+| [`docs/empirical-findings.md`](docs/empirical-findings.md) | the retired claims and their measurements, plus the audit system explained in plain English |
 | [`docs/findings.md`](docs/findings.md) | defects found, with what each one cost |
 | [`docs/experiment.md`](docs/experiment.md) | measurements, including the ones that undercut the plugin |
 | [`docs/control-effectiveness.md`](docs/control-effectiveness.md) | the five-point design against what is actually enforced, tested, or only documented |
 | [`docs/verification-architecture.md`](docs/verification-architecture.md) | why the loop has to put verification on-box, and the one tier where that reasoning breaks |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | what was built, measured and retired |
 | [`scripts/check-promotion.cjs`](scripts/check-promotion.cjs) | the promotion socket: gate a commit on whether delegated work is verified |
+| [`scripts/verify-release-tarball.ps1`](scripts/verify-release-tarball.ps1) | checks a published tarball against its release tag blob-for-blob, in both directions |
 | [`scripts/measure-reading-cost.cjs`](scripts/measure-reading-cost.cjs) | what the architect actually reads, from the plugin's own audit trace |
 
 ## Development
