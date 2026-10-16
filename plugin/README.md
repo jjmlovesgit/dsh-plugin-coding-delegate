@@ -1,11 +1,22 @@
 # dsh-plugin-coding-delegate
 
-> **Your plan is for thinking. Your GPU does the typing.**
+> **Repo-native cryptographic attestation and anti-self-approval enforcement for AI coding agents.**
+> Your plan is for thinking. Your GPU does the typing.
 
 A DeepSeek Harness (Cordis) plugin that decides where a request may go, and decides by
 **permission rather than preference**. A credential is not permitted to reach the cloud. The
 cloud model is not permitted to author source code. Beyond those two rules the destination is
 the cloud, and moving work off it is the architect's explicit choice — not a heuristic's guess.
+
+Attested delegations leave an Ed25519-signed record in the repository's own Git notes
+(`refs/notes/delegations`), binding the unit's contract and the commit tree it was verified against, so
+the claim travels with a clone and audits offline. The record maps to named obligations — SOC 2 Type II
+CC8.1, ISO/IEC 42001, and EU AI Act Articles 12 and 14 — with the residual boundaries stated rather than
+glossed, in
+[`docs/enterprise-governance.md`](https://github.com/jjmlovesgit/dsh-plugin-coding-delegate/blob/main/docs/enterprise-governance.md).
+Dual attestation, in which a worker receipt and a separate human approval are signed under different
+keys, is written and verified by the repository's `scripts/attest-unit.cjs` toolchain and **not by this
+plugin**: the plugin's own in-process envelope still emits spec 1.1.
 
 Everything runs **in-process**: there is no separate decision daemon, no HTTP hop, and no
 timeout on the routing path. (Earlier versions called an external Python "Laya" scoring service;
