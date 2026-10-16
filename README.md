@@ -1,12 +1,91 @@
-# DSH Coding Delegation Technical Control for the Separation of Duties
+# dsh-plugin-coding-delegate
+
+**Repo-native cryptographic attestation, anti-self-approval enforcement, and an execution perimeter for
+autonomous coding agents.**
+
+Every verified delegation leaves a signed record in the repository's own Git notes, bound to the commit it
+describes: the execution receipt and the human approval are two signatures made by two different keys, and
+the audit that checks both runs offline. Control mapping for SOC 2 CC8.1, ISO/IEC 42001 and the EU AI Act:
+[docs/enterprise-governance.md](docs/enterprise-governance.md).
 
 A [DeepSeek Harness](https://github.com/deepseek-ai) (DSH) plugin that separates **who specifies** work
 from **who implements** it, and refuses to let the first party write the second party's code. It is a
 technical control, not a policy: enforcement happens in a tool-call hook before a write lands, so it does
 not depend on the model choosing to comply.
 
-The metered model has no write tool and no shell.  A fully prompt-injected architect can plan anything and 
+The metered model has no write tool and no shell. A fully prompt-injected architect can plan anything and
 still cannot change a byte of your host, because the permission is never granted.
+
+## The two guarantees this control exists to make
+
+Two properties, both of the kind a pipeline usually asserts rather than enforces. Everything else in this
+README is in service of them.
+
+### 1. Anti-self-approval: two principals, two keys, checked
+
+A record under attestation spec **1.2** carries a `worker` receipt and a `reviewer` approval, with three
+signatures sealed in order: the worker signature over the payload, the reviewer signature over the payload
+*including* the frozen worker block, and the outer envelope seal last, because adding the reviewer block
+would invalidate an earlier seal.
+
+* **The two keys must differ.** Equal fingerprints are refused with `self-approval refused`. Red-team probe
+  10 signs a reviewer block with the worker's own key; without that check the record verifies perfectly.
+* **The record must name the key that verifies it.** A genuine signature from a key the record names but the
+  resolved trust root does not know is refused (probe 9).
+* **Approval is a separate, human, two-phase act.** `--prepare <target> <contract>` runs the contract and
+  stages an untracked draft that cannot be committed; `--approve <target> --reviewer-identity "<name>"`
+  re-verifies the draft against the anchored tree, adds the reviewer block, attaches once, reads the note
+  back byte-identical, and only then removes the draft. It does **not** re-run the contract: the record must
+  carry what phase one saw, not a second opinion collected later.
+* **No plugin path can author a human claim.** `delegate_worker` settles execution status only — the four
+  registry outcomes `UNIT_PASSED`, `UNIT_FAILED`, `UNIT_UNVERIFIED` and `UNIT_FLAKY`, which are verdicts and
+  not signing keys. The three tool parameters that once let a caller name a reviewing human are gone, and a
+  compile-time assertion keeps them gone.
+
+**Residual boundary.** With the in-repo reviewer key in use, a committer who can edit both
+`keys/delegation-reviewer.pub` and the operator pin could substitute both roots. Pin the reviewer root out of
+band with `DSH_REVIEWER_PUBKEY` or `DSH_REVIEWER_FINGERPRINT`, and a second signature becomes evidence about
+a principal the record's author cannot reach. Details:
+[dual attestation](#dual-attestation-the-worker-receipt-and-the-human-reviewer-spec-12).
+
+### 2. Repo-native provenance: the record cannot outrun its commit
+
+Attestations are Ed25519-signed notes in `refs/notes/delegations` — objects in the same database as the
+code, so they clone and verify offline. Every claim in a record is re-derived at audit time from the
+**anchored commit's tree**, never from the working copy: a note that names one commit and lives on another,
+whose anchor is not an ancestor of `main`, or whose artifact or contract digest does not match the blob at
+that commit is refused. The full check list is under
+[Cryptographic Provenance & Dual-Gate Contract Attestation](#cryptographic-provenance--dual-gate-contract-attestation).
+
+**Residual boundary.** A Git ref is not write-once storage: notes can be edited, re-attached or removed, and
+the ref can be force-pushed. The audit catches every mutation that leaves a record behind — the red-team
+harness performs ten of them — and it refuses an empty ledger, but it cannot detect one note removed while
+others remain. That needs an external sink, and the auditor says so in its own closing line.
+
+## Auditing it yourself
+
+Run these from a clone. The published npm package is the plugin (`plugin/dist`); the gate and signing tooling
+deliberately live in the checkout rather than in the tarball, so there is no standalone CLI to install and no
+extra artefact to trust:
+
+```bash
+npm run gate                                 # all five stages, offline
+node scripts/verify-delegation-ledger.cjs    # the ledger audit alone
+node scripts/redteam-probe.cjs               # ten attack classes; restores the ledger afterwards
+```
+
+A green run prints `AUDIT PASSED`, then the one limit that matters: *"this proves the records present are
+sound. It cannot detect a record that was deleted."* To check a **published** release against its tag — this
+one needs the network — run
+`powershell -File scripts/verify-release-tarball.ps1 -Version 0.5.4 -Tag v0.5.4`, which compares the tarball
+and the tag in both directions by Git blob hash.
+
+The same gate runs on every push in [`.github/workflows/ci.yml`](.github/workflows/ci.yml), with
+`fetch-depth: 0` and an explicit `refs/notes/delegations` fetch, because a depth-1 checkout would audit an
+empty ledger and report success. The most recent run —
+[run 202, on the `v0.5.4` release commit](https://github.com/jjmlovesgit/dsh-plugin-coding-delegate/actions/runs/38808098846)
+— concluded `success`. A CI workflow holds no signing key, so the signer lifecycle step reports a named
+`# SKIP` there rather than passing silently.
 
 ## How it works: a contract out, a verdict back
 
@@ -31,10 +110,11 @@ needs — nothing else — writes the code, and is discarded. A fresh context pe
 The verification command runs as an ordinary subprocess, with the operator's approval. Its raw output
 stays on the local machine; what travels back is the failure *structure*, with source stripped out.
 
-> **Status: 0.4.0.** The mechanisms work and are tested. Its **limits are documented
-> rather than glossed**, including two that cannot be closed from inside the process — see
-> [What this control does not cover](#what-this-control-does-not-cover). Read that section before deciding
-> whether it fits your situation.
+> **Status: 0.5.4**, published to npm and gated in CI. The mechanisms work and are tested, and their
+> **limits are documented rather than glossed**, including several that cannot be closed from inside the
+> process — see [What this control does not cover](#what-this-control-does-not-cover) and the consolidated
+> residual table in [docs/enterprise-governance.md](docs/enterprise-governance.md). Read those before
+> deciding whether it fits your situation.
 
 ```text
   CLOUD  (metered, holds the design conversation)          LOCAL  (your box, your GPU)
