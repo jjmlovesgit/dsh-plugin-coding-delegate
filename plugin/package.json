@@ -1,7 +1,7 @@
 {
   "name": "dsh-plugin-coding-delegate",
   "version": "0.5.4",
-  "description": "A preventive control for DeepSeek Harness: the metered model cannot author code and every delegation leaves a hashable verdict. The architect specifies and is denied write and shell access; a local worker implements inside a bounded workspace; promotion accepts only a SHA-256 match against a machine-checked or operator-attested record.",
+  "description": "Repo-native cryptographic attestation and anti-self-approval governance for autonomous AI coding agents. A preventive control for DeepSeek Harness: the metered model cannot author code and every delegation leaves a hashable verdict. The architect specifies and is denied write and shell access; a local worker implements inside a bounded workspace; promotion accepts only a SHA-256 match against a machine-checked or operator-attested record, and Schema 1.2 binds the worker and the human reviewer with two Ed25519 signatures kept in the repository's own Git notes.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [
@@ -40,7 +40,17 @@
     "delegation",
     "local-first",
     "local-llm",
-    "lm-studio"
+    "lm-studio",
+    "ai-governance",
+    "attestation",
+    "dual-key-signing",
+    "non-repudiation",
+    "audit-trail",
+    "soc2",
+    "eu-ai-act",
+    "git-notes",
+    "ed25519",
+    "developer-tools"
   ],
   "author": "Jim McCormack <mccormackjim3@gmail.com>",
   "license": "MIT",

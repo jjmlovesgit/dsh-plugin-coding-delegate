@@ -2,7 +2,7 @@
   "name": "dsh-plugin-coding-delegate",
   "version": "0.5.4",
   "private": true,
-  "description": "A preventive control for DeepSeek Harness: the cloud planner cannot author code and every delegation leaves a hashable verdict. Sandboxed local execution with hash-bound promotion.",
+  "description": "Repo-native cryptographic attestation and anti-self-approval governance for autonomous AI coding agents. A preventive control for DeepSeek Harness: the cloud planner cannot author code and every delegation leaves a hashable verdict; sandboxed local execution with hash-bound promotion, and Ed25519 dual-signed records kept in the repository's own Git notes.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -15,7 +15,17 @@
     "deepseek-harness",
     "cordis",
     "delegation",
-    "governance"
+    "governance",
+    "ai-governance",
+    "attestation",
+    "dual-key-signing",
+    "non-repudiation",
+    "audit-trail",
+    "soc2",
+    "eu-ai-act",
+    "git-notes",
+    "ed25519",
+    "developer-tools"
   ],
   "dsh": {
     "bundle": {
