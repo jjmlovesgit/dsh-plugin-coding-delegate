@@ -1472,3 +1472,29 @@ stashed, exactly three of the nine cases are red and every control stays green, 
 was supposed to have: it adds refusals and removes no allow that was doing work.
 
 
+## The audit printed the worker model and never compared it — fixed
+
+The ledger audit put `payload.modelIdentifier` in every per-note block and in its SUMMARY table, and never
+compared it to anything. A reader scanning that output could not tell the sandboxed local worker from a
+cloud model, and the field is a string the signer writes — a self-description standing exactly where a
+check should be. It surfaced because the operator read "Check 9 enforces the worker model" in a plan and
+asked me to confirm it; there was no check 9, so the control that was believed to exist had never been
+written.
+
+The fix is one comparison against one constant, `AUTHORIZED_WORKER_MODEL`, applied to every note with no
+cut-off. Equality rather than a set of allowed models is deliberate and is the same trade as the operator
+key pin: a set invites the question of who maintains membership, while a constant makes a worker migration
+a single line in a reviewed diff. What it cannot do is establish that a model is *local* — the auditor has
+no way to know that. It can only establish that the record names the model the operator authorized for
+this ledger, which is the claim worth making and the one that was previously missing.
+
+Measured in a throwaway clone, so the governed ledger was never touched: `node scripts/attest-unit.cjs
+tools/async-mutex.ts tests/contracts/async-mutex.contract.cjs --model deepseek-v4.1-flash-1017` signed a
+record normally (`ATTEST PASS`), and the audit refused that one note with `AUDIT FAILED: 1 critical
+check(s) failed.` and exit 1 while the seven real notes still passed. The signer still permits such a
+record; the refusal is deliberately at audit time, because the audit is the gate, and a record that fails
+it has to be removed rather than never written.
+
+Fixed at `02c1794`.
+
+
