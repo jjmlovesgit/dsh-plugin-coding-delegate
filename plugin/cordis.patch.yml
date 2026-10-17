@@ -4,7 +4,9 @@
 # no model and no API key -- provider configuration is yours to own.
 #
 # With no config block the plugin uses its built-in defaults (localProvider lm-studio,
-# localModel qwen/qwen3.8-27b, cloudProvider deepseek-official, cloudModel deepseek-chat).
+# localModel qwen/qwen3.8-27b, cloudProvider deepseek-official, cloudModel deepseek-flash).
+# NOTE the precedence: a config block here or in your profile WINS over those defaults, and the
+# architect route then rewrites the host's own model selection with the value it resolved.
 # Override them in your own profile patch; cordis.patch.example.yml has a complete
 # worked example, and README.md "Configuring providers" covers other endpoints and
 # cloud-only setups.

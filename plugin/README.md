@@ -305,7 +305,7 @@ When you call `predictRoute` directly, its decision output is
 | `cloudProvider` | `deepseek-official` | Provider id used for escalated execution |
 | `localModel` | `qwen/qwen3.8-27b` | Local model id, used for the local reroute *and* for `delegate_worker` |
 | `localEndpoint` | `http://127.0.0.1:1234/v1` | Base URL `delegate_worker` posts to (a full `/chat/completions` URL is also accepted). Operator configuration — a caller-supplied `endpoint` argument is ignored, so a model cannot redirect the task |
-| `cloudModel` | `deepseek-chat` | Cloud model id |
+| `cloudModel` | `deepseek-flash` | Cloud model id. A host that sets this overrides the built-in default, and the architect route rewrites the host's own model selection with it — so this value, not the harness's, is what the architect request actually carries |
 | `contextThreshold` / `contextTokenThreshold` | `30000` | **Inert.** Read only inside `LocalRouter.predictRoute`, which nothing in `src/` calls — see [The classifier is available but not wired in](#the-classifier-is-available-but-not-wired-in). Setting it changes nothing |
 | `timeoutMs` | `2000` | **Inert, and never read at all.** The value is stored on the router's config and no code path reads it. The only timeout that binds a delegation is `verificationTimeoutMs` |
 | `enforceDLP` | `true` | Enable the credential firewall |

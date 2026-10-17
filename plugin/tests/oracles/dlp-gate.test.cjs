@@ -9,6 +9,7 @@ const assert = require("node:assert/strict");
 
 const PLUGIN = require("node:path").resolve(__dirname, "..", "..");
 const { apply } = require(PLUGIN + "/dist/index.js");
+const { PROFILES } = require(PLUGIN + "/dist/profiles.js");
 
 const FAKE_KEY = 'api_key = "sk-' + "a".repeat(32) + '"';
 const CLEAN = "rename the variable x to y in this function";
@@ -52,7 +53,11 @@ test("a clean payload is passed through to the cloud architect unchanged", async
   const handlers = hooksFor();
   const config = await issueRequest(handlers, CLEAN);
   assert.equal(config.provider, "deepseek-official");
-  assert.equal(config.model, "deepseek-chat");
+  // Asserted against the profile rather than a literal id. This case is about the payload NOT being
+  // rewritten on a clean request; naming one model made it also a pin on the shipped default, so a
+  // deliberate default change read as a regression here. The upstream model was "upstream-default",
+  // so any value other than the profile's own would still fail.
+  assert.equal(config.model, PROFILES.ARCHITECT.model);
   assert.ok(Array.isArray(config.tools), "tool schema is still injected");
   assert.ok(
     config.tools.some((t) => (t?.function?.name || t?.name) === "delegate_worker"),

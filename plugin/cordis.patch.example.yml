@@ -16,7 +16,9 @@
     localProvider: 'lm-studio'
     localModel: 'qwen/qwen3.8-27b'
     cloudProvider: 'deepseek-official'
-    cloudModel: 'deepseek-chat'
+    # The moving V4 alias. Pin a dated checkpoint here instead (e.g. deepseek-v4.1-flash-1017) if this
+    # host must hold one set of weights; the shipped default cannot make that choice for you.
+    cloudModel: 'deepseek-flash'
     # guardAskPaths REPLACES the built-in default rather than extending it, so list every
     # path that should stay approval-eligible instead of hard-denied.
     guardAskPaths:

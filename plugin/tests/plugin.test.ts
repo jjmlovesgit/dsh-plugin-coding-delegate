@@ -71,7 +71,9 @@ describe('DSH Local Router Cordis Plugin Test Suite', () => {
 
   it('Profiles Integrity: Exported ARCHITECT and WORKER profiles match standards', () => {
     expect(PROFILES.ARCHITECT.provider).toBe('deepseek-official')
-    expect(PROFILES.ARCHITECT.model).toBe('deepseek-chat')
+    // The V4 alias, not the remapped `deepseek-chat` name it replaced and not a dated checkpoint: a
+    // default is shipped to every embedder, so it must follow the line rather than freeze one release.
+    expect(PROFILES.ARCHITECT.model).toBe('deepseek-flash')
     expect(PROFILES.ARCHITECT.uncappedContextWindow).toBe(true)
 
     expect(PROFILES.WORKER.provider).toBe('lm-studio')

@@ -23,7 +23,19 @@ export const PROFILES: Profiles = {
   ARCHITECT: {
     name: 'ARCHITECT_CLOUD',
     provider: 'deepseek-official',
-    model: 'deepseek-chat',
+    // THE MOVING ALIAS, NOT A DATED CHECKPOINT AND NOT THE RETIRED NAME. `deepseek-chat` was the
+    // canonical id when this profile was written; the provider has since remapped it to the V4 line, so a
+    // default still naming it pins every architect request to a compatibility alias that this plugin then
+    // hands to the host verbatim. A dated checkpoint (`deepseek-v4.1-flash-1017`) is the other tempting
+    // fix and is worse in shipped code: it freezes today's weights and rots silently when they are
+    // superseded. So the alias lives here and a dated pin belongs in the operator's own
+    // `cordis.patch.yml`, where choosing a specific checkpoint is a visible local decision.
+    //
+    // NOTE THE PRECEDENCE: this value is only a DEFAULT. A host that sets `cloudModel` in the plugin
+    // options overrides it outright -- and the architect route rewrites the host's own model selection
+    // with it (plugin/src/roles.ts:298-313), so the plugin wins over whatever the harness picked. That is
+    // why the live model can differ from this line without this line being wrong.
+    model: 'deepseek-flash',
     uncappedContextWindow: true,
     systemInstruction:
       'You are the Lead Architect. You have access to the `delegate_worker` tool. For implementation, ' +

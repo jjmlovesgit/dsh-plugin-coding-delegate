@@ -113,7 +113,9 @@ $routerEntry = @"
     localProvider: 'lm-studio'
     localModel: 'qwen/qwen3.8-27b'
     cloudProvider: 'deepseek-official'
-    cloudModel: 'deepseek-chat'
+    # Moving V4 alias. Pin a dated checkpoint here (e.g. deepseek-v4.1-flash-1017) to hold one set of
+    # weights on this host; the plugin's default cannot decide that for you.
+    cloudModel: 'deepseek-flash'
     # guardAskPaths REPLACES the built-in default (tests/, tools/), so list every path that
     # should stay approval-eligible rather than hard-denied.
     guardAskPaths:
@@ -177,7 +179,7 @@ Write-Host " Registration complete" -ForegroundColor Cyan
 Write-Host " Config written to: $PatchFile" -ForegroundColor Cyan
 Write-Host " Plugin:  $PluginName (id: $PluginEntryId, in-process routing)" -ForegroundColor Cyan
 Write-Host " Local:   lm-studio at http://127.0.0.1:1234/v1 (override with localEndpoint)" -ForegroundColor Cyan
-Write-Host " Cloud:   deepseek-official / deepseek-chat (needs `$env:DEEPSEEK_API_KEY)" -ForegroundColor Cyan
+Write-Host " Cloud:   deepseek-official / deepseek-flash (needs `$env:DEEPSEEK_API_KEY)" -ForegroundColor Cyan
 Write-Host ""
 Write-Host " Restart the profile for the plugin to load." -ForegroundColor Cyan
 Write-Host " If you do not run LM Studio, set localEndpoint and localModel." -ForegroundColor Cyan
