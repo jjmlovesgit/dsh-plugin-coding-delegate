@@ -43,6 +43,16 @@
  *      nothing -- and the record could not tell, because an envelope carries a contract hash, not a
  *      fixture verdict.
  *
+ *   8. SPEC 1.2 CARRIES TWO INDEPENDENT SIGNATURES. A payload that claims 1.2 must show a worker receipt
+ *      and a reviewer approval, signed with different keys over different byte ranges, each naming the
+ *      fingerprint that verifies it. Without that, the claim of a second principal is unbacked -- which
+ *      is the whole difference between dual attestation and one signer writing twice.
+ *
+ *   9. THE RECORDED WORKER MODEL IS THE AUTHORIZED LOCAL ONE. Every other check asks whether the record
+ *      is true about the commit; this one asks whether the thing that produced the commit was the
+ *      sandboxed local worker the containment claim depends on. `modelIdentifier` is a string the signer
+ *      writes, so a ledger that accepts any string cannot show that source never left the machine.
+ *
  * WHY CHECK 6 IS NOT A FAILURE WHEN IT CANNOT RUN. For 1.1 notes the envelope records the contract SET,
  * so the digest is recomputed from what the note itself carries, against the anchored tree. For 1.0
  * notes it records only `contractHash`, a blind commitment over an array it does not carry, so it can be
@@ -131,6 +141,28 @@ const REPO_PINNED_KEY_PATH = path.join(REPO_ROOT, 'keys', 'delegation-operator.p
  * database grows another object sharing the prefix, and this constant must not rot into ambiguity.
  */
 const SPEC_1_1_CUTOFF = 'c5bcc5a61b018468dd8cb16a3aed9c53c1c73232'
+
+/**
+ * The one worker model this ledger accepts.
+ *
+ * EVERY OTHER CHECK ASKS WHETHER THE RECORD IS TRUE ABOUT THE COMMIT; this asks whether the run that
+ * produced the commit was the local worker the containment claim rests on. The payload cannot answer
+ * that for itself: `modelIdentifier` is a string the signer writes, so a worker repointed at a cloud
+ * model -- or a caller passing `--model` by hand -- records that name and every other check still
+ * passes. The audit printed the model in its summary and never compared it, which reads as a check to
+ * anyone scanning the output and is not one.
+ *
+ * EQUALITY, NOT A SET, AND THE SAME TRADE AS THE KEY PIN. A set invites the question of who decides
+ * membership; one constant makes a model change a single line in a reviewed diff. That is the whole
+ * value, and it is a real limit: this cannot establish that a model is local. It can only establish that
+ * the record names the model the operator authorized for this ledger. Moving the worker to another local
+ * checkpoint therefore means changing this constant in the SAME commit that changes PROFILES.WORKER --
+ * the intended friction, and the reason it is not a fallback chain.
+ *
+ * APPLIED TO EVERY NOTE, with no cut-off. Every record in this ledger names the same checkpoint, so there
+ * is no legacy class to grandfather, and a cut-off would let the first record naming a cloud model in.
+ */
+const AUTHORIZED_WORKER_MODEL = 'qwen/qwen3.8-27b'
 
 const sha256 = (buffer) => crypto.createHash('sha256').update(buffer).digest('hex')
 
@@ -843,6 +875,28 @@ for (const { noteBlob, commitSha } of entries) {
     }
   }
 
+  // ---- 9. the recorded worker model is the authorized local one -----------------
+  //
+  // EVERY OTHER CHECK IS ABOUT THE COMMIT; this one is about the run that made it. See
+  // AUTHORIZED_WORKER_MODEL for why the comparison is equality rather than a set, and for what it cannot
+  // prove. A missing value fails closed: an empty `modelIdentifier` is not a model, and treating it as
+  // "unspecified, therefore permitted" is how a field that nobody fills in stops being a control.
+  const recordedModel = typeof payload.modelIdentifier === 'string' ? payload.modelIdentifier.trim() : ''
+  if (!recordedModel) {
+    fail(
+      'the payload records no modelIdentifier, so nothing shows which model produced these artifacts and ' +
+        'the local-worker boundary cannot be checked against an authorized model'
+    )
+  } else if (recordedModel !== AUTHORIZED_WORKER_MODEL) {
+    fail(
+      'the payload records modelIdentifier ' + recordedModel + ', but this ledger authorizes ' +
+        AUTHORIZED_WORKER_MODEL + ' as its local worker. A record naming any other model records a run ' +
+        'this containment claim does not cover, whatever the artifacts say.'
+    )
+  } else {
+    console.log('  ok    worker model is the authorized local one (' + recordedModel + ')')
+  }
+
   summary.push({
     commit: short,
     model: payload.modelIdentifier,
@@ -864,6 +918,6 @@ if (critical > 0) {
   console.error('AUDIT FAILED: ' + critical + ' critical check(s) failed.')
   process.exit(1)
 }
-console.log('AUDIT PASSED: every note is attributed to the pinned operator key, attached to the commit it names, its artifacts and contracts match that commit\'s tree, and every recorded contract is covered by the discrimination gate.')
+console.log('AUDIT PASSED: every note is attributed to the pinned operator key, attached to the commit it names, its artifacts and contracts match that commit\'s tree, every recorded contract is covered by the discrimination gate, and every record names the authorized local worker model.')
 console.log('NOTE: this proves the records present are sound. It cannot detect a record that was deleted.')
 process.exit(0)
