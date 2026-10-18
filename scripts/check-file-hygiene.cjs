@@ -22,9 +22,15 @@
  *      live hazard on this host specifically: PowerShell 5.1 writes one for `-Encoding utf8`, which is
  *      the default people reach for, and this session has already produced one that way.
  *
- * SCOPE. `tools/` and `plugin/src/` -- the generated artefacts and the source that is compiled from
- * them. `plugin/dist/` is deliberately NOT checked: it is tsc output, tsc already emits conforming
- * files, and a check that cannot fail is a check that teaches people to ignore the one that can.
+ * SCOPE. `tools/`, `plugin/src/` and `scripts/` -- the generated artefacts, the source compiled from
+ * them, and the operator tooling that signs and audits both. `plugin/dist/` is deliberately NOT
+ * checked: it is tsc output, tsc already emits conforming files, and a check that cannot fail is a
+ * check that teaches people to ignore the one that can.
+ *
+ * `scripts/` was added on 2026-10-18, after a policy config landed there that the check could not
+ * see. The gap was not hypothetical: the rule that matters most for this tree is CRLF, because the
+ * signer hashes the bytes on disk while the auditor compares against the blob, and a script that
+ * signs is exactly the file whose line endings have to agree.
  *
  * Usage: node scripts/check-file-hygiene.cjs
  * Exit 0 when every file conforms, 1 otherwise.
@@ -35,7 +41,14 @@ const fs = require('node:fs')
 const path = require('node:path')
 
 const REPO_ROOT = path.resolve(__dirname, '..')
-const TARGET_DIRS = [path.join(REPO_ROOT, 'tools'), path.join(REPO_ROOT, 'plugin', 'src')]
+const TARGET_DIRS = [
+  path.join(REPO_ROOT, 'tools'),
+  path.join(REPO_ROOT, 'plugin', 'src'),
+  path.join(REPO_ROOT, 'scripts'),
+]
+const TARGET_LABELS = TARGET_DIRS.map(
+  (dir) => path.relative(REPO_ROOT, dir).split(path.sep).join('/') + '/'
+).join(', ')
 const EXTENSIONS = new Set(['.ts', '.js', '.mjs', '.cjs', '.json', '.md'])
 
 const BOM = [0xef, 0xbb, 0xbf]
@@ -85,7 +98,7 @@ for (const dir of TARGET_DIRS) {
   }
 }
 
-console.log('=== file hygiene (' + checked + ' file(s) under tools/ and plugin/src) ===')
+console.log('=== file hygiene (' + checked + ' file(s) under ' + TARGET_LABELS + ') ===')
 
 if (violations.length === 0) {
   console.log('  ok    every file ends with a newline, stores LF, and carries no BOM')
