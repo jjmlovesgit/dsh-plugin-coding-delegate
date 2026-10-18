@@ -46,6 +46,16 @@
     "check:hygiene": "node scripts/check-file-hygiene.cjs",
     "gate:wellformed": "node scripts/check-contracts.cjs",
     "test:lifecycle": "node --test tests/attest-unit-lifecycle.test.cjs",
+    "lint": "eslint scripts",
+    "gate:arch": "depcruise --config .dependency-cruiser.cjs tools plugin/src scripts tests",
     "gate": "node scripts/check-file-hygiene.cjs && node scripts/check-contract-fixtures.cjs && node scripts/check-contracts.cjs && node scripts/verify-delegation-ledger.cjs && node --test tests/attest-unit-lifecycle.test.cjs"
+  },
+  "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^8.10.0",
+    "@typescript-eslint/parser": "^8.10.0",
+    "dependency-cruiser": "^16.10.0",
+    "eslint": "^9.13.0",
+    "eslint-plugin-import": "^2.31.0",
+    "typescript": "^5.5.4"
   }
 }
