@@ -13,7 +13,9 @@
  *     is `scripts/attest-unit.cjs` with `--prepare` / `--approve`.
  *   - The blueprint dispatches `scripts/worker-build.mjs --target … --model …`. The dispatcher is
  *     `tools/worker-build.mjs` and takes POSITIONAL arguments (`<target> <contract>`); it has no
- *     model flag, and it refuses a target with no authored `REQUIREMENTS` entry.
+ *     model flag. It used to require a hand-written `REQUIREMENTS` entry per target, which made every
+ *     new unit a dispatcher edit; this harness now extracts the contract's own `@requirements` block
+ *     and passes it through `AI_SDLC_REQUIREMENTS_FILE`, with the table kept as the fallback.
  *   - The blueprint validates the mutant with a `TARGET_FILE_OVERRIDE` environment variable. There
  *     is no such hook, and `check-contract-fixtures.cjs` records why it was removed: the contract
  *     needed a test-only branch, which changed the contract's bytes and broke the `contractHash`
@@ -106,6 +108,7 @@ function resolveUnit(params) {
   unit.targetRel = rel(unit.target)
   unit.contractRel = rel(unit.contract)
   unit.mutantRel = rel(unit.mutant)
+  assertDeclaredTarget(unit)
   return unit
 }
 
@@ -178,28 +181,67 @@ function assertCleanTree() {
   }
 }
 
-function dispatch(unit) {
-  heading('dispatching to ' + config.workerModel + ' via tools/worker-build.mjs')
-  if (fs.existsSync(unit.target)) {
-    fs.rmSync(unit.target)
-    ok('unlinked the stale target: ' + unit.targetRel)
-  }
-  const result = spawnSync(
-    process.execPath,
-    [path.join('tools', 'worker-build.mjs'), unit.targetRel, unit.contractRel],
-    { cwd: REPO_ROOT, stdio: 'inherit' }
-  )
-  if (result.status !== 0) {
+/** The contract may carry its own worker requirements in a `@requirements` header block. */
+function extractRequirements(contractPath) {
+  const source = fs.readFileSync(contractPath, 'utf8')
+  const at = source.indexOf('@requirements')
+  if (at === -1) return null
+  const end = source.indexOf('*/', at)
+  if (end === -1) return null
+  const lines = source
+    .slice(at + '@requirements'.length, end)
+    .split('\n')
+    .map((line) => line.replace(/^\s*\*\s?/, '').replace(/^[-*]\s+/, '').trim())
+    .filter(Boolean)
+  return lines.length > 0 ? lines : null
+}
+
+/** A contract that names a target must name THIS one, or the pairing is a transcription error. */
+function assertDeclaredTarget(unit) {
+  const match = /@target\s+(\S+)/.exec(fs.readFileSync(unit.contract, 'utf8'))
+  if (match && match[1] !== unit.targetRel) {
     fail(
-      'WORKER_FAILED',
-      'tools/worker-build.mjs exited ' + result.status + '. A target with no authored REQUIREMENTS ' +
-        'entry cannot be dispatched; add one there rather than skipping the worker.'
+      'TARGET_MISMATCH',
+      unit.contractRel + ' declares @target ' + match[1] + ' but the harness was given ' + unit.targetRel
     )
   }
-  if (!fs.existsSync(unit.target)) {
-    fail('EMISSION_FAILED', 'the worker exited 0 but ' + unit.targetRel + ' was not emitted')
+}
+
+function dispatch(unit) {
+  heading('dispatching to ' + config.workerModel + ' via tools/worker-build.mjs')
+  const requirements = extractRequirements(unit.contract)
+  const env = { ...process.env }
+  let requirementsFile = null
+  if (requirements) {
+    requirementsFile = path.join(os.tmpdir(), 'dsh-requirements-' + process.pid + '.txt')
+    fs.writeFileSync(requirementsFile, requirements.join('\n') + '\n')
+    env.AI_SDLC_REQUIREMENTS_FILE = requirementsFile
+    ok('using ' + requirements.length + ' requirement(s) from the contract header')
   }
-  ok('emitted ' + unit.targetRel)
+  try {
+    if (fs.existsSync(unit.target)) {
+      fs.rmSync(unit.target)
+      ok('unlinked the stale target: ' + unit.targetRel)
+    }
+    const result = spawnSync(
+      process.execPath,
+      [path.join('tools', 'worker-build.mjs'), unit.targetRel, unit.contractRel],
+      { cwd: REPO_ROOT, stdio: 'inherit', env }
+    )
+    if (result.status !== 0) {
+      fail(
+        'WORKER_FAILED',
+        'tools/worker-build.mjs exited ' + result.status + '. A target with no requirements, in ' +
+          'either the contract header or the dispatcher table, cannot be dispatched.'
+      )
+    }
+    if (!fs.existsSync(unit.target)) {
+      fail('EMISSION_FAILED', 'the worker exited 0 but ' + unit.targetRel + ' was not emitted')
+    }
+    ok('emitted ' + unit.targetRel)
+  } finally {
+    if (requirementsFile) fs.rmSync(requirementsFile, { force: true })
+  }
 }
 
 function commitUnit(unit) {
@@ -241,7 +283,11 @@ function audit() {
 
 function printPlan(unit) {
   heading('dry run: nothing is unlinked, committed, or signed')
+  const requirements = extractRequirements(unit.contract)
   const present = fs.existsSync(unit.target) ? ' (present)' : ' (absent)'
+  console.log('  requirements   : ' + (requirements
+    ? requirements.length + ' from the contract @requirements block'
+    : 'from the tools/worker-build.mjs table (no @requirements block)'))
   console.log('  would unlink   : ' + unit.targetRel + present)
   console.log('  would dispatch : tools/worker-build.mjs ' + unit.targetRel + ' ' + unit.contractRel)
   console.log('  would verify   : ' + config.delegation.flakeIterations + ' x node --test ' + unit.contractRel)
@@ -283,4 +329,8 @@ function main() {
   else execute(unit)
 }
 
-main()
+if (require.main === module) main()
+
+// Exported for the harness's own tests: the parser is the part that fails silently when it is wrong,
+// because a contract with no recognised block simply falls back to the table.
+module.exports = { extractRequirements, parseArgs }

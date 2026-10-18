@@ -128,13 +128,37 @@ const positionals = argv.filter((token) => !token.startsWith("--"));
 const targetPath = positionals[0] || "tools/priority-queue.ts";
 const contractPath = positionals[1] || "tests/contracts/priority-queue.contract.cjs";
 
-const requirements = REQUIREMENTS[targetPath];
+/**
+ * Requirements for a target, from the contract when the harness supplies them, else from the table.
+ *
+ * WHY AN OVERRIDE AND NOT A BIGGER TABLE. The table below is authored per target, which is right --
+ * a generic prompt is what let the first canonicalMerge generation alias its inputs -- but it makes
+ * adding a unit a three-file edit: contract, mutant, and this dispatcher. An unattested file is the
+ * one place a requirement can silently be forgotten, so `delegate-unit.cjs` extracts an
+ * `@requirements` block from the contract's own header into AI_SDLC_REQUIREMENTS_FILE and this
+ * reads it. The table stays as the fallback for the targets that predate the convention.
+ */
+function loadRequirements(targetPath) {
+  const override = process.env.AI_SDLC_REQUIREMENTS_FILE;
+  if (override) {
+    const body = fs.readFileSync(override, "utf8");
+    const lines = body
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+    if (lines.length > 0) return lines;
+  }
+  return REQUIREMENTS[targetPath];
+}
+
+const requirements = loadRequirements(targetPath);
 if (!requirements) {
   console.error(
     "No authored requirements for '" +
       targetPath +
-      "'. Add them to REQUIREMENTS in this file: a vague prompt is how the first canonicalMerge " +
-      "generation passed its contract while aliasing both inputs."
+      "'. Add an @requirements block to its contract, or add them to REQUIREMENTS in this file: a " +
+      "vague prompt is how the first canonicalMerge generation passed its contract while aliasing " +
+      "both inputs."
   );
   process.exit(2);
 }

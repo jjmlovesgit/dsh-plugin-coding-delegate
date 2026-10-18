@@ -1,0 +1,45 @@
+#!/bin/sh
+# AI-SDLC pre-commit gate (POL-SEC-AISDLC-001 §8.1, ADR-SEC-AISDLC-001 §5.1).
+#
+# WHY THIS HOOK EXISTS AND WHY IT IS NOT THE WHOLE GATE. It runs the two checks that a commit can
+# still fix cheaply -- byte hygiene and architectural boundaries -- and refuses a Tier 1 commit that
+# did not come from the atomic harness. The ledger audit and the lifecycle test are deliberately NOT
+# here: they take seconds, they need the signing keys, and a hook slow enough to be annoying is a
+# hook people learn to bypass with --no-verify.
+#
+# THE STAGING CATCH-22, RESOLVED BY THE FLAG RATHER THAN BY A SPECIAL CASE. A Schema 1.2 note can
+# only be attached once the commit exists, so a hook that demanded a note before the commit would
+# deadlock every delegation. `delegate-unit.cjs` sets AI_SDLC_ATOMIC_RUN=1 for its own commit and
+# prepares the note immediately afterwards, where the ledger audit catches a missing one. A HUMAN
+# commit of a Tier 1 module is refused: that is the path that would otherwise put an unattested
+# primitive into the tree, and a warning there is not a control.
+#
+# A staged Tier 1 edit made by the harness is the only way through without the flag. If that is too
+# strict for an experiment, set AI_SDLC_ATOMIC_RUN=1 deliberately -- the bypass is explicit and
+# shows up in the shell history, which is what a fail-closed design should require.
+set -u
+
+echo "[pre-commit] file hygiene"
+if ! node scripts/check-file-hygiene.cjs; then
+  echo "FATAL [PRE_COMMIT]: file hygiene failed; fix the files rather than the check."
+  exit 1
+fi
+
+echo "[pre-commit] architectural boundaries and complexity ceilings"
+if ! npm run gate:arch --silent; then
+  echo "FATAL [PRE_COMMIT]: an architectural boundary or complexity ceiling was violated."
+  exit 1
+fi
+
+STAGED_TIER1=$(git diff --cached --name-only --diff-filter=ACM | grep -E '^tools/[^/]+\.ts$' || true)
+if [ -n "$STAGED_TIER1" ] && [ "${AI_SDLC_ATOMIC_RUN:-}" != "1" ]; then
+  echo "FATAL [PRE_COMMIT]: Tier 1 module(s) staged outside the atomic harness:"
+  echo "$STAGED_TIER1" | sed 's/^/    /'
+  echo ""
+  echo "A Tier 1 unit is produced by:"
+  echo "    npm run delegate:unit -- --target <path> --contract <path> --mutant <path>"
+  echo "which commits with AI_SDLC_ATOMIC_RUN=1 and stages the attestation immediately afterwards."
+  exit 1
+fi
+
+exit 0
