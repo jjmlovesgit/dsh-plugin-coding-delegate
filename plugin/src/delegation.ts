@@ -612,6 +612,32 @@ export function classifyWorkerOutput(input: {
   }
 }
 
+/**
+ * The most of a non-2xx response body that may enter a message.
+ *
+ * This is the one string in the pipeline whose length nothing upstream bounds: `response.text()`
+ * returns whatever the server sent, so an LM Studio traceback, a proxy's HTML error page or a
+ * misrouted endpoint can append megabytes to a message that then enters the conversation and is
+ * re-sent on every later turn. The worker's own completion is capped by `max_tokens` and the
+ * verification log by `parseTestOutput`; this closes the third door, at the same 2000 characters so
+ * there is one number to remember for "how much raw text can reach the architect".
+ *
+ * The full body is not persisted, deliberately. A verification log is the worker's work product and
+ * is kept on disk; an error page is diagnostic text whose first 2000 characters already carry the
+ * status, the content type and the first failure. Copying it to disk would replace one unbounded
+ * write with another to fix a display problem.
+ */
+export const MAX_ERROR_BODY_CHARS = 2000
+
+/** Bound a diagnostic body before appending it to a message. Never throws, and never grows it. */
+export function truncateErrorBody(text: unknown): string {
+  const body =
+    typeof text === 'string' ? text : text === undefined || text === null ? '' : String(text)
+  return body.length > MAX_ERROR_BODY_CHARS
+    ? body.slice(0, MAX_ERROR_BODY_CHARS) + ' [truncated]'
+    : body
+}
+
 export async function delegateWorker(
   params: DelegateWorkerParams = {},
   tracker?: SavingsTracker
@@ -784,11 +810,13 @@ export async function delegateWorker(
     }).finally(() => clearTimeout(timeoutId))
 
     if (!response.ok) {
+      // Capped at the append point rather than at the read: the body is diagnostic text, and a
+      // traceback or an HTML error page is not a transcript worth carrying into every later turn.
       const errText = await response.text()
       return {
         success: false,
         status: 'ERROR',
-        message: 'LM Studio returned HTTP ' + response.status + ': ' + errText,
+        message: 'LM Studio returned HTTP ' + response.status + ': ' + truncateErrorBody(errText),
         filesWritten: [],
         testResults: { passed: 0, failed: 0, output: 'Request failed.' },
         tokens: { prompt: 0, completion: 0 },

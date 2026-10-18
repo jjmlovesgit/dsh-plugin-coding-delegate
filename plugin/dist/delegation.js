@@ -33,13 +33,14 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.MIN_SEARCH_CHARS = exports.DEFAULT_LOCAL_ENDPOINT = exports.MAX_VERIFICATION_REPEATS = exports.DEFAULT_VERIFICATION_REPEATS = exports.DELEGATE_WORKER_SCHEMA_COVERS_EVERY_PARAMETER = exports.CANONICAL_DELEGATE_WORKER_PARAMETERS = exports.DELEGATE_WORKER_SCHEMA = exports.DELEGATE_WORKER_OPENAI_SCHEMA = void 0;
+exports.MAX_ERROR_BODY_CHARS = exports.MIN_SEARCH_CHARS = exports.DEFAULT_LOCAL_ENDPOINT = exports.MAX_VERIFICATION_REPEATS = exports.DEFAULT_VERIFICATION_REPEATS = exports.DELEGATE_WORKER_SCHEMA_COVERS_EVERY_PARAMETER = exports.CANONICAL_DELEGATE_WORKER_PARAMETERS = exports.DELEGATE_WORKER_SCHEMA = exports.DELEGATE_WORKER_OPENAI_SCHEMA = void 0;
 exports.resolveVerificationRepeats = resolveVerificationRepeats;
 exports.resolveChatCompletionsUrl = resolveChatCompletionsUrl;
 exports.parseSearchReplaceBlocks = parseSearchReplaceBlocks;
 exports.applySearchReplaceBlocks = applySearchReplaceBlocks;
 exports.resolveDelegateStatus = resolveDelegateStatus;
 exports.classifyWorkerOutput = classifyWorkerOutput;
+exports.truncateErrorBody = truncateErrorBody;
 exports.delegateWorker = delegateWorker;
 exports.extractPromptText = extractPromptText;
 exports.estimateTokenCount = estimateTokenCount;
@@ -458,6 +459,29 @@ function classifyWorkerOutput(input) {
             'local server. The contract was not run.',
     };
 }
+/**
+ * The most of a non-2xx response body that may enter a message.
+ *
+ * This is the one string in the pipeline whose length nothing upstream bounds: `response.text()`
+ * returns whatever the server sent, so an LM Studio traceback, a proxy's HTML error page or a
+ * misrouted endpoint can append megabytes to a message that then enters the conversation and is
+ * re-sent on every later turn. The worker's own completion is capped by `max_tokens` and the
+ * verification log by `parseTestOutput`; this closes the third door, at the same 2000 characters so
+ * there is one number to remember for "how much raw text can reach the architect".
+ *
+ * The full body is not persisted, deliberately. A verification log is the worker's work product and
+ * is kept on disk; an error page is diagnostic text whose first 2000 characters already carry the
+ * status, the content type and the first failure. Copying it to disk would replace one unbounded
+ * write with another to fix a display problem.
+ */
+exports.MAX_ERROR_BODY_CHARS = 2000;
+/** Bound a diagnostic body before appending it to a message. Never throws, and never grows it. */
+function truncateErrorBody(text) {
+    const body = typeof text === 'string' ? text : text === undefined || text === null ? '' : String(text);
+    return body.length > exports.MAX_ERROR_BODY_CHARS
+        ? body.slice(0, exports.MAX_ERROR_BODY_CHARS) + ' [truncated]'
+        : body;
+}
 async function delegateWorker(params = {}, tracker) {
     const endpoint = resolveChatCompletionsUrl(params.endpoint || profiles_1.PROFILES.WORKER.endpoint || exports.DEFAULT_LOCAL_ENDPOINT);
     const model = params.model || profiles_1.PROFILES.WORKER.model;
@@ -599,11 +623,13 @@ async function delegateWorker(params = {}, tracker) {
             signal: controller.signal,
         }).finally(() => clearTimeout(timeoutId));
         if (!response.ok) {
+            // Capped at the append point rather than at the read: the body is diagnostic text, and a
+            // traceback or an HTML error page is not a transcript worth carrying into every later turn.
             const errText = await response.text();
             return {
                 success: false,
                 status: 'ERROR',
-                message: 'LM Studio returned HTTP ' + response.status + ': ' + errText,
+                message: 'LM Studio returned HTTP ' + response.status + ': ' + truncateErrorBody(errText),
                 filesWritten: [],
                 testResults: { passed: 0, failed: 0, output: 'Request failed.' },
                 tokens: { prompt: 0, completion: 0 },
