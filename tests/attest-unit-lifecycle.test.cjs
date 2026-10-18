@@ -102,6 +102,14 @@ test('Schema 1.2 two-phase lifecycle across both reviewer trust roots', { timeou
       fs.copyFileSync(path.join(REPO_ROOT, 'scripts', name), path.join(clone, 'scripts', name));
     }
 
+    // THE FIXTURE GIVES ITSELF AN UNATTESTED ANCHOR. The clone's HEAD is this repository's HEAD, and
+    // a note is keyed by COMMIT: `--approve` against an already-attested commit REPLACES that record
+    // rather than adding one, so the count below would not move and the case would fail for a reason
+    // that has nothing to do with the lifecycle. Measured: it passed until the tip itself was
+    // attested, then reported "8 !== 9" -- the assumption that HEAD carries no note was never stated.
+    // An empty commit supplies a fresh anchor with the same tree, so artifact resolution is unchanged.
+    mustRun('git', ['commit', '--allow-empty', '--quiet', '-m', 'lifecycle fixture'], { cwd: clone });
+
     const tipBefore = ledgerTip(clone);
     const countBefore = noteCount(clone);
     assert.ok(tipBefore, 'the clone has no ledger ref, so the fetch above did not copy one');
