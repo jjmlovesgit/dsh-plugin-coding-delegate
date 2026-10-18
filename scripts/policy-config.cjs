@@ -73,6 +73,18 @@ const SENSIBLE_DEFAULTS = Object.freeze({
     }),
   }),
 
+  /**
+   * Delegation defaults (POL-SEC-AISDLC-001 §5.3).
+   *
+   * `flakeIterations` is the minimum number of consecutive, deterministic contract runs a unit must
+   * pass before it can settle. It is a policy number rather than a harness constant so the two
+   * cannot disagree: a harness that quietly ran the contract twice would still satisfy a document
+   * claiming three.
+   */
+  delegation: Object.freeze({
+    flakeIterations: 3,
+  }),
+
   complexity: Object.freeze({
     /** Cyclomatic ceiling for Tier 3 functions (POL §6.2). */
     max: 10,
@@ -112,9 +124,10 @@ const SENSIBLE_DEFAULTS = Object.freeze({
   }),
 })
 
-const TOP_LEVEL_KEYS = new Set(['schemaVersion', 'ledgerRef', 'workerModel', 'tiers', 'complexity'])
+const TOP_LEVEL_KEYS = new Set(['schemaVersion', 'ledgerRef', 'workerModel', 'tiers', 'delegation', 'complexity'])
 const TIER_KEYS = new Set(['pattern', 'contractGoverned', 'futurePaths', 'globs'])
 const COMPLEXITY_KEYS = new Set(['max', 'maxLinesPerFunction', 'baseline'])
+const DELEGATION_KEYS = new Set(['flakeIterations'])
 
 /** Refuse an override that carries a key this module would otherwise ignore. */
 function assertKnownKeys(value, allowed, where) {
@@ -166,6 +179,7 @@ function assertTier(config, tier) {
 function validate(config) {
   assertCeiling(config.complexity.max, 'complexity.max')
   assertCeiling(config.complexity.maxLinesPerFunction, 'complexity.maxLinesPerFunction')
+  assertCeiling(config.delegation && config.delegation.flakeIterations, 'delegation.flakeIterations')
   if (!Array.isArray(config.complexity.baseline)) {
     throw new Error('ai-sdlc: complexity.baseline must be an array')
   }
@@ -199,6 +213,7 @@ function loadPolicyConfig(rootDir = process.cwd()) {
   }
   assertKnownKeys(override, TOP_LEVEL_KEYS, CONFIG_BASENAME)
   if (override.complexity) assertKnownKeys(override.complexity, COMPLEXITY_KEYS, CONFIG_BASENAME + '.complexity')
+  if (override.delegation) assertKnownKeys(override.delegation, DELEGATION_KEYS, CONFIG_BASENAME + '.delegation')
 
   return { config: validate(merge(SENSIBLE_DEFAULTS, override, 'ai-sdlc')), source: overridePath }
 }

@@ -48,6 +48,7 @@
     "test:lifecycle": "node --test tests/attest-unit-lifecycle.test.cjs",
     "lint": "eslint scripts",
     "gate:arch": "depcruise --config .dependency-cruiser.cjs tools plugin/src scripts tests",
+    "delegate:unit": "node scripts/delegate-unit.cjs",
     "gate": "node scripts/check-file-hygiene.cjs && node scripts/check-contract-fixtures.cjs && node scripts/check-contracts.cjs && node scripts/verify-delegation-ledger.cjs && node --test tests/attest-unit-lifecycle.test.cjs"
   },
   "devDependencies": {
