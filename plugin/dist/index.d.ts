@@ -370,6 +370,16 @@ export declare function requestApprovalForVerification(ctx: any, exec: any, comm
  * no approval service, no agent, or a thrown request all resolve to refusal rather than to consent.
  */
 export declare function requestApprovalForWorkspace(ctx: any, exec: any, dir: string, reason: string): Promise<boolean>;
+/**
+ * Guarantee the transport telemetry on EVERY tool result.
+ *
+ * `delegateWorker` has paths that never reach the transport — a refused workspace, a starved worker —
+ * and they return before a retry counter exists. Normalising at the boundary means a consumer reads
+ * `transportRetries` without having to know which internal branch produced the verdict, and 0 is the
+ * truthful value for a path that made no request at all. `lastTransportError` is added only when the
+ * transport actually failed terminally, so its presence is itself the signal.
+ */
+export declare function withTransportTelemetry(verdict: any): any;
 export declare function apply(ctx: Context, options?: PluginConfig): void;
 declare const pluginExport: {
     name: string;

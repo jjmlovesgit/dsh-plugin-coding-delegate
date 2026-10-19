@@ -438,9 +438,11 @@ change.
 
 **The verdict carries the evidence.** `transportRetries` (0 on a first-attempt success) is on the
 success path and on every error path; `lastTransportError` names the terminal code when the transport
-failed outright. The established unreachable-worker message is unchanged for a first-attempt failure
-and gains an `(after N attempts)` suffix only when a retry happened, so existing consumers see no new
-text in the common case.
+failed outright. At the tool boundary, `withTransportTelemetry` normalises the field to 0 for the paths
+that never make a request — a refused workspace, a starved worker — so a consumer never has to ask
+which internal branch produced the verdict. The established unreachable-worker message is unchanged
+for a first-attempt failure and gains an `(after N attempts)` suffix only when a retry happened, so
+existing consumers see no new text in the common case.
 
 ### Open
 

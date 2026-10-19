@@ -19,6 +19,7 @@ import {
   hasCommandDeleteSignal,
   evaluateCodeWriteGuard,
   resolveChatCompletionsUrl,
+  withTransportTelemetry,
 } from '../src/index'
 import { classifyLocally } from '../src/local-classifier'
 import * as path from 'path'
@@ -352,7 +353,43 @@ not ok 3 - PriorityQueue isEmpty
     expect(res.success).toBe(false)
     expect(res.status).toBe('ERROR')
     expect(res.message).toContain('LM Studio at 127.0.0.1:1234 was unreachable')
+    // The rejection carries the code in its MESSAGE, not on `error.code`, so it is not retried: the
+    // policy matches transport codes, not substrings. 0 is therefore the honest count.
+    expect(res.transportRetries).toBe(0)
+    expect(res.lastTransportError).toContain('ECONNREFUSED')
     expect(res.tokens.prompt).toBe(0)
+  })
+
+  it('Telemetry: a retry-recovered delegation reports the attempt count', async () => {
+    const busy = new Response('{"error":"busy"}', { status: 503 })
+    const starved = new Response(
+      JSON.stringify({
+        choices: [{ message: { content: '' }, finish_reason: 'length' }],
+        usage: { prompt_tokens: 1, completion_tokens: 0, total_tokens: 1 },
+      }),
+      { status: 200 }
+    )
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(busy).mockResolvedValueOnce(starved))
+
+    const res = await delegateWorker({ taskName: 'TestRetry', instruction: 'Run test' })
+
+    // Empty content settles as starved, not as a pass. That is irrelevant to this assertion: what is
+    // being pinned is that the SECOND attempt is visible on the verdict the host receives.
+    expect(res.transportRetries).toBe(1)
+    expect('lastTransportError' in res).toBe(false)
+  })
+
+  it('Telemetry: the boundary normalises a verdict that never reached the transport', () => {
+    expect(withTransportTelemetry({ status: 'CONTEXT_REFUSED' }).transportRetries).toBe(0)
+    expect(withTransportTelemetry({ status: 'UNIT_PASSED', transportRetries: 2 }).transportRetries).toBe(2)
+
+    const terminated = withTransportTelemetry({
+      status: 'ERROR',
+      transportRetries: 2,
+      lastTransportError: 'ECONNREFUSED',
+    })
+    expect(terminated.lastTransportError).toBe('ECONNREFUSED')
+    expect('lastTransportError' in withTransportTelemetry({ status: 'ERROR', transportRetries: 0 })).toBe(false)
   })
 
   it('Complexity Routing: high complexity routes to ARCHITECT_CLOUD via the local classifier', async () => {

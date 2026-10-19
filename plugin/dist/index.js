@@ -40,6 +40,7 @@ exports.requestApprovalForWrite = requestApprovalForWrite;
 exports.resolveVerificationPolicy = resolveVerificationPolicy;
 exports.requestApprovalForVerification = requestApprovalForVerification;
 exports.requestApprovalForWorkspace = requestApprovalForWorkspace;
+exports.withTransportTelemetry = withTransportTelemetry;
 exports.apply = apply;
 const fs = __importStar(require("fs"));
 const savings_tracker_1 = require("./savings-tracker");
@@ -651,6 +652,21 @@ async function requestApprovalForWorkspace(ctx, exec, dir, reason) {
 }
 // Role resolution, the architect config and the lead tier moved to ./roles.ts and are imported
 // above. They are re-exported beside the other module re-exports because callers depend on them.
+/**
+ * Guarantee the transport telemetry on EVERY tool result.
+ *
+ * `delegateWorker` has paths that never reach the transport — a refused workspace, a starved worker —
+ * and they return before a retry counter exists. Normalising at the boundary means a consumer reads
+ * `transportRetries` without having to know which internal branch produced the verdict, and 0 is the
+ * truthful value for a path that made no request at all. `lastTransportError` is added only when the
+ * transport actually failed terminally, so its presence is itself the signal.
+ */
+function withTransportTelemetry(verdict) {
+    const normalized = { ...verdict, transportRetries: verdict?.transportRetries ?? 0 };
+    if (verdict?.lastTransportError)
+        normalized.lastTransportError = verdict.lastTransportError;
+    return normalized;
+}
 function apply(ctx, options = {}) {
     // Restore what was delegated before this process started. Without this, a restart silently widened
     // what the architect may read back — the gap a live run found, and the reason this is not merely
@@ -729,6 +745,7 @@ function apply(ctx, options = {}) {
                         return {
                             success: false,
                             status: 'CONTEXT_REFUSED',
+                            transportRetries: 0,
                             taskName: String(args?.taskName || ''),
                             message: String(containment.reason),
                             error: 'workspaceDir refused',
@@ -744,6 +761,7 @@ function apply(ctx, options = {}) {
                             return {
                                 success: false,
                                 status: 'CONTEXT_REFUSED',
+                                transportRetries: 0,
                                 taskName: String(args?.taskName || ''),
                                 message: String(containment.reason),
                                 error: 'workspaceDir refused: operator approval was not granted',
@@ -791,7 +809,7 @@ function apply(ctx, options = {}) {
                     // The record was always the caller's own claim about itself. There is no version of this route
                     // that a caller cannot author, so the route is gone and `selectAttestableTargets` is left
                     // unreferenced (still unit-tested) rather than half-wired.
-                    return verdict;
+                    return withTransportTelemetry(verdict);
                 },
             };
             // DRIFT ASSERTION against the FROZEN canonical snapshot, and it exists because the parameters were

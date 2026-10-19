@@ -987,6 +987,7 @@ export async function delegateWorker(
         success: false,
         status: 'WORKER_OUTPUT_STARVED',
         message: 'The delegation produced no output: ' + starvation.reason,
+        transportRetries,
         resolvedWorkspace: workspaceBase,
         filesWritten: [],
         workerFinishReason: data.choices?.[0]?.finish_reason ?? null,
