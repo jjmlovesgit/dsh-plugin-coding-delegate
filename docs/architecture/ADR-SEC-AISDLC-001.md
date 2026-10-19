@@ -205,6 +205,9 @@ written rather than ticked, so the deviations stay visible.
   equals the bytes at HEAD. Nine shipped in v0.5.8; `tools/exponential-backoff.ts` was delegated
   through the harness afterwards (`9311c05`), and the release workflow needed no change to accept it.
 - Ledger: **17 notes**, all verified against the pinned operator key (`afea373a`).
+- Tier 2: **1** protocol engine, `src/engine/task-state-machine.ts`, with a 9-test loopback suite
+  (`npm run test:engine`). Tier 3: **1** route adapter, `src/routes/task-routes.ts`, with 8 tests
+  (`npm run test:routes`).
 - Gate: **seven stages, eight tools** — hygiene; architecture + lint; contract fixtures; contract
   parity; ledger audit; tree coverage; Schema 1.2 lifecycle. `npm run gate` exits 0.
 - Coverage baseline: **none**. Seven primitives had drifted by one newline byte in `9595ccf`; they
@@ -324,10 +327,33 @@ independently verify the *reviewer's* signature inside the payload, which needs 
 reconstruction before it can be checked offline. And the archive is reproducible only under GNU tar,
 which is what both this host and CI's bash provide; a bsdtar host would produce different bytes.
 
+### Tier 3 activated
+
+The first production route file, `src/routes/task-routes.ts`, is the adapter between the Tier 2 task
+engine and a caller: 200 on a legal transition, 409 when the lifecycle refuses a well-formed request,
+400 for unusable arguments, and no path that turns a caller's mistake into a 500. Eight loopback
+tests. The architecture stage cruises 194 modules with zero violations and ESLint passes the live tree
+**with no baseline exemption** — the ceilings were not waived for the first real file.
+
+**What the ceiling taught, and the rule it produced.** The first draft of `applyAction` passed every
+limit by collapsing five branches into nested ternaries: 13 lines, complexity under 10, and worse than
+the switch it replaced. A line-count ceiling rewards compression, which is Goodhart's law in static
+analysis. Tier 3 now carries `no-nested-ternary`; the switch that replaced the ladder is the same 13
+lines, and the complexity ceiling always allowed it. Two legacy scripts contain the pattern and are
+covered by the file baseline — code that predates a rule is grandfathered by name, never by weakening
+the rule.
+
+**`gate:flake` no longer writes by default.** Running the sweep in the inner loop used to produce a
+two-line diff (a fresh timestamp and commit) in a committed evidence file. It now prints by default
+and writes only with `--out`, which the release workflow passes; an ordinary run leaves the tree
+clean.
+
 ### Open
 
 - **Offline dual-signature verification** is not implemented in the bundle: the reviewer block is
   authenticated by the operator's envelope, but the reviewer's own Ed25519 signature is not re-checked
   without canonical-JSON reconstruction.
-- **Tier 2/3 rule paths** are armed but still match no file in this repository until `src/` exists.
-  Arming is not production evidence, and it should not be read as such.
+- **Reserved paths not yet realised**: `src/ui/**`, `src/core/primitives/**` and
+  `src/core/protocol/**` match no file. The fences and ceilings are armed for them and were exercised
+  on `src/engine/**` and `src/routes/**`, but arming is not evidence for directories nothing has been
+  written into.

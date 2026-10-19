@@ -47,6 +47,12 @@ export default [
         'error',
         { max: maxLinesPerFunction, skipBlankLines: true, skipComments: true },
       ],
+      // GOODHART'S LAW, PATCHED. A line-count ceiling invites collapsing control flow into dense
+      // expressions -- measured here: the first Tier 3 adapter passed every ceiling by writing five
+      // nested ternaries, which is legal, compact, and worse than the switch it replaced. The
+      // complexity ceiling already permits a five-case switch (each case is +1), so the compression
+      // was never required. Forbidding the pattern removes the incentive rather than arguing with it.
+      'no-nested-ternary': 'error',
     },
   },
   {
@@ -85,6 +91,10 @@ export default [
     rules: {
       complexity: 'off',
       'max-lines-per-function': 'off',
+      // The baseline predates this rule too, and for the same reason: two legacy scripts contain a
+      // nested ternary, and rewriting them is a change to code nobody is touching. Files added after
+      // the rule landed are governed from their first commit.
+      'no-nested-ternary': 'off',
     },
   },
 ]

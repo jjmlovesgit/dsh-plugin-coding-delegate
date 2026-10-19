@@ -73,7 +73,9 @@ function sweep(file) {
   }
   const runs = Array.from({ length: RUNS }, () => runOnce(contract))
   const codes = [...new Set(runs.map((r) => r.status))]
-  const verdict = codes.length > 1 ? 'FLAKY' : runs[0].status === 0 ? 'PASS' : 'FAIL'
+  let verdict = 'FAIL'
+  if (codes.length > 1) verdict = 'FLAKY'
+  else if (runs[0].status === 0) verdict = 'PASS'
   return { file, contract, runs, verdict }
 }
 

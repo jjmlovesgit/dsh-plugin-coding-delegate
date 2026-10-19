@@ -263,7 +263,7 @@ and `npm run test:lifecycle` for the signer lifecycle.
 | :--- | :--- | :--- |
 | **1 — leaf primitives** | `tools/*.ts` | zero imports of any kind; a discrimination contract plus a targeted negative fixture; three-run flake evidence; a signed Schema 1.2 note whose digest matches the bytes at HEAD |
 | **2 — protocol engines** | `plugin/src/**` | must resolve entirely inside `plugin/`, because the package ships as `plugin/dist` and is installed on its own |
-| **3 — imperative shell** | `scripts/**`, and `src/routes/**` / `src/ui/**` once they exist | cyclomatic ceiling 10, 40 lines per function; may not be imported by tier 1 or tier 2 |
+| **3 — imperative shell** | `scripts/**`, `src/routes/**` | cyclomatic ceiling 10, 40 lines per function, no nested ternaries; may not be imported by tier 1 or tier 2 |
 
 The tier patterns and ceilings live in `scripts/policy-config.cjs`, and the paths the repository has not
 grown yet are armed rather than merely documented: `src/engine/**` importing `src/routes/**` already fails
