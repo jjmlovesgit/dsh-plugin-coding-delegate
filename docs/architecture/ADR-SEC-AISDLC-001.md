@@ -391,6 +391,57 @@ two-line diff (a fresh timestamp and commit) in a committed evidence file. It no
 and writes only with `--out`, which the release workflow passes; an ordinary run leaves the tree
 clean.
 
+### Transport retry and the vendored leaf (post-v0.5.9)
+
+The plugin's worker call used to be a single `fetch`. A refused connection or a gateway error returned
+an error verdict immediately, so a delegation that raced a restarting LM Studio failed for a reason
+that would have cleared in half a second. `delegation.ts` now wraps that call in a bounded retry.
+
+**The packaging boundary, and why the leaf is vendored.** `plugin/` installs standalone; a relative
+import into `../../tools/` resolves in this checkout and nowhere else, which is exactly what
+`tier2-owns-its-package` forbids. The attested leaf is therefore copied to
+`plugin/src/vendor/exponential-backoff.ts` — byte-identical, not adapted. The cost of a copy is drift,
+and the cost of drift is a retry schedule that no longer matches the implementation whose contract
+and attestation cover it.
+
+**The parity oracle is two checks, because they fail for different reasons.**
+`tests/exponential-backoff-parity.test.cjs` (`npm run test:parity`) asserts (1) SHA-256 byte identity
+between the two files, so the vendor remains a copy rather than an adaptation, and (2) behavioural
+equality across six configurations × attempts 0–40 × five seed states, because the two files execute
+through different paths — one is loaded by Node's type stripping in the test, the other compiled by
+`tsc` into `plugin/dist`. The first catches a deliberate tweak; the second catches a copy that no
+longer computes the same numbers.
+
+**The schedule** is three attempts with delays of 500 ms and 1000 ms — base 500, factor 2, ceiling
+4000, jitter none — driven by the vendored leaf and bounded inside the caller's existing `timeoutMs`.
+A single `AbortController` spans every attempt, so a retry can never outlive the deadline the caller
+set. Zero jitter is deliberate: a local endpoint does not need thundering-herd avoidance, and a
+deterministic schedule is replayable.
+
+**What is retried, and what is not.**
+
+| class | examples | behaviour |
+| :--- | :--- | :--- |
+| transport codes | `ECONNREFUSED`, `ECONNRESET`, `ETIMEDOUT`, `UND_ERR_CONNECT_TIMEOUT` | retried |
+| gateway statuses | 502, 503, 504 | retried |
+| **500** | context exhaustion, template parse failure, engine assertion | **fail fast** |
+| 4xx | 400, 401, 404, 422 | fail fast |
+| `AbortError` | the caller's deadline expired | fail fast |
+| unclassified | no transport `code` on the error | fail fast |
+
+**500 is excluded on purpose.** A local inference server emits it for deterministic faults — a prompt
+that overflows the context, a template the engine cannot parse, an assertion inside the runtime — and
+all three reproduce identically on the next attempt, so a retry adds 1.5 s to a failure that was
+already decided. 502/503/504 are gateway-shaped: model swapping, KV-cache reallocation, queue
+saturation, a proxy whose socket is not up. Those are the conditions another attempt can actually
+change.
+
+**The verdict carries the evidence.** `transportRetries` (0 on a first-attempt success) is on the
+success path and on every error path; `lastTransportError` names the terminal code when the transport
+failed outright. The established unreachable-worker message is unchanged for a first-attempt failure
+and gains an `(after N attempts)` suffix only when a retry happened, so existing consumers see no new
+text in the common case.
+
 ### Open
 
 - **Reserved paths not yet realised**: `src/ui/**`, `src/core/primitives/**` and
