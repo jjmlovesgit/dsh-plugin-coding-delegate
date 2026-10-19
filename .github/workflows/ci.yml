@@ -29,9 +29,21 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-          cache-dependency-path: plugin/package-lock.json
+          cache-dependency-path: |
+            plugin/package-lock.json
+            package-lock.json
 
       - run: npm ci
+
+      - name: Install the repository toolchain
+        # NOT REDUNDANT, AND NOT COVERED BY THE STEP ABOVE. This job's default working-directory is
+        # `plugin`, so the `npm ci` above installs only the plugin's dependencies. The root
+        # devDependencies (eslint, dependency-cruiser, typescript) are what `npm run gate`'s
+        # architecture stage calls, and without them that stage fails with `depcruise: not found` --
+        # measured on run 217, which died two seconds into the gate step having passed hygiene.
+        # The gate is a root script, so it needs the root install.
+        working-directory: .
+        run: npm ci
 
       - name: Build
         run: npm run build
