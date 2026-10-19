@@ -1,15 +1,15 @@
 ﻿# Delegation ledger audit - evidence population
 #
-# Generated : 2026-10-18T20:34:29-04:00
-# Commit    : 726b262942c5b907c0f3b681c260d9f8ccc85e8d
+# Generated : 2026-10-18T20:52:18-04:00
+# Commit    : 5d86fa6f545cae0695fc1a8a5fab9e22bf69d60a
 # Command   : node scripts/verify-delegation-ledger.cjs 2>&1   (both streams, including the trust-root notice)
-# Notes     : 9
+# Notes     : 16
 #
 # This artefact is generated evidence, not source. Regenerate it at audit time: it records the
 # ledger as of the commit above, and it goes stale the moment a new note is attached.
 pinned key: keys/delegation-operator.pub (agrees with ~/.dsh/keys/delegation_ed25519.pub, ~/.dsh/keys/delegation_ed25519.pem (derived)) · fingerprint afea373a verified
 
-=== DELEGATION LEDGER AUDIT (9 notes) ===
+=== DELEGATION LEDGER AUDIT (16 notes) ===
 
 Commit 0286c6b4  (note blob dfadc948)
   ok    Ed25519 signature valid against the pinned operator key
@@ -18,6 +18,48 @@ Commit 0286c6b4  (note blob dfadc948)
   ok    1 artifact(s) match the anchored tree
   --    legacy 1.0 payload, anchored before the 1.1 cutoff; grandfathered and resolved below
   ok    contractHash recomputed by convention against tests/contracts/ring-buffer.contract.cjs
+  ok    worker model is the authorized local one (qwen/qwen3.8-27b)
+
+Commit 0e05ef84  (note blob 5abd2893)
+  ok    Ed25519 signature valid against the pinned operator key
+  ok    attached to the commit its payload names (0e05ef84)
+  ok    baseCommit 0e05ef84 is an ancestor of main
+  ok    1 artifact(s) match the anchored tree
+  ok    contractHash reproduced from the 1 contract(s) recorded in the payload
+  ok    1 recorded contract(s) covered by the discrimination gate
+  [AUDIT_NOTICE: in-repo reviewer key used; out-of-band pin recommended for CI]
+  ok    reviewer key resolved from keys/delegation-reviewer.pub (in-repo fallback)
+  --    the reviewer trust decision came from this repository, so it is reviewable rather than independent
+  ok    worker signature valid over the canonical record, reviewer block excluded
+  ok    reviewer signature valid over the canonical record under the resolved key
+  ok    worker model is the authorized local one (qwen/qwen3.8-27b)
+
+Commit 135b0e93  (note blob 337cffa1)
+  ok    Ed25519 signature valid against the pinned operator key
+  ok    attached to the commit its payload names (135b0e93)
+  ok    baseCommit 135b0e93 is an ancestor of main
+  ok    1 artifact(s) match the anchored tree
+  ok    contractHash reproduced from the 1 contract(s) recorded in the payload
+  ok    1 recorded contract(s) covered by the discrimination gate
+  [AUDIT_NOTICE: in-repo reviewer key used; out-of-band pin recommended for CI]
+  ok    reviewer key resolved from keys/delegation-reviewer.pub (in-repo fallback)
+  --    the reviewer trust decision came from this repository, so it is reviewable rather than independent
+  ok    worker signature valid over the canonical record, reviewer block excluded
+  ok    reviewer signature valid over the canonical record under the resolved key
+  ok    worker model is the authorized local one (qwen/qwen3.8-27b)
+
+Commit 20624367  (note blob f0db568d)
+  ok    Ed25519 signature valid against the pinned operator key
+  ok    attached to the commit its payload names (20624367)
+  ok    baseCommit 20624367 is an ancestor of main
+  ok    1 artifact(s) match the anchored tree
+  ok    contractHash reproduced from the 1 contract(s) recorded in the payload
+  ok    1 recorded contract(s) covered by the discrimination gate
+  [AUDIT_NOTICE: in-repo reviewer key used; out-of-band pin recommended for CI]
+  ok    reviewer key resolved from keys/delegation-reviewer.pub (in-repo fallback)
+  --    the reviewer trust decision came from this repository, so it is reviewable rather than independent
+  ok    worker signature valid over the canonical record, reviewer block excluded
+  ok    reviewer signature valid over the canonical record under the resolved key
   ok    worker model is the authorized local one (qwen/qwen3.8-27b)
 
 Commit 35fde328  (note blob 0cdf69e2)
@@ -43,10 +85,38 @@ Commit 4b4571a1  (note blob a69fb656)
   ok    contractHash recomputed by convention against tests/contracts/priority-queue.contract.cjs
   ok    worker model is the authorized local one (qwen/qwen3.8-27b)
 
+Commit 60509a62  (note blob 8a542982)
+  ok    Ed25519 signature valid against the pinned operator key
+  ok    attached to the commit its payload names (60509a62)
+  ok    baseCommit 60509a62 is an ancestor of main
+  ok    1 artifact(s) match the anchored tree
+  ok    contractHash reproduced from the 1 contract(s) recorded in the payload
+  ok    1 recorded contract(s) covered by the discrimination gate
+  [AUDIT_NOTICE: in-repo reviewer key used; out-of-band pin recommended for CI]
+  ok    reviewer key resolved from keys/delegation-reviewer.pub (in-repo fallback)
+  --    the reviewer trust decision came from this repository, so it is reviewable rather than independent
+  ok    worker signature valid over the canonical record, reviewer block excluded
+  ok    reviewer signature valid over the canonical record under the resolved key
+  ok    worker model is the authorized local one (qwen/qwen3.8-27b)
+
 Commit 726b2629  (note blob 9da496e0)
   ok    Ed25519 signature valid against the pinned operator key
   ok    attached to the commit its payload names (726b2629)
   ok    baseCommit 726b2629 is an ancestor of main
+  ok    1 artifact(s) match the anchored tree
+  ok    contractHash reproduced from the 1 contract(s) recorded in the payload
+  ok    1 recorded contract(s) covered by the discrimination gate
+  [AUDIT_NOTICE: in-repo reviewer key used; out-of-band pin recommended for CI]
+  ok    reviewer key resolved from keys/delegation-reviewer.pub (in-repo fallback)
+  --    the reviewer trust decision came from this repository, so it is reviewable rather than independent
+  ok    worker signature valid over the canonical record, reviewer block excluded
+  ok    reviewer signature valid over the canonical record under the resolved key
+  ok    worker model is the authorized local one (qwen/qwen3.8-27b)
+
+Commit 7a80b48b  (note blob 5801fb3b)
+  ok    Ed25519 signature valid against the pinned operator key
+  ok    attached to the commit its payload names (7a80b48b)
+  ok    baseCommit 7a80b48b is an ancestor of main
   ok    1 artifact(s) match the anchored tree
   ok    contractHash reproduced from the 1 contract(s) recorded in the payload
   ok    1 recorded contract(s) covered by the discrimination gate
@@ -102,16 +172,51 @@ Commit ca05be71  (note blob 834dfcd7)
   ok    1 recorded contract(s) covered by the discrimination gate
   ok    worker model is the authorized local one (qwen/qwen3.8-27b)
 
+Commit d47e7b78  (note blob e4d5a638)
+  ok    Ed25519 signature valid against the pinned operator key
+  ok    attached to the commit its payload names (d47e7b78)
+  ok    baseCommit d47e7b78 is an ancestor of main
+  ok    1 artifact(s) match the anchored tree
+  ok    contractHash reproduced from the 1 contract(s) recorded in the payload
+  ok    1 recorded contract(s) covered by the discrimination gate
+  [AUDIT_NOTICE: in-repo reviewer key used; out-of-band pin recommended for CI]
+  ok    reviewer key resolved from keys/delegation-reviewer.pub (in-repo fallback)
+  --    the reviewer trust decision came from this repository, so it is reviewable rather than independent
+  ok    worker signature valid over the canonical record, reviewer block excluded
+  ok    reviewer signature valid over the canonical record under the resolved key
+  ok    worker model is the authorized local one (qwen/qwen3.8-27b)
+
+Commit f5d676e5  (note blob be493930)
+  ok    Ed25519 signature valid against the pinned operator key
+  ok    attached to the commit its payload names (f5d676e5)
+  ok    baseCommit f5d676e5 is an ancestor of main
+  ok    1 artifact(s) match the anchored tree
+  ok    contractHash reproduced from the 1 contract(s) recorded in the payload
+  ok    1 recorded contract(s) covered by the discrimination gate
+  [AUDIT_NOTICE: in-repo reviewer key used; out-of-band pin recommended for CI]
+  ok    reviewer key resolved from keys/delegation-reviewer.pub (in-repo fallback)
+  --    the reviewer trust decision came from this repository, so it is reviewable rather than independent
+  ok    worker signature valid over the canonical record, reviewer block excluded
+  ok    reviewer signature valid over the canonical record under the resolved key
+  ok    worker model is the authorized local one (qwen/qwen3.8-27b)
+
 === SUMMARY ===
   0286c6b4   contract=VERIFIED    qwen/qwen3.8-27b
+  0e05ef84   contract=SELF-DESCRIBED qwen/qwen3.8-27b
+  135b0e93   contract=SELF-DESCRIBED qwen/qwen3.8-27b
+  20624367   contract=SELF-DESCRIBED qwen/qwen3.8-27b
   35fde328   contract=SELF-DESCRIBED qwen/qwen3.8-27b
   4b4571a1   contract=VERIFIED    qwen/qwen3.8-27b
+  60509a62   contract=SELF-DESCRIBED qwen/qwen3.8-27b
   726b2629   contract=SELF-DESCRIBED qwen/qwen3.8-27b
+  7a80b48b   contract=SELF-DESCRIBED qwen/qwen3.8-27b
   82c23c3d   contract=VERIFIED    qwen/qwen3.8-27b
   980ff097   contract=SELF-DESCRIBED qwen/qwen3.8-27b
   a113cff5   contract=SELF-DESCRIBED qwen/qwen3.8-27b
   ad2b1974   contract=SELF-DESCRIBED qwen/qwen3.8-27b
   ca05be71   contract=SELF-DESCRIBED qwen/qwen3.8-27b
+  d47e7b78   contract=SELF-DESCRIBED qwen/qwen3.8-27b
+  f5d676e5   contract=SELF-DESCRIBED qwen/qwen3.8-27b
 
 AUDIT PASSED: every note is attributed to the pinned operator key, attached to the commit it names, its artifacts and contracts match that commit's tree, every recorded contract is covered by the discrimination gate, and every record names the authorized local worker model.
 NOTE: this proves the records present are sound. It cannot detect a record that was deleted.
