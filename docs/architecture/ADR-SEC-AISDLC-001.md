@@ -332,8 +332,16 @@ the reviewer signature, which is exactly the separation the second signature exi
 mutated `keyFingerprint` fails both the fingerprint and the signature check, and the nine untouched
 notes still verify.
 
-**One limit remains**: the archive is reproducible only under GNU tar, which is what both this host
-and CI's bash provide; a bsdtar host would produce different bytes.
+**Packaging and canonicalisation are now mechanically guarded, not merely documented.** The exporter
+refuses to build an archive when `tar --version` is not GNU tar — bsdtar has no `--sort=name` or
+`--owner` and would silently produce a different digest for the same tree — and the refusal branch is
+unit-tested with a synthetic banner, because the host that builds the bundle always has GNU tar and
+the branch this machine never takes is the one that needs a test.
+`tests/canonical-json-parity.test.cjs` compares the embedded canonicaliser against
+`plugin/src/canonical-json.ts` over a corpus that reaches every branch of the algorithm; the two are
+forbidden to drift in OUTPUT, which is the property that matters, since the authority is TypeScript
+and the copy is plain JavaScript inside a template literal. Verified by mutating the comparator: the
+oracle reports `{"b":1,"a":2}` against the reference's `{"a":2,"b":1}`.
 
 ### Tier 3 activated
 

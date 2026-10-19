@@ -72,6 +72,15 @@ jobs:
         working-directory: .
         run: npm run test:routes
 
+      - name: Canonicalizer parity oracle
+        # Two implementations of RFC 8785 exist: the authority in plugin/src and the copy embedded in
+        # the bundle verifier, which may carry no dependencies. They must produce identical bytes for
+        # the same value or every reviewer signature fails at a release, so this compares outputs over
+        # a corpus covering every branch -- a text comparison could not, since one is TypeScript and
+        # the other is plain JavaScript inside a template literal.
+        working-directory: .
+        run: npm run test:parity
+
       - name: Regression oracles
         # Exercises the guard, DLP gate, redaction, containment and verification paths against
         # the built artefact.

@@ -334,6 +334,35 @@ function exportOne(file, notes, out) {
   }
 }
 
+/**
+ * Why a banner is not GNU tar, or null when it is.
+ *
+ * Kept as a pure predicate rather than inline in the archive step so the refusal can be tested on a
+ * host that HAS GNU tar: the branch that matters is the one this machine never takes. bsdtar has
+ * `--mtime` but no `--sort=name` or `--owner`, so it silently produces a different archive for the
+ * same tree -- which is the exact property the reproducibility claim rests on.
+ */
+function gnuTarBannerProblem(banner) {
+  const text = String(banner || '')
+  if (/GNU tar/i.test(text)) return null
+  const firstLine = text.split('\n')[0].trim()
+  return (
+    'deterministic archives require GNU tar (--sort=name, --mtime, --owner); this host reports "' +
+    (firstLine || 'no version banner') +
+    '", which cannot be relied on for a reproducible digest'
+  )
+}
+
+/** Refuse to build an archive the reproducibility claim does not cover. */
+function assertGnuTar() {
+  const version = spawnSync('tar', ['--version'], { encoding: 'utf8' })
+  if (version.error || version.status !== 0) {
+    fail('TAR', 'cannot invoke tar to check its implementation: ' + String(version.error || version.status))
+  }
+  const problem = gnuTarBannerProblem(String(version.stdout || '') + String(version.stderr || ''))
+  if (problem) fail('TAR', problem)
+}
+
 function makeTarball(out, commitDate) {
   // Run tar from the parent directory with RELATIVE names. Passing an absolute Windows path to -f
   // makes tar read `C:` as a remote host spec and fail with "Child returned status 128" -- measured.
@@ -344,6 +373,7 @@ function makeTarball(out, commitDate) {
   const parent = path.dirname(out)
   const base = path.basename(out)
   const archiveName = base + '.tar.gz'
+  assertGnuTar()
   const args = [
     '--sort=name',
     '--mtime=' + commitDate,
@@ -397,4 +427,8 @@ function main() {
   console.log('  done  ' + params.out)
 }
 
-main()
+if (require.main === module) main()
+
+// The tar guard is exported so its refusal branch can be exercised on a host that HAS GNU tar --
+// the branch that matters is the one this machine never takes.
+module.exports = { gnuTarBannerProblem }
