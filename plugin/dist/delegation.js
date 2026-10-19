@@ -511,7 +511,11 @@ const TRANSPORT_BACKOFF = new exponential_backoff_1.ExponentialBackoff({
     factor: 2,
     jitter: 'none',
 });
-const RETRYABLE_STATUS = new Set([500, 502, 503, 504]);
+// 500 IS DELIBERATELY ABSENT. A local inference server emits 500 for deterministic faults -- context
+// exhaustion, an unparseable template, an engine assertion -- and repeating those three times only
+// adds 1.5 s before the same error. 502/503/504 are gateway-shaped: model swapping, KV-cache
+// reallocation, queue saturation, a proxy whose socket is not up yet. Those are worth another attempt.
+const RETRYABLE_STATUS = new Set([502, 503, 504]);
 const RETRYABLE_CODES = new Set(['ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT']);
 function transportErrorCode(error) {
     for (const candidate of [error, error?.cause]) {

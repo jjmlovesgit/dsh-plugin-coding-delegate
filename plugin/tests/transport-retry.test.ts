@@ -58,7 +58,7 @@ describe('fetchWithTransportRetry', () => {
   });
 
   it('retries every status classified as transient', async () => {
-    for (const status of [500, 502, 503, 504]) {
+    for (const status of [502, 503, 504]) {
       const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(status)).mockResolvedValueOnce(jsonResponse(200));
       const { promise } = run(fetchMock);
       const attempt = await promise;
@@ -66,6 +66,17 @@ describe('fetchWithTransportRetry', () => {
       expect(attempt.retries).toBe(1);
       vi.unstubAllGlobals();
     }
+  });
+
+  it('does not retry a 500: a local engine fault is deterministic', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(500));
+    const { promise, sleep } = run(fetchMock);
+    const attempt = await promise;
+
+    expect(attempt.response?.status).toBe(500);
+    expect(attempt.retries).toBe(0);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
   });
 
   it('does not retry a 4xx: the request itself is wrong', async () => {
@@ -94,12 +105,12 @@ describe('fetchWithTransportRetry', () => {
     expect(sleep.mock.calls.map((call) => call[0])).toEqual([500, 1000]);
   });
 
-  it('returns the last response when the final attempt is still a 5xx', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(500));
+  it('returns the last response when the final attempt is still transient', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(503));
     const { promise } = run(fetchMock);
     const attempt = await promise;
 
-    expect(attempt.response?.status).toBe(500);
+    expect(attempt.response?.status).toBe(503);
     expect(attempt.retries).toBe(TRANSPORT_MAX_ATTEMPTS - 1);
     expect(fetchMock).toHaveBeenCalledTimes(TRANSPORT_MAX_ATTEMPTS);
   });
