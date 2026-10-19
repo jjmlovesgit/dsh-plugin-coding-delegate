@@ -51,13 +51,14 @@ const SENSIBLE_DEFAULTS = Object.freeze({
     corePrimitives: Object.freeze({
       pattern: '^tools/',
       /**
-       * The subset the leaf rule binds: one `.ts` file directly under `tools/`, which is exactly the
-       * set `check-contracts.cjs` governs (it filters `.ts` and never `.d.ts`). `tools/` also holds
-       * `.mjs` dispatchers and probes -- operator tooling that legitimately imports Node builtins and
-       * is not a primitive. Measured: with the whole directory bound, the fence reported seven
-       * violations, every one of them a dispatcher importing `fs` or `http`.
+       * The subset the leaf rule and the contract gates bind: one `.ts` file directly under `tools/`
+       * or under `src/core/primitives/`, which is exactly the set `check-contracts.cjs` governs. Both
+       * directories are Tier 1, and until this pattern named both, a primitive under the reserved path
+       * was outside the contract, discrimination and attestation gates entirely. `tools/` also holds
+       * `.mjs` dispatchers -- operator tooling that legitimately imports Node builtins -- which is why
+       * the pattern is files-and-extension rather than the directory.
        */
-      contractGoverned: '^tools/[^/]+\\.ts$',
+      contractGoverned: '^(tools/[^/]+|src/core/primitives/[^/]+)\\.ts$',
       futurePaths: Object.freeze(['^src/core/primitives/']),
       futureGlobs: Object.freeze(['src/core/primitives/**']),
       globs: Object.freeze(['tools/**']),

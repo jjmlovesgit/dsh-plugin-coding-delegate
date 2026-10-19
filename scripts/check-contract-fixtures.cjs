@@ -156,15 +156,20 @@ for (const contract of contractFiles) {
   const mirrorRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-fixture-' + base + '-'))
   let negated
   try {
-    const mirrorTools = path.join(mirrorRoot, 'tools')
-    const mirrorContracts = path.join(mirrorRoot, 'tests', 'contracts')
-    fs.mkdirSync(mirrorTools, { recursive: true })
-    fs.mkdirSync(mirrorContracts, { recursive: true })
-
-    // The contract reaches its module as `../../tools/<base>.ts` relative to its own directory, so the
-    // fixture takes exactly that position and the contract file is copied byte-for-byte.
+    // The contract reaches its module as a path relative to tests/contracts, so the fixture takes
+    // exactly that position and the contract file is copied byte-for-byte. BOTH Tier 1 layouts are
+    // populated: a contract may reach `../../tools/<base>.ts` or `../../src/core/primitives/<base>.ts`,
+    // and mirroring both means the runner never has to parse the contract to learn which one it is.
     const extension = path.extname(fixture)
-    fs.copyFileSync(fixtureAbs, path.join(mirrorTools, base + extension))
+    for (const mirrorModuleDir of [
+      path.join(mirrorRoot, 'tools'),
+      path.join(mirrorRoot, 'src', 'core', 'primitives'),
+    ]) {
+      fs.mkdirSync(mirrorModuleDir, { recursive: true })
+      fs.copyFileSync(fixtureAbs, path.join(mirrorModuleDir, base + extension))
+    }
+    const mirrorContracts = path.join(mirrorRoot, 'tests', 'contracts')
+    fs.mkdirSync(mirrorContracts, { recursive: true })
     const mirroredContract = path.join(mirrorContracts, contract)
     fs.copyFileSync(contractAbs, mirroredContract)
 
