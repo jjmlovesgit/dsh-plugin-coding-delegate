@@ -85,6 +85,25 @@ export default [
     },
   },
   {
+    // TIER 1 CEILINGS. These apply to the leaf primitives themselves, not only to the shell that calls
+    // them. Until now a Tier 1 file was bounded by its discrimination contract and nothing else, so a
+    // 300-line function with a ternary ladder was legal as long as its tests passed -- compliance by
+    // accident rather than by construction. The limits are the same numbers as Tier 3 because the
+    // concern is the same: a primitive that cannot be read cannot be verified by reading it.
+    //
+    // Note what this does NOT do: it does not replace the contract, the mutant fixture or the ledger.
+    // Complexity is a readability proxy; the contract is the behavioural claim.
+    files: ['tools/**/*.ts', 'src/core/primitives/**/*.ts'],
+    rules: {
+      complexity: ['error', max],
+      'max-lines-per-function': [
+        'error',
+        { max: maxLinesPerFunction, skipBlankLines: true, skipComments: true },
+      ],
+      'no-nested-ternary': 'error',
+    },
+  },
+  {
     // The ratchet. Later config objects override earlier ones for the files they name, so these
     // files keep every other rule while the two ceilings are switched off for them.
     files: baseline,
