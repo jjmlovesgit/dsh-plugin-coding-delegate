@@ -16,12 +16,13 @@
  * exactly when the bytes an operator reviewed are the bytes that are there now, and it survives
  * rebase, squash and amend.
  *
- * THE BASELINE IS A RATCHET, AND IT IS KEYED BY DIGEST RATHER THAN BY PATH. Introducing this gate on
- * 2026-10-18 found seven primitives whose bytes had drifted after sealing -- `9595ccf` appended a
- * missing newline to seven files, one byte each, which is enough to invalidate a content digest. They
- * are grandfathered so the gate can be adopted without a red build, but a grandfathered entry names
- * an EXACT digest: any subsequent edit changes the digest, stops matching, and must be attested. The
- * file only shrinks, and `--write-baseline` exists to record the initial state once, deliberately.
+ * THERE IS NO BASELINE ANY MORE, AND THAT IS THE POINT. When this gate was introduced, seven
+ * primitives had drifted after sealing -- `9595ccf` appended one newline byte to seven files, which
+ * is enough to invalidate a content digest -- so a digest-keyed baseline grandfathered their exact
+ * bytes and the file was a ratchet that could only shrink. On 2026-10-18 all seven were re-attested
+ * against their post-hygiene bytes (one empty commit per unit, because a note is keyed by commit),
+ * the baseline was deleted, and the escape hatch was removed with it. A missing note is now
+ * unconditionally a failure; the git history holds the seven records.
  *
  * SIGNATURE CHECKING IS DELEGATED, DELIBERATELY. `verifyEnvelope` from the shipped plugin verifies
  * each covering note's Ed25519 signature against the key the envelope carries, which rejects a
@@ -29,20 +30,18 @@
  * runs immediately before this one; re-implementing the pin here would be a second opinion about the
  * trust root, and two opinions is how they drift apart.
  *
- * Usage: node scripts/verify-tree-attestations.cjs [--write-baseline]
- * Exit 0 when every Tier 1 primitive at HEAD is covered or grandfathered, 1 otherwise.
+ * Usage: node scripts/verify-tree-attestations.cjs
+ * Exit 0 when every Tier 1 primitive at HEAD is covered, 1 otherwise.
  */
 'use strict'
 
 const crypto = require('node:crypto')
-const fs = require('node:fs')
 const path = require('node:path')
 const { spawnSync } = require('node:child_process')
 const { loadPolicyConfig } = require('./policy-config.cjs')
 const { verifyEnvelope } = require('../plugin/dist/crypto-attestation.js')
 
 const REPO_ROOT = path.resolve(__dirname, '..')
-const BASELINE_PATH = path.join(__dirname, 'attestation-baseline.json')
 const { config } = loadPolicyConfig(REPO_ROOT)
 const TIER1 = new RegExp(config.tiers.corePrimitives.contractGoverned)
 
@@ -99,49 +98,31 @@ function covers(note, file, sha256) {
   return Array.isArray(artifacts) && artifacts.some((a) => a && a.path === file && a.sha256 === sha256)
 }
 
-function readBaseline() {
-  try {
-    const parsed = JSON.parse(fs.readFileSync(BASELINE_PATH, 'utf8'))
-    return Array.isArray(parsed) ? parsed : []
-  } catch {
-    return []
-  }
-}
-
 /** Classify one primitive at HEAD. */
-function assess(file, notes, baseline) {
+function assess(file, notes) {
   const sha256 = sha256AtHead(file)
   if (!sha256) return { file, sha256: null, state: 'unreadable' }
   const covering = notes.find((note) => covers(note, file, sha256))
-  if (covering && verifyEnvelope(covering.envelope)) return { file, sha256, state: 'attested', covering }
-  if (covering) return { file, sha256, state: 'bad-signature', covering }
-  const known = baseline.some((entry) => entry.path === file && entry.sha256 === sha256)
-  return { file, sha256, state: known ? 'grandfathered' : 'missing' }
+  if (!covering) return { file, sha256, state: 'missing' }
+  return verifyEnvelope(covering.envelope)
+    ? { file, sha256, state: 'attested', covering }
+    : { file, sha256, state: 'bad-signature', covering }
 }
 
 function report(result) {
   if (result.state === 'attested') {
     const reviewer = result.covering.payload.reviewer && result.covering.payload.reviewer.identity
-    const provenance = reviewer ? 'reviewed by ' + reviewer : 'spec ' + (result.covering.payload.specVersion || '?') + ', no reviewer block'
-    console.log('  ok           ' + result.file + ' <- ' + result.covering.commit.slice(0, 7) + ' (' + provenance + ')')
-  } else if (result.state === 'grandfathered') {
-    console.log('  grandfathered ' + result.file + ' (digest unchanged since the baseline; any edit must be attested)')
+    const provenance = reviewer
+      ? 'reviewed by ' + reviewer
+      : 'spec ' + (result.covering.payload.specVersion || '?') + ', no reviewer block'
+    console.log('  ok       ' + result.file + ' <- ' + result.covering.commit.slice(0, 7) + ' (' + provenance + ')')
   } else if (result.state === 'bad-signature') {
-    console.error('  FAIL         ' + result.file + ': the covering note signature does not verify')
+    console.error('  FAIL     ' + result.file + ': the covering note signature does not verify')
   } else if (result.state === 'unreadable') {
-    console.error('  FAIL         ' + result.file + ': cannot read the HEAD blob')
+    console.error('  FAIL     ' + result.file + ': cannot read the HEAD blob')
   } else {
-    console.error('  MISSING      ' + result.file + ': no note records sha256 ' + String(result.sha256).slice(0, 12) + '...')
+    console.error('  MISSING  ' + result.file + ': no note records sha256 ' + String(result.sha256).slice(0, 12) + '...')
   }
-}
-
-function writeBaseline(results) {
-  const entries = results
-    .filter((r) => r.state === 'missing' && r.sha256)
-    .map((r) => ({ path: r.file, sha256: r.sha256 }))
-  fs.writeFileSync(BASELINE_PATH, JSON.stringify(entries, null, 2) + '\n')
-  console.log('\nwrote ' + entries.length + ' grandfathered entr(ies) to ' + path.basename(BASELINE_PATH) + '.')
-  console.log('Review and commit it; the list must only shrink.')
 }
 
 function main() {
@@ -151,17 +132,11 @@ function main() {
     process.exit(1)
   }
   const notes = readNotes()
-  const baseline = readBaseline()
   console.log('=== tree attestation coverage (' + files.length + ' primitive(s) at HEAD, ' + notes.length + ' note(s)) ===')
-  const results = files.map((file) => assess(file, notes, baseline))
+  const results = files.map((file) => assess(file, notes))
   results.forEach(report)
 
-  if (process.argv.includes('--write-baseline')) {
-    writeBaseline(results)
-    process.exit(0)
-  }
-
-  const failed = results.filter((r) => r.state === 'missing' || r.state === 'bad-signature' || r.state === 'unreadable')
+  const failed = results.filter((r) => r.state !== 'attested')
   if (failed.length > 0) {
     console.error('')
     console.error(
@@ -171,7 +146,7 @@ function main() {
     console.error('Produce the unit with: npm run delegate:unit -- --target <path> --contract <path> --mutant <path>')
     process.exit(1)
   }
-  console.log('All ' + files.length + ' Tier 1 primitive(s) at HEAD are covered or grandfathered.')
+  console.log('All ' + files.length + ' Tier 1 primitive(s) at HEAD are covered by a signed note.')
 }
 
 main()
