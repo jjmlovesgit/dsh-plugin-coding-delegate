@@ -68,8 +68,14 @@ module.exports = {
         'plugin/src must resolve inside plugin/: the package ships as plugin/dist and is installed ' +
         'on its own, so a path that climbs out of the package works here and nowhere else. Stated ' +
         'as the trees it may not reach rather than as "everything except plugin/src", because Node ' +
-        'builtins and npm packages resolve outside plugin/src by design and are not the hazard.',
-      from: { path: tierPath(tiers.protocolEngines) },
+        'builtins and npm packages resolve outside plugin/src by design and are not the hazard. ' +
+        'THE RESERVED TIER 2 PATHS ARE DELIBERATELY NOT BOUND BY THIS RULE: src/engine is a ' +
+        'protocol engine but not a package, and the policy allows Tier 2 to consume Tier 1 ' +
+        'primitives. Measured: with futurePaths included in `from`, importing ' +
+        'tools/exponential-backoff from src/engine was refused, which would have stopped the first ' +
+        'Tier 2 engine from using the attested backoff it exists to use. Tier 2 -> Tier 3 is still ' +
+        'refused, by the rule above.',
+      from: { path: tiers.protocolEngines.pattern },
       to: { path: '^(tools|scripts|tests|experiments|src)/' },
     },
   ],
