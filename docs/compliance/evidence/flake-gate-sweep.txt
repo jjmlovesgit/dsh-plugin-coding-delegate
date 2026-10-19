@@ -1,7 +1,7 @@
 # Tier 1 flake sweep - evidence population
 #
-# Generated : 2026-10-19T01:04:50.988Z
-# Commit    : 1df517cfc267204e457f2f0886398def4f1ce462
+# Generated : 2026-10-19T01:43:52.515Z
+# Commit    : 9311c05e4ccc9cfe75613f34430542a87c780be5
 # Command   : node scripts/flake-gate-sweep.cjs
 # Runs      : 3 per contract, each in its own subprocess
 # Verdicts  : PASS = all runs agreed and passed; FAIL = all agreed and failed; FLAKY = disagreement
@@ -11,6 +11,7 @@
 PASS  async-mutex.ts  tests/contracts/async-mutex.contract.cjs
 PASS  currency.ts  tests/contracts/currency.contract.cjs
 PASS  event-emitter.ts  tests/contracts/event-emitter.contract.cjs
+PASS  exponential-backoff.ts  tests/contracts/exponential-backoff.contract.cjs
 PASS  json-canonical-merge.ts  tests/contracts/json-canonical-merge.contract.cjs
 PASS  lru-cache.ts  tests/contracts/lru-cache.contract.cjs
 PASS  priority-queue.ts  tests/contracts/priority-queue.contract.cjs

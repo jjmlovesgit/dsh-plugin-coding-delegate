@@ -201,15 +201,16 @@ written rather than ticked, so the deviations stay visible.
 
 ### Final state
 
-- Tier 1 primitives: **9**, every one covered by a signed Schema 1.2 note whose recorded SHA-256
-  equals the bytes at HEAD.
-- Ledger: **16 notes**, all verified against the pinned operator key (`afea373a`).
+- Tier 1 primitives: **10**, every one covered by a signed Schema 1.2 note whose recorded SHA-256
+  equals the bytes at HEAD. Nine shipped in v0.5.8; `tools/exponential-backoff.ts` was delegated
+  through the harness afterwards (`9311c05`), and the release workflow needed no change to accept it.
+- Ledger: **17 notes**, all verified against the pinned operator key (`afea373a`).
 - Gate: **seven stages, eight tools** — hygiene; architecture + lint; contract fixtures; contract
   parity; ledger audit; tree coverage; Schema 1.2 lifecycle. `npm run gate` exits 0.
 - Coverage baseline: **none**. Seven primitives had drifted by one newline byte in `9595ccf`; they
   were re-anchored to empty commits on 2026-10-18, and the baseline file and its `--write-baseline`
   flag were deleted rather than retained.
-- Flake evidence: **9 contracts x 3 runs = 27**, zero disagreements, in
+- Flake evidence: **10 contracts x 3 runs = 30**, zero disagreements, in
   `docs/compliance/evidence/flake-gate-sweep.txt` (`npm run gate:flake`).
 
 ### Deviations from the plan, and why
