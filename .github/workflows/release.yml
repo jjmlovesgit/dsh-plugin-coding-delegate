@@ -1,0 +1,109 @@
+name: Release
+
+# Tag-triggered, and deliberately NOT a prepublish hook.
+#
+# WHY NOT `prepublishOnly`. The root manifest is `private: true` and is never published, so a
+# prepublish script there can never run for a real publish. The published artefact is `plugin/`, and
+# it ships only `dist/` -- no Tier 1 primitive is ever packaged -- so a check asserting "every
+# bundled primitive has a ledger entry" would be true by construction and could never fail. A gate
+# that cannot fail is an administrative illusion; this workflow replaces it with checks that can.
+#
+# WHAT A TAG BUYS THAT A PUSH DOES NOT. The push-time CI runs the structural gate on every commit.
+# A release additionally asserts, at the exact tagged tree, that all nine Tier 1 contracts are
+# STABLE across three clean subprocess runs each (27 runs), and publishes both evidence populations
+# as release assets with a checksum file. Anyone holding the release can recompute the hashes and
+# re-run the audit against the tag.
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # Full history: the ledger audit proves each note's anchor is an ancestor of main and reads
+          # artifacts out of that commit's tree. A depth-1 checkout fails every note.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            plugin/package-lock.json
+            package-lock.json
+
+      - name: Install plugin dependencies
+        working-directory: plugin
+        run: npm ci
+
+      - name: Install the repository toolchain
+        # The gate's architecture stage calls depcruise and eslint, which live in the ROOT
+        # devDependencies. The `npm ci` above runs in plugin/ and installs neither.
+        working-directory: .
+        run: npm ci
+
+      - name: Fetch the delegation ledger
+        working-directory: .
+        run: git fetch origin 'refs/notes/delegations:refs/notes/delegations'
+
+      - name: Structural and coverage gate
+        working-directory: .
+        run: npm run gate
+
+      - name: Flake sweep (9 contracts x 3 runs)
+        # Not part of the every-commit gate: 27 subprocesses on every commit tempts `--no-verify`.
+        # A release is the right cadence, and the sweep writes its own evidence file.
+        working-directory: .
+        run: npm run gate:flake
+
+      - name: Regenerate the ledger evidence at the tag
+        # The committed copy records whatever commit it was generated at, so it is stale by
+        # definition at release time. Regenerate it here rather than shipping the old one.
+        working-directory: .
+        shell: bash
+        run: |
+          {
+            echo "# Delegation ledger audit - evidence population"
+            echo "#"
+            echo "# Generated : $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "# Commit    : $(git rev-parse HEAD)"
+            echo "# Tag       : ${GITHUB_REF_NAME}"
+            echo "# Command   : node scripts/verify-delegation-ledger.cjs 2>&1"
+            echo "#"
+            echo ""
+          } > docs/compliance/evidence/ledger-audit-population.txt
+          node scripts/verify-delegation-ledger.cjs >> docs/compliance/evidence/ledger-audit-population.txt 2>&1
+
+      - name: Checksum the evidence
+        working-directory: docs/compliance/evidence
+        shell: bash
+        run: |
+          sha256sum ledger-audit-population.txt flake-gate-sweep.txt > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Attach evidence to the release
+        # `gh` is preinstalled on the runner, so this needs no third-party action. The `||` covers a
+        # re-run against an existing release, where create fails and upload --clobber replaces the
+        # assets; either way the step's exit status is the upload's.
+        working-directory: .
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes \
+            docs/compliance/evidence/ledger-audit-population.txt \
+            docs/compliance/evidence/flake-gate-sweep.txt \
+            docs/compliance/evidence/SHA256SUMS.txt \
+          || gh release upload "${GITHUB_REF_NAME}" \
+            docs/compliance/evidence/ledger-audit-population.txt \
+            docs/compliance/evidence/flake-gate-sweep.txt \
+            docs/compliance/evidence/SHA256SUMS.txt --clobber

@@ -196,6 +196,8 @@ written rather than ticked, so the deviations stay visible.
 | `scripts/delegate-unit.cjs` | `a2e5109` | atomic harness: mutant mirror, dispatch, 3-run gate, commit, prepare |
 | `scripts/git-hooks/pre-commit` | `eecf494` | hygiene, architecture, Tier 1 seam (fail closed) |
 | `scripts/verify-tree-attestations.cjs` | `1efabc6` | exhaustive coverage of `tools/*.ts` at HEAD |
+| `scripts/flake-gate-sweep.cjs` | `74619e8` | 3-run flake evidence across every Tier 1 contract |
+| `.github/workflows/release.yml` | tag-triggered | gate + flake sweep at the tag, evidence attached to the release |
 
 ### Final state
 
@@ -207,6 +209,8 @@ written rather than ticked, so the deviations stay visible.
 - Coverage baseline: **none**. Seven primitives had drifted by one newline byte in `9595ccf`; they
   were re-anchored to empty commits on 2026-10-18, and the baseline file and its `--write-baseline`
   flag were deleted rather than retained.
+- Flake evidence: **9 contracts x 3 runs = 27**, zero disagreements, in
+  `docs/compliance/evidence/flake-gate-sweep.txt` (`npm run gate:flake`).
 
 ### Deviations from the plan, and why
 
@@ -223,11 +227,39 @@ written rather than ticked, so the deviations stay visible.
 6. Contract-derived `@requirements` headers replace per-target `REQUIREMENTS` entries in the
    dispatcher; the table remains as the fallback for pre-convention targets.
 
+### Corrections and closures (recorded after first publication)
+
+- **The coverage gate was not wired into `npm run gate`.** `1efabc6` carried the script and the
+  baseline but not the manifest change that invoked them: the editor reported a write it had not
+  performed (`ReplaceFileW EIO`), and the retry reported success on an unchanged file. Every
+  "9/9 covered" result before `74619e8` came from invoking the script by hand; the push-time CI of
+  that period never ran coverage at all. The wiring is now confirmed by the gate's own output and by
+  Run 219 on `74619e8`. The lesson is recorded because it is the failure this document exists to
+  prevent: a missing expected line in a gate's output is a signal, not noise.
+- **The dormant tier paths were not armed.** `futurePaths` was declared per tier and read by no
+  rule, so `src/routes/**` would have matched nothing on the day it appeared. `tierPath()` now merges
+  `pattern` with `futurePaths` for every dependency rule; the ESLint config merges `futureGlobs` and
+  parses TypeScript with `@typescript-eslint/parser`; both lint scopes cruise `.` rather than a fixed
+  directory list. Verified with probes, then removed: `src/engine/probe.ts → src/routes/complex.ts`
+  reported `no-tier3-behind-the-fence`, and a complexity-11 function in `src/routes/` was rejected.
+- **Flake evidence for the seven re-anchored primitives is closed.** `npm run gate:flake` runs all
+  nine contracts three times in fresh subprocesses: 27 runs, zero disagreements. The 3-run
+  distinction between generated and re-anchored units no longer exists.
+
+### Packaging architecture, and the check it retires
+
+`prepublishOnly` is **retired as a proposal**. The root manifest is `private: true` and is never
+published; the published artefact is `plugin/`, which ships `dist/` and no Tier 1 primitive. A
+pre-publish check asserting that every bundled primitive has a ledger entry would be true by
+construction -- a check that cannot fail. `.github/workflows/release.yml` replaces it: on a
+`v*.*.*` tag it runs the structural gate and the 27-run flake sweep at the tagged tree, regenerates
+the ledger evidence, checksums both files, and attaches them to the GitHub Release, so a released
+tarball can be checked against evidence that names its commit.
+
 ### Open
 
-- **Release compiler gate (Phase 3, item 3)** is partial: `verify-tree-attestations.cjs` proves
-  coverage for Tier 1 primitives, not for every production dependency of a release bundle.
-- **Tier 2/3 rule paths** (`src/engine/**`, `src/routes/**`, `src/ui/**`) are declared in
-  `policy-config.cjs` and match no file in this repository. They are dormant, not proven.
-- **Re-attested units** record a single contract execution (`--prepare`), not the 3-run flake loop
-  `delegate-unit.cjs` performs. The distinction is deliberate and recorded in the ledger.
+- **The release workflow is unexercised until the first version tag.** Its commands are the ones the
+  gate and the sweep already run under CI, but the tag trigger, the bash evidence regeneration and
+  the release upload have not fired.
+- **Tier 2/3 rule paths** are armed but still match no file in this repository until `src/` exists.
+  Arming is not production evidence, and it should not be read as such.
