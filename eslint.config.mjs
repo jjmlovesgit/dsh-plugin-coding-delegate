@@ -16,6 +16,7 @@
 // config does not pretend to govern it -- `npm run gate:arch` is where its boundary is checked.
 import { createRequire } from 'node:module'
 import tsParser from '@typescript-eslint/parser'
+import importPlugin from 'eslint-plugin-import'
 
 const require = createRequire(import.meta.url)
 const { loadPolicyConfig } = require('./scripts/policy-config.cjs')
@@ -63,6 +64,19 @@ export default [
     // that says nothing about complexity. `scripts/**` stays on espree because it is CommonJS.
     files: ['**/*.ts'],
     languageOptions: { parser: tsParser, ecmaVersion: 2023, sourceType: 'module' },
+  },
+  {
+    // THE SPECIFIER, NOT THE RESOLVED PATH. `dependency-cruiser` cannot enforce this rule: it matches
+    // resolved module paths, and resolution appends the extension whether or not the source wrote it,
+    // so an extensionless import and an explicit one are indistinguishable there. ESLint sees the
+    // literal string, which is the thing Node's type stripping cares about -- it resolves `.ts`
+    // specifiers literally, so `import x from './y'` works under one runner and fails under another.
+    // `ignorePackages` keeps npm specifiers exempt: their exports maps are their own contract.
+    files: ['src/**/*.ts'],
+    plugins: { import: importPlugin },
+    rules: {
+      'import/extensions': ['error', 'ignorePackages', { ts: 'always' }],
+    },
   },
   {
     // The ratchet. Later config objects override earlier ones for the files they name, so these
