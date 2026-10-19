@@ -1,0 +1,45 @@
+#!/bin/sh
+# Refuse a branch push that would leave the delegation ledger behind on origin.
+#
+# WHY THIS EXISTS. `git push origin main` names an explicit refspec, which DELIBERATELY bypasses the
+# `remote.origin.push` defaults configured for a bare `git push`. So the comfortable habit -- push the
+# branch, assume the notes ride along -- silently publishes a tree whose attestations are still local.
+# Measured in CI run 226: main carried the tenth primitive, origin carried sixteen of the seventeen
+# notes, and the coverage gate refused the build with `MISSING tools/exponential-backoff.ts`. The gate
+# was right; the push was incomplete. This hook turns that into a local failure before the network.
+#
+# THE HOOK MUST NOT BLOCK ITS OWN REMEDY. Git feeds the refs being pushed on stdin. If
+# `refs/notes/delegations` is among them, this is the push that fixes the problem, and it is allowed
+# through without the comparison -- otherwise the operator is told to run a command the hook refuses.
+#
+# A missing remote ref is not a failure: the first push of the ledger has nothing to compare against.
+set -u
+
+remote="${1:-}"
+[ "$remote" = "origin" ] || exit 0
+
+pushing_notes=0
+while read -r local_ref _local_sha _remote_ref _remote_sha; do
+  [ "$local_ref" = "refs/notes/delegations" ] && pushing_notes=1
+done
+[ "$pushing_notes" = "1" ] && exit 0
+
+local_notes=$(git rev-parse --verify refs/notes/delegations 2>/dev/null) || exit 0
+[ -n "$local_notes" ] || exit 0
+
+remote_notes=$(git ls-remote "$remote" refs/notes/delegations 2>/dev/null | awk '{print $1}')
+[ -n "$remote_notes" ] || exit 0
+
+ahead=$(git rev-list "$remote_notes..$local_notes" --count 2>/dev/null || echo 0)
+if [ "$ahead" -gt 0 ]; then
+  echo "FATAL [PRE_PUSH]: the local delegation ledger is $ahead commit(s) ahead of $remote."
+  echo "  local  : $local_notes"
+  echo "  remote : $remote_notes"
+  echo ""
+  echo "This push would publish a tree whose attestations are still local. Push the ledger first:"
+  echo "  git push origin refs/notes/delegations"
+  echo "then repeat this push."
+  exit 1
+fi
+
+exit 0
