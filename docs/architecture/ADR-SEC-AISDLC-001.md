@@ -201,10 +201,12 @@ written rather than ticked, so the deviations stay visible.
 
 ### Final state
 
-- Tier 1 primitives: **10**, every one covered by a signed Schema 1.2 note whose recorded SHA-256
+- Tier 1 primitives: **11**, every one covered by a signed Schema 1.2 note whose recorded SHA-256
   equals the bytes at HEAD. Nine shipped in v0.5.8; `tools/exponential-backoff.ts` was delegated
-  through the harness afterwards (`9311c05`), and the release workflow needed no change to accept it.
-- Ledger: **17 notes**, all verified against the pinned operator key (`afea373a`).
+  through the harness afterwards (`9311c05`), and `src/core/primitives/result.ts` is the eleventh —
+  the first primitive outside `tools/`, which required the contract, fixture and coverage gates to
+  learn a second directory before it could be governed at all.
+- Ledger: **20 notes**, all verified against the pinned operator key (`afea373a`).
 - Tier 2: **1** protocol engine, `src/engine/task-state-machine.ts`, with a 9-test loopback suite
   (`npm run test:engine`). Tier 3: **1** route adapter, `src/routes/task-routes.ts`, with 8 tests
   (`npm run test:routes`).
@@ -458,3 +460,21 @@ common case.
   fences and ceilings are armed for them and have been exercised on `src/engine/**`,
   `src/routes/**` and `src/core/primitives/**`, but arming is not evidence for directories nothing
   has been written into.
+
+### Tier 1 unification, and the gap it closed
+
+`src/core/primitives/` was in the policy as Tier 1 but outside three gates: `check-contracts.cjs`
+walked `tools/` only, `check-contract-fixtures.cjs` mirrored a fixture into `tools/` only, and
+`verify-tree-attestations.cjs` selected its population from the `contractGoverned` pattern, which named
+`tools/*.ts`. A primitive written there would have been leaf-fenced and lint-ceilinged and **not
+contract-governed, not mutant-tested, and not attested** — the policy would have said Tier 1 while the
+gates said otherwise.
+
+All three now read the same pattern, which names both directories:
+`^(tools/[^/]+|src/core/primitives/[^/]+)\.ts$`. The fixture runner mirrors the negative mutant into
+both layouts, so it never has to parse a contract to learn where its module lives. `result.ts` carries
+a contract whose mutant is caught by exactly one case — `unwrapOr` returning the fallback on a success —
+which is the discrimination evidence that distinguishes a contract from a smoke test.
+
+The count is **11** and the ledger **20**. The two remaining reserved paths are `src/ui/**` and
+`src/core/protocol/**`.
