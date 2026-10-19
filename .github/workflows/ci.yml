@@ -56,6 +56,14 @@ jobs:
       - name: Unit tests
         run: npm test
 
+      - name: Tier 2 engine loopback suite
+        # Outside `npm run gate` on purpose, beside the plugin unit tests and the oracles: the gate is
+        # the attestation gate, and Tier 2 has no attestation obligation (POL §2 gives it loopback
+        # suites). Folding it in would also change the gate's published seven-command accounting for a
+        # suite that needs no keys, no worker and no network.
+        working-directory: .
+        run: npm run test:engine
+
       - name: Regression oracles
         # Exercises the guard, DLP gate, redaction, containment and verification paths against
         # the built artefact.

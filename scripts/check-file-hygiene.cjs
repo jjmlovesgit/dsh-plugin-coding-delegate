@@ -45,6 +45,10 @@ const TARGET_DIRS = [
   path.join(REPO_ROOT, 'tools'),
   path.join(REPO_ROOT, 'plugin', 'src'),
   path.join(REPO_ROOT, 'scripts'),
+  // Added with the first Tier 2 engine. `src/` is hand-written source now, not a reserved path, and
+  // the rule that matters here is CRLF: a checkout that rewrites line endings changes the bytes a
+  // reviewer read, whether or not the file is attested.
+  path.join(REPO_ROOT, 'src'),
 ]
 const TARGET_LABELS = TARGET_DIRS.map(
   (dir) => path.relative(REPO_ROOT, dir).split(path.sep).join('/') + '/'

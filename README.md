@@ -216,8 +216,8 @@ npm run gate
 
 It runs **seven commands, executing eight tools**, in order. A failure in any one stops the rest:
 
-1. **File hygiene** — `scripts/check-file-hygiene.cjs`. Refuses files under `tools/`, `plugin/src/` and
-   `scripts/` that are missing a trailing newline, are stored with CRLF, or carry a UTF-8 BOM. CRLF is not
+1. **File hygiene** — `scripts/check-file-hygiene.cjs`. Refuses files under `tools/`, `plugin/src/`,
+   `scripts/` and `src/` that are missing a trailing newline, are stored with CRLF, or carry a UTF-8 BOM. CRLF is not
    cosmetic here: the signer hashes the bytes on disk while the auditor reads the blob from the commit, so a
    CRLF checkout produces a note the audit then rejects.
 2. **Architecture and complexity** — `npm run gate:arch`, two tools in one step. `dependency-cruiser`
