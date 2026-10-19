@@ -299,6 +299,33 @@ The first real release, published by the workflow the smoke test verified, at `2
   `gate:arch` (dependency-cruiser + ESLint); contract fixtures; contract parity; ledger audit; tree
   coverage; Schema 1.2 lifecycle. A reader counting steps in the log will see seven.
 
+### Release v0.5.9 (2026-10-19)
+
+The first release to ship the attested-tools bundle, its dual-signature verifier and the reproducible
+archive.
+
+- **Candidate first.** `v0.5.9-rc.1` at `0c5b07f`, run `39257302701`, success. Its bundle was
+  downloaded, extracted and verified offline — 10/10 against both keys — and the three checksum
+  sources agreed. The candidate release and tag were then deleted.
+- **A defect the candidate exposed.** GitHub published it with `isPrerelease: false`, so a release
+  candidate was presented as the latest release. `fda1f70` derives `--prerelease` from a suffixed tag.
+- **Production.** `v0.5.9` at `fda1f70`; branch CI `39258408359` green before the tag was cut; release
+  run `39258706694` success; four assets, `prerelease: false`, listed as Latest.
+- **Verified after publication, not assumed.** The production bundle was downloaded, extracted and
+  verified offline — 10/10 from `fda1f70` — with its digest matching both the published
+  `SHA256SUMS.txt` and GitHub's server-side digest.
+
+| asset | bytes | sha256 |
+| :--- | ---: | :--- |
+| `attested-tools-bundle.tar.gz` | 44,742 | `7b540d22e2d132acf06a7b4dd423e7cc3c6a1e3a4e7169d44325d3314ab2ce43` |
+| `ledger-audit-population.txt` | 14,160 | `7af227b922c9d24ee495cfbabd437ae35220f3a0dbaf5a0ddf8fea0d426405ec` |
+| `flake-gate-sweep.txt` | 1,255 | `9069807dd2d62ae807684da866a986d358fa986e0cd40fbdb2f6b2b2dd367a85` |
+| `SHA256SUMS.txt` | 276 | `af153a9b83549de1f401c2e13d6b1d0e7c0680e758446fb39345326216930904` |
+
+The candidate and production archives have different digests, and that is correct: the manifest
+records the commit it was generated from, so reproducibility is same-commit, not same-content. Two
+exports of one commit are byte-identical; two exports of different commits are not.
+
 ### Attested tools bundle (Option C.3, verified on v0.5.8-rc.2)
 
 Consumers that cannot reach the package graph receive the primitives as bytes plus receipts. DSH loads
