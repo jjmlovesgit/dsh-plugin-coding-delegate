@@ -1,7 +1,7 @@
 # Architectural Decision Record & Implementation Blueprint: AI-SDLC Compliance Engine
 
 **Document ID:** ADR-SEC-AISDLC-001  
-**Status:** Approved for Implementation  
+**Status:** Implemented — Phases 1–3 complete (2026-10-18); Phase 4 partially exercised  
 **Date:** October 18, 2026  
 **Governing Policy:** `docs/compliance/POL-SEC-AISDLC-001.md`  
 **Target Standards:** NIST AI RMF 1.0 (GOVERN 1.2, MANAGE 2.4), NIST SP 800-53 (AC-5, CM-3, SA-11), SOC 2 (CC6.8, CC8.1), ISO/IEC 42001:2023 (Annex A.6, A.9)
@@ -177,3 +177,57 @@ Five critical operational traps were identified during design. Each must be acco
 - [ ] Deliberately inject an AST import violation in Tier 3 to confirm CI fails closed.
 - [ ] Deliberately inline a complex loop in Tier 3 to confirm complexity linter blocks commit.
 - [ ] Verify that `node scripts/verify-delegation-ledger.cjs` reports a complete, clean audit chain.
+
+---
+
+## 7. Implementation Status (2026-10-18)
+
+**Phases 1–3 are complete and verified; Phase 4 is partly exercised.** This section records what
+actually landed, where it deviates from the plan above, and what remains open. The plan is left as
+written rather than ticked, so the deviations stay visible.
+
+### Landed
+
+| Artefact | Commit | Purpose |
+| :--- | :--- | :--- |
+| `scripts/policy-config.cjs` | `9b947da` | one source of truth for tiers, ceilings, flake count, ledger ref |
+| `.dependency-cruiser.cjs` | `9b947da` | Tier 1 leaf rule, Tier 3 fence, package self-containment |
+| `eslint.config.mjs` | `9b947da` | complexity 10 / 40 lines on Tier 3, with a file baseline |
+| `scripts/delegate-unit.cjs` | `a2e5109` | atomic harness: mutant mirror, dispatch, 3-run gate, commit, prepare |
+| `scripts/git-hooks/pre-commit` | `eecf494` | hygiene, architecture, Tier 1 seam (fail closed) |
+| `scripts/verify-tree-attestations.cjs` | `1efabc6` | exhaustive coverage of `tools/*.ts` at HEAD |
+
+### Final state
+
+- Tier 1 primitives: **9**, every one covered by a signed Schema 1.2 note whose recorded SHA-256
+  equals the bytes at HEAD.
+- Ledger: **16 notes**, all verified against the pinned operator key (`afea373a`).
+- Gate: **seven stages, eight tools** — hygiene; architecture + lint; contract fixtures; contract
+  parity; ledger audit; tree coverage; Schema 1.2 lifecycle. `npm run gate` exits 0.
+- Coverage baseline: **none**. Seven primitives had drifted by one newline byte in `9595ccf`; they
+  were re-anchored to empty commits on 2026-10-18, and the baseline file and its `--write-baseline`
+  flag were deleted rather than retained.
+
+### Deviations from the plan, and why
+
+1. `lib/policy-config.cjs` → `scripts/policy-config.cjs`. A new top-level `lib/` would sit outside
+   every existing guard (hygiene scans `tools/`, `plugin/src/`, `scripts/`; contract parity scans
+   `tools/*.ts`).
+2. `scripts/delegate-note.cjs` → `scripts/attest-unit.cjs --prepare` / `--approve`. The former never
+   existed.
+3. `scripts/worker-build.mjs` → `tools/worker-build.mjs`, positional arguments, no model flag.
+4. Mutant validation by `TARGET_FILE_OVERRIDE` → a byte-identical contract mirror. The env hook
+   required a test-only branch inside the contract, which changes the bytes `contractHash` is
+   computed over. `scripts/check-contract-fixtures.cjs` records the measurement.
+5. `config.tiers.tier1.flakeIterations` → `config.delegation.flakeIterations`.
+6. Contract-derived `@requirements` headers replace per-target `REQUIREMENTS` entries in the
+   dispatcher; the table remains as the fallback for pre-convention targets.
+
+### Open
+
+- **Release compiler gate (Phase 3, item 3)** is partial: `verify-tree-attestations.cjs` proves
+  coverage for Tier 1 primitives, not for every production dependency of a release bundle.
+- **Tier 2/3 rule paths** (`src/engine/**`, `src/routes/**`, `src/ui/**`) are declared in
+  `policy-config.cjs` and match no file in this repository. They are dormant, not proven.
+- **Re-attested units** record a single contract execution (`--prepare`), not the 3-run flake loop
+  `delegate-unit.cjs` performs. The distinction is deliberate and recorded in the ledger.
