@@ -328,6 +328,32 @@ The candidate and production archives have different digests, and that is correc
 records the commit it was generated from, so reproducibility is same-commit, not same-content. Two
 exports of one commit are byte-identical; two exports of different commits are not.
 
+### Release v0.5.10 (2026-10-19)
+
+The first release after `v0.5.9`, and the first to carry the transport retry, the boundary telemetry,
+the Tier 1 ceilings, the vendored leaf with its parity oracle, and the eleventh primitive.
+
+- **Candidate first.** `v0.5.10-rc.1` at `6641f2e`, run `39325783355`, success, and published with
+  **`isPrerelease: true`** — the fix from `fda1f70` doing its job on its first candidate. GitHub
+  listed it as *Pre-release* while `v0.5.9` remained Latest, which is the whole point of the flag.
+- **Verified from the published asset.** Three checksum sources agreed on all three artefacts; the
+  extracted bundle verified offline at **11/11** from `6641f2e`, with both keys and `primitives/result.ts`
+  present in the archive. The candidate release and tag were then deleted.
+- **Production.** `v0.5.10` at `6641f2e`, release run `39326251236`, success, `isPrerelease: false`,
+  listed as Latest. Verified again after publication: three-way digest agreement and 11/11 offline.
+
+| asset | bytes | sha256 |
+| :--- | ---: | :--- |
+| `attested-tools-bundle.tar.gz` | 48,724 | `6e211cf80e3b3f76b0660041a50172afd979544ff2e3359414c4525f8d942e94` |
+| `ledger-audit-population.txt` | 15,742 | `b5e5701ac823a2a14ae51aa9964ed0dbdbf55b9859554b49b75c2625f8fe330e` |
+| `flake-gate-sweep.txt` | 1,255 | `34bba1e648ee2846091caa365d6e47068f1f4f6f3422dbbb7ce422cbc528ba55` |
+| `SHA256SUMS.txt` | 276 | `d89daa6c400257b4e6e96ead20f2cb4eeea57ff7b00c6eb1688253c967c65e4e` |
+
+The primitive count moved **10 → 11** between releases: `v0.5.9` shipped ten, and `result.ts` joined the
+ledger afterwards as the first attested primitive outside `tools/`. The candidate and production
+archives have different digests for the same reason as v0.5.9 — the manifest records the commit it was
+generated from.
+
 ### Attested tools bundle (Option C.3, verified on v0.5.8-rc.2)
 
 Consumers that cannot reach the package graph receive the primitives as bytes plus receipts. DSH loads
