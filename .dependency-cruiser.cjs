@@ -47,10 +47,15 @@ module.exports = {
       name: 'tier1-is-a-leaf',
       severity: 'error',
       comment:
-        'Tier 1 primitives must not depend on anything -- no runtime import, no Node builtin, no ' +
-        'type-only import. See docs/architecture/ADR-SEC-AISDLC-001.md §5.2.',
+        'Tier 1 primitives must depend on NOTHING -- no runtime import, no Node builtin, no ' +
+        'type-only import, and no other primitive. See docs/architecture/ADR-SEC-AISDLC-001.md §5.2. ' +
+        'The rule used to read `pathNot: ^tools/`, which forbade reaching OUTSIDE the directory but ' +
+        'allowed a primitive to import its neighbour -- precisely the edge that makes the graph ' +
+        'non-leaf. Measured: a `tools/index.ts` barrel re-exporting two primitives passed the fence ' +
+        'and was caught only by contract parity. `path: "."` matches every resolved dependency, so ' +
+        'the rule now enforces what its comment always claimed.',
       from: { path: tiers.corePrimitives.contractGoverned },
-      to: { pathNot: tiers.corePrimitives.pattern },
+      to: { path: '.' },
     },
     {
       name: 'no-tier3-behind-the-fence',
