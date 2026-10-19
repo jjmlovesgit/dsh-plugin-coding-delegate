@@ -436,17 +436,25 @@ already decided. 502/503/504 are gateway-shaped: model swapping, KV-cache reallo
 saturation, a proxy whose socket is not up. Those are the conditions another attempt can actually
 change.
 
-**The verdict carries the evidence.** `transportRetries` (0 on a first-attempt success) is on the
-success path and on every error path; `lastTransportError` names the terminal code when the transport
-failed outright. At the tool boundary, `withTransportTelemetry` normalises the field to 0 for the paths
-that never make a request — a refused workspace, a starved worker — so a consumer never has to ask
-which internal branch produced the verdict. The established unreachable-worker message is unchanged
-for a first-attempt failure and gains an `(after N attempts)` suffix only when a retry happened, so
-existing consumers see no new text in the common case.
+**The tool boundary guarantees the contract.** Every `delegateWorker` result returned through
+`index.ts` passes through `withTransportTelemetry`, so `transportRetries: number` is present on EVERY
+return path — the two workspace refusals, the starved-worker return, the transport-failure return and
+the completed verdict alike — defaulting to 0 for a path that never reached the transport.
+`lastTransportError` is projected if and only if a terminal socket or network fault occurred, which
+makes the key's PRESENCE the unambiguous failure indicator rather than its value.
+
+**No cumulative rollups.** A session-level retry counter was considered and rejected. It would be state
+with no anchor: no defined lifetime across turns, restarts or concurrent sessions, and this plugin
+already refuses to hold state whose lifecycle it cannot state. The per-call field is the contract;
+a host that wants a rollup can accumulate it where it already owns the session lifetime.
+
+The established unreachable-worker message is unchanged for a first-attempt failure and gains an
+`(after N attempts)` suffix only when a retry happened, so existing consumers see no new text in the
+common case.
 
 ### Open
 
-- **Reserved paths not yet realised**: `src/ui/**`, `src/core/primitives/**` and
-  `src/core/protocol/**` match no file. The fences and ceilings are armed for them and were exercised
-  on `src/engine/**` and `src/routes/**`, but arming is not evidence for directories nothing has been
-  written into.
+- **Reserved paths not yet realised**: `src/ui/**` and `src/core/protocol/**` match no file. The
+  fences and ceilings are armed for them and have been exercised on `src/engine/**`,
+  `src/routes/**` and `src/core/primitives/**`, but arming is not evidence for directories nothing
+  has been written into.

@@ -53,8 +53,11 @@ module.exports = {
         'allowed a primitive to import its neighbour -- precisely the edge that makes the graph ' +
         'non-leaf. Measured: a `tools/index.ts` barrel re-exporting two primitives passed the fence ' +
         'and was caught only by contract parity. `path: "."` matches every resolved dependency, so ' +
-        'the rule now enforces what its comment always claimed.',
-      from: { path: tiers.corePrimitives.contractGoverned },
+        'the rule now enforces what its comment always claimed. ' +
+        'THE RESERVED TIER 1 DIRECTORY IS BOUND TOO: `src/core/primitives/` is Tier 1 by the policy, ' +
+        'and `contractGoverned` only ever named `tools/*.ts`, so the first file written there would ' +
+        'have been silently exempt from the leaf invariant.',
+      from: { path: tiers.corePrimitives.contractGoverned + '|^src/core/primitives/' },
       to: { path: '.' },
     },
     {

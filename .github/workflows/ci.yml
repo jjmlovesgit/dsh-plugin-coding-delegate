@@ -81,6 +81,12 @@ jobs:
         working-directory: .
         run: npm run test:parity
 
+      - name: Tier 1 core primitive suite
+        # The first file under src/core/primitives. Its leaf invariant is enforced by the architecture
+        # stage (`npm run gate:arch`), not here; this step proves the behaviour.
+        working-directory: .
+        run: npm run test:primitives
+
       - name: Regression oracles
         # Exercises the guard, DLP gate, redaction, containment and verification paths against
         # the built artefact.
