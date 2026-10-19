@@ -64,6 +64,14 @@ jobs:
         working-directory: .
         run: npm run test:engine
 
+      - name: Tier 3 route adapter loopback suite
+        # The first real Tier 3 file. Outside the gate for the same reason as the engine suite, but
+        # note what it DOES exercise inside the gate: eslint's complexity and 40-line ceilings run on
+        # `src/routes/**` through `npm run gate:arch`, so this tree is bounded whether or not the
+        # tests run.
+        working-directory: .
+        run: npm run test:routes
+
       - name: Regression oracles
         # Exercises the guard, DLP gate, redaction, containment and verification paths against
         # the built artefact.

@@ -97,11 +97,12 @@ jobs:
         working-directory: .
         run: npm run gate
 
-      - name: Flake sweep (9 contracts x 3 runs)
-        # Not part of the every-commit gate: 27 subprocesses on every commit tempts `--no-verify`.
-        # A release is the right cadence, and the sweep writes its own evidence file.
+      - name: Flake sweep (contracts x 3 runs)
+        # Not part of the every-commit gate: 30 subprocesses on every commit tempts `--no-verify`.
+        # A release is the right cadence. `--out` is explicit because the sweep now prints by default:
+        # an evidence file is a release product, and writing it from the inner loop dirtied the tree.
         working-directory: .
-        run: npm run gate:flake
+        run: npm run gate:flake -- --out docs/compliance/evidence/flake-gate-sweep.txt
 
       - name: Regenerate the ledger evidence at the tag
         # The committed copy records whatever commit it was generated at, so it is stale by
