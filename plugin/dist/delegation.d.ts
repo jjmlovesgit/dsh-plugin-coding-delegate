@@ -1,4 +1,5 @@
 import { SavingsTracker } from './savings-tracker';
+import { ExponentialBackoff } from './vendor/exponential-backoff';
 import { ContextRequest } from './context';
 import { VerificationPolicy } from './verification';
 import type { DelegateWorkerParameter } from './contracts';
@@ -400,6 +401,44 @@ export declare function classifyWorkerOutput(input: {
 export declare const MAX_ERROR_BODY_CHARS = 2000;
 /** Bound a diagnostic body before appending it to a message. Never throws, and never grows it. */
 export declare function truncateErrorBody(text: unknown): string;
+/**
+ * Transport retry policy for the worker call, and the reasons for its shape.
+ *
+ * THE PLUGIN'S ONLY RETRY, AND IT IS NARROW. The call this wraps used to be a single fetch: a refused
+ * connection or a 502 returned an error verdict immediately, even when the local server was merely
+ * restarting. The policy is bounded so it cannot eat the delegation's deadline — three attempts with
+ * delays of 500 ms and 1000 ms from the attested backoff, no jitter, because a local endpoint does not
+ * need thundering-herd avoidance and a deterministic schedule is replayable.
+ *
+ * WHAT IS NOT RETRIED IS THE MORE IMPORTANT HALF. A 4xx means the request is wrong — a bad model id, a
+ * missing key, a malformed body — and repeating it three times only triples the wait before the same
+ * error. An AbortError means the caller's deadline expired, and retrying past it would break the one
+ * bound the caller set. Both fail fast and unchanged.
+ *
+ * The delay schedule comes from `tools/exponential-backoff.ts`, vendored under `plugin/src/vendor/`
+ * because this package installs standalone and may not reach outside itself. `tests/` holds a parity
+ * oracle between the two copies, in the same spirit as the canonicaliser guard.
+ */
+export declare const TRANSPORT_MAX_ATTEMPTS = 3;
+export interface TransportAttempt {
+    response: Response | null;
+    retries: number;
+    error: unknown;
+}
+export interface TransportRetryOptions {
+    maxAttempts?: number;
+    backoff?: Pick<ExponentialBackoff, 'computeDelay'>;
+    sleep?: (ms: number) => Promise<void>;
+}
+/** A network-level failure worth repeating. An abort, or anything without a known code, is not. */
+export declare function isRetryableTransportError(error: unknown): boolean;
+export declare function describeTransportError(error: unknown): string;
+/**
+ * POST with a bounded retry. Returns the final response, or a null response with the error when every
+ * attempt failed at the transport level. A non-ok response is RETURNED rather than thrown, so the
+ * caller keeps deciding what an HTTP error means.
+ */
+export declare function fetchWithTransportRetry(url: string, init: RequestInit, options?: TransportRetryOptions): Promise<TransportAttempt>;
 export declare function delegateWorker(params?: DelegateWorkerParams, tracker?: SavingsTracker): Promise<any>;
 export declare function extractPromptText(session: LLMSession | any): string;
 export declare function estimateTokenCount(text: string): number;

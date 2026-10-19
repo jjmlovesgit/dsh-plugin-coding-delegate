@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.MAX_ERROR_BODY_CHARS = exports.MIN_SEARCH_CHARS = exports.DEFAULT_LOCAL_ENDPOINT = exports.MAX_VERIFICATION_REPEATS = exports.DEFAULT_VERIFICATION_REPEATS = exports.DELEGATE_WORKER_SCHEMA_COVERS_EVERY_PARAMETER = exports.CANONICAL_DELEGATE_WORKER_PARAMETERS = exports.DELEGATE_WORKER_SCHEMA = exports.DELEGATE_WORKER_OPENAI_SCHEMA = void 0;
+exports.TRANSPORT_MAX_ATTEMPTS = exports.MAX_ERROR_BODY_CHARS = exports.MIN_SEARCH_CHARS = exports.DEFAULT_LOCAL_ENDPOINT = exports.MAX_VERIFICATION_REPEATS = exports.DEFAULT_VERIFICATION_REPEATS = exports.DELEGATE_WORKER_SCHEMA_COVERS_EVERY_PARAMETER = exports.CANONICAL_DELEGATE_WORKER_PARAMETERS = exports.DELEGATE_WORKER_SCHEMA = exports.DELEGATE_WORKER_OPENAI_SCHEMA = void 0;
 exports.resolveVerificationRepeats = resolveVerificationRepeats;
 exports.resolveChatCompletionsUrl = resolveChatCompletionsUrl;
 exports.parseSearchReplaceBlocks = parseSearchReplaceBlocks;
@@ -41,12 +41,16 @@ exports.applySearchReplaceBlocks = applySearchReplaceBlocks;
 exports.resolveDelegateStatus = resolveDelegateStatus;
 exports.classifyWorkerOutput = classifyWorkerOutput;
 exports.truncateErrorBody = truncateErrorBody;
+exports.isRetryableTransportError = isRetryableTransportError;
+exports.describeTransportError = describeTransportError;
+exports.fetchWithTransportRetry = fetchWithTransportRetry;
 exports.delegateWorker = delegateWorker;
 exports.extractPromptText = extractPromptText;
 exports.estimateTokenCount = estimateTokenCount;
 const child_process = __importStar(require("child_process"));
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
+const exponential_backoff_1 = require("./vendor/exponential-backoff");
 const profiles_1 = require("./profiles");
 const logging_1 = require("./logging");
 const emission_1 = require("./emission");
@@ -482,6 +486,96 @@ function truncateErrorBody(text) {
         ? body.slice(0, exports.MAX_ERROR_BODY_CHARS) + ' [truncated]'
         : body;
 }
+/**
+ * Transport retry policy for the worker call, and the reasons for its shape.
+ *
+ * THE PLUGIN'S ONLY RETRY, AND IT IS NARROW. The call this wraps used to be a single fetch: a refused
+ * connection or a 502 returned an error verdict immediately, even when the local server was merely
+ * restarting. The policy is bounded so it cannot eat the delegation's deadline — three attempts with
+ * delays of 500 ms and 1000 ms from the attested backoff, no jitter, because a local endpoint does not
+ * need thundering-herd avoidance and a deterministic schedule is replayable.
+ *
+ * WHAT IS NOT RETRIED IS THE MORE IMPORTANT HALF. A 4xx means the request is wrong — a bad model id, a
+ * missing key, a malformed body — and repeating it three times only triples the wait before the same
+ * error. An AbortError means the caller's deadline expired, and retrying past it would break the one
+ * bound the caller set. Both fail fast and unchanged.
+ *
+ * The delay schedule comes from `tools/exponential-backoff.ts`, vendored under `plugin/src/vendor/`
+ * because this package installs standalone and may not reach outside itself. `tests/` holds a parity
+ * oracle between the two copies, in the same spirit as the canonicaliser guard.
+ */
+exports.TRANSPORT_MAX_ATTEMPTS = 3;
+const TRANSPORT_BACKOFF = new exponential_backoff_1.ExponentialBackoff({
+    baseDelayMs: 500,
+    maxDelayMs: 4000,
+    factor: 2,
+    jitter: 'none',
+});
+const RETRYABLE_STATUS = new Set([500, 502, 503, 504]);
+const RETRYABLE_CODES = new Set(['ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT']);
+function transportErrorCode(error) {
+    for (const candidate of [error, error?.cause]) {
+        const code = candidate?.code;
+        if (typeof code === 'string')
+            return code;
+    }
+    return null;
+}
+/** A network-level failure worth repeating. An abort, or anything without a known code, is not. */
+function isRetryableTransportError(error) {
+    if (!error || typeof error !== 'object')
+        return false;
+    if (error.name === 'AbortError')
+        return false;
+    const code = transportErrorCode(error);
+    return code !== null && RETRYABLE_CODES.has(code);
+}
+function describeTransportError(error) {
+    const code = transportErrorCode(error);
+    if (code !== null)
+        return code;
+    const message = error?.message;
+    return typeof message === 'string' && message.length > 0 ? message : String(error);
+}
+/** Release a response we are about to throw away, so a retry does not hold its socket open. */
+async function discardBody(response) {
+    try {
+        await response.body?.cancel();
+    }
+    catch {
+        /* already consumed or absent: nothing to release */
+    }
+}
+/**
+ * POST with a bounded retry. Returns the final response, or a null response with the error when every
+ * attempt failed at the transport level. A non-ok response is RETURNED rather than thrown, so the
+ * caller keeps deciding what an HTTP error means.
+ */
+async function fetchWithTransportRetry(url, init, options = {}) {
+    const maxAttempts = options.maxAttempts ?? exports.TRANSPORT_MAX_ATTEMPTS;
+    const backoff = options.backoff ?? TRANSPORT_BACKOFF;
+    const sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+    let lastError = null;
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+        try {
+            const response = await fetch(url, init);
+            const retryable = RETRYABLE_STATUS.has(response.status);
+            if (response.ok || !retryable || attempt === maxAttempts - 1) {
+                return { response, retries: attempt, error: null };
+            }
+            lastError = 'HTTP ' + response.status;
+            await discardBody(response);
+        }
+        catch (error) {
+            if (!isRetryableTransportError(error) || attempt === maxAttempts - 1) {
+                return { response: null, retries: attempt, error };
+            }
+            lastError = error;
+        }
+        await sleep(backoff.computeDelay(attempt));
+    }
+    return { response: null, retries: maxAttempts - 1, error: lastError };
+}
 async function delegateWorker(params = {}, tracker) {
     const endpoint = resolveChatCompletionsUrl(params.endpoint || profiles_1.PROFILES.WORKER.endpoint || exports.DEFAULT_LOCAL_ENDPOINT);
     const model = params.model || profiles_1.PROFILES.WORKER.model;
@@ -602,10 +696,14 @@ async function delegateWorker(params = {}, tracker) {
     const contractPaths = (0, contracts_1.resolveContractFiles)(params.contractFiles, workspaceBase);
     const contractBefore = (0, contracts_1.contractFileHashes)(contractPaths);
     const requestStartedAt = Date.now();
+    let transportRetries = 0;
+    let lastTransportError = null;
     try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-        const response = await fetch(endpoint, {
+        // One controller for the whole budget: a retry cannot outlive the caller's deadline, so an
+        // AbortError ends the loop rather than starting another attempt.
+        const attempt = await fetchWithTransportRetry(endpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -621,7 +719,27 @@ async function delegateWorker(params = {}, tracker) {
                 reasoning_effort: profiles_1.PROFILES.WORKER.reasoning_effort ?? 'none',
             }),
             signal: controller.signal,
-        }).finally(() => clearTimeout(timeoutId));
+        });
+        clearTimeout(timeoutId);
+        transportRetries = attempt.retries;
+        if (!attempt.response) {
+            lastTransportError = describeTransportError(attempt.error);
+            return {
+                success: false,
+                status: 'ERROR',
+                message: 'LM Studio at 127.0.0.1:1234 was unreachable or failed: ' +
+                    lastTransportError +
+                    // The established wording is kept for a first-attempt failure; the count is appended only
+                    // when a retry actually happened, so existing callers see no new text for the common case.
+                    (transportRetries > 0 ? ' (after ' + (transportRetries + 1) + ' attempts)' : ''),
+                transportRetries,
+                lastTransportError,
+                filesWritten: [],
+                testResults: { passed: 0, failed: 0, output: lastTransportError },
+                tokens: { prompt: 0, completion: 0 },
+            };
+        }
+        const response = attempt.response;
         if (!response.ok) {
             // Capped at the append point rather than at the read: the body is diagnostic text, and a
             // traceback or an HTML error page is not a transcript worth carrying into every later turn.
@@ -630,6 +748,7 @@ async function delegateWorker(params = {}, tracker) {
                 success: false,
                 status: 'ERROR',
                 message: 'LM Studio returned HTTP ' + response.status + ': ' + truncateErrorBody(errText),
+                transportRetries,
                 filesWritten: [],
                 testResults: { passed: 0, failed: 0, output: 'Request failed.' },
                 tokens: { prompt: 0, completion: 0 },
@@ -1148,6 +1267,8 @@ async function delegateWorker(params = {}, tracker) {
             // Already resolved above, where the attestation was gated on it. Recomputing it here would give
             // two call sites the chance to disagree about the same unit.
             status: delegateStatus,
+            // How many transport retries this delegation needed; 0 means the first attempt answered.
+            transportRetries,
             taskName: params.taskName || 'Subtask',
             tokensUsed: totalTokens,
         };
@@ -1158,6 +1279,8 @@ async function delegateWorker(params = {}, tracker) {
             success: false,
             status: 'ERROR',
             message: 'LM Studio at 127.0.0.1:1234 was unreachable or failed: ' + errMsg,
+            transportRetries,
+            ...(lastTransportError ? { lastTransportError } : {}),
             filesWritten: [],
             testResults: { passed: 0, failed: 0, output: errMsg },
             tokens: { prompt: 0, completion: 0 },
