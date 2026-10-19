@@ -223,8 +223,8 @@ It runs **seven commands, executing eight tools**, in order. A failure in any on
 2. **Architecture and complexity** — `npm run gate:arch`, two tools in one step. `dependency-cruiser`
    (`.dependency-cruiser.cjs`) refuses a Tier 1 module that imports anything at all, a Tier 1 or Tier 2
    module that imports Tier 3, and `plugin/src` reaching outside its own package. `eslint`
-   (`eslint.config.mjs`) enforces a cyclomatic ceiling of 10 and 40 lines per function on Tier 3 paths,
-   against a named file baseline that may only shrink. Both read their numbers from
+   (`eslint.config.mjs`) enforces a cyclomatic ceiling of 10 and 40 lines per function on Tier 1 and
+   Tier 3 paths, against a named file baseline that may only shrink. Both read their numbers from
    `scripts/policy-config.cjs`, so the enforced ceiling is the documented one.
 3. **Negative discrimination** — `scripts/check-contract-fixtures.cjs`. Refuses a contract that passes its
    real module but *also* passes `tests/contracts/fixtures/<name>.negative.ts`, a contract with no fixture
@@ -261,7 +261,7 @@ and `npm run test:lifecycle` for the signer lifecycle.
 
 | Tier | Paths | What is mechanically enforced |
 | :--- | :--- | :--- |
-| **1 — leaf primitives** | `tools/*.ts` | zero imports of any kind; a discrimination contract plus a targeted negative fixture; three-run flake evidence; a signed Schema 1.2 note whose digest matches the bytes at HEAD |
+| **1 — leaf primitives** | `tools/*.ts`, `src/core/primitives/*.ts` | zero imports of any kind; a discrimination contract plus a targeted negative fixture; three-run flake evidence; a signed Schema 1.2 note whose digest matches the bytes at HEAD; the same complexity (10) and length (40 lines) ceilings as tier 3, plus no nested ternaries |
 | **2 — protocol engines** | `plugin/src/**` | must resolve entirely inside `plugin/`, because the package ships as `plugin/dist` and is installed on its own |
 | **3 — imperative shell** | `scripts/**`, `src/routes/**` | cyclomatic ceiling 10, 40 lines per function, no nested ternaries; may not be imported by tier 1 or tier 2 |
 

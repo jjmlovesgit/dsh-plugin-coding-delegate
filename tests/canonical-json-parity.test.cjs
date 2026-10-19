@@ -27,7 +27,6 @@ function embeddedCanonicalize() {
   assert.notEqual(start, -1, 'the exporter must carry an embedded canonicalizeJson');
   assert.ok(end > start, 'the embedded canonicaliser block must end before verifyReviewer');
   const body = source.slice(start, end);
-  // eslint-disable-next-line no-new-func
   return new Function(body + '\nreturn canonicalizeJson;')();
 }
 
