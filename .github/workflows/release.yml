@@ -54,7 +54,17 @@ jobs:
           echo "tag:    ${TAG_VERSION}"
           echo "root:   ${ROOT_VERSION}"
           echo "plugin: ${PLUGIN_VERSION}"
-          if [ "${TAG_VERSION}" != "${ROOT_VERSION}" ] || [ "${TAG_VERSION}" != "${PLUGIN_VERSION}" ]; then
+          # A PRE-RELEASE OF THE SAME BASE VERSION IS LEGITIMATE; anything else must match exactly.
+          # Measured: comparing the full strings made every release candidate untaggable -- v0.5.8-rc.2
+          # against manifests at 0.5.8 failed the guard before any check ran, which is why the guard
+          # shipped without ever being exercised on a candidate.
+          matches() {
+            case "$1" in
+              "$2" | "$2"-*) return 0 ;;
+              *) return 1 ;;
+            esac
+          }
+          if ! matches "${TAG_VERSION}" "${ROOT_VERSION}" || ! matches "${TAG_VERSION}" "${PLUGIN_VERSION}"; then
             echo "FATAL: tag ${TAG_VERSION} disagrees with root ${ROOT_VERSION} / plugin ${PLUGIN_VERSION}"
             exit 1
           fi
