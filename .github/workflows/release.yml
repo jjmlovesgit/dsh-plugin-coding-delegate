@@ -53,6 +53,16 @@ jobs:
         working-directory: .
         run: git fetch origin 'refs/notes/delegations:refs/notes/delegations'
 
+      - name: Materialise main for the ledger ancestry check
+        # THE TAG CHECKOUT IS DETACHED, AND THE AUDIT NAMES `main` LITERALLY. It asserts every note's
+        # baseCommit with `git merge-base --is-ancestor <baseCommit> main`, and on a tag ref there is
+        # only `refs/remotes/origin/main` -- so the check fails with "fatal: Not a valid object name
+        # main" and takes the whole gate with it. Measured in release run 39184720880 (step 7, 26 s)
+        # and reproduced in a tag-only clone: absent with no local main, passing once it exists.
+        # This creates the ref the audit names; it does not change what is checked out or tested.
+        working-directory: .
+        run: git update-ref refs/heads/main refs/remotes/origin/main
+
       - name: Structural and coverage gate
         working-directory: .
         run: npm run gate
