@@ -51,20 +51,26 @@ export function handleGetSnapshot(machine: TaskStateMachine): RouteResponse {
   };
 }
 
-/** One transition, with the engine's verdict flattened into a response shape. */
-function applyAction(machine: TaskStateMachine, action: TaskAction, now: number): RouteResponse {
-  const outcome =
-    action === 'fail'
-      ? machine.fail(now)
-      : action === 'delegate'
-        ? machine.delegate(now)
-        : action === 'start'
-          ? machine.start(now)
-          : action === 'complete'
-            ? machine.complete(now)
-            : machine.timeout(now);
+/** Flatten either engine outcome into the uniform response body. */
+function respond(outcome: { state: string; retryDelayMs?: number | null }): RouteResponse {
   const retryDelayMs = 'retryDelayMs' in outcome ? outcome.retryDelayMs : null;
   return { status: 200, body: { state: outcome.state, retryDelayMs } };
+}
+
+/** One transition, with the engine's verdict flattened into a response shape. */
+function applyAction(machine: TaskStateMachine, action: TaskAction, now: number): RouteResponse {
+  switch (action) {
+    case 'delegate':
+      return respond(machine.delegate(now));
+    case 'start':
+      return respond(machine.start(now));
+    case 'complete':
+      return respond(machine.complete(now));
+    case 'timeout':
+      return respond(machine.timeout(now));
+    case 'fail':
+      return respond(machine.fail(now));
+  }
 }
 
 function mapError(error: unknown): RouteResponse {
