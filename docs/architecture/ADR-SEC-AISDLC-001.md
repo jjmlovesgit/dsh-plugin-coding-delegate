@@ -256,10 +256,28 @@ construction -- a check that cannot fail. `.github/workflows/release.yml` replac
 the ledger evidence, checksums both files, and attaches them to the GitHub Release, so a released
 tarball can be checked against evidence that names its commit.
 
+### Release smoke test (v0.5.8-rc.1, then torn down)
+
+The release path was exercised on a throwaway annotated tag and removed afterwards, so nothing was
+shipped and no release candidate remains.
+
+- **Run 1 — `39184720880`, failed.** The gate died 26 s in, at the ledger audit, with
+  `fatal: Not a valid object name main`. A tag checkout is detached and carries
+  `refs/remotes/origin/main`, but the audit names `main` literally in
+  `git merge-base --is-ancestor <baseCommit> main`. Reproduced in a tag-only clone: the audit fails
+  without a local `main` and passes once the ref exists.
+- **Fix — `761c789`.** The release job now runs
+  `git update-ref refs/heads/main refs/remotes/origin/main` after fetching the ledger. It creates the
+  ref the audit names; it changes neither what is checked out nor what is tested.
+- **Run 2 — `39184943934`, success**, on `761c789`, 84 s end to end: structural gate, 27-run flake
+  sweep, evidence regeneration at the tag, checksums, release created with three assets.
+- **Asset integrity.** `ledger-audit-population.txt` (13,204 B) and `flake-gate-sweep.txt` (1,124 B)
+  agreed across the published `SHA256SUMS.txt`, the locally recomputed digests, and GitHub's
+  server-side asset digests — `2685ffd0…` and `622558bd…` respectively.
+- **Teardown.** Release and tag both deleted; `gh release view` reports "release not found" and the
+  remote tag list is empty.
+
 ### Open
 
-- **The release workflow is unexercised until the first version tag.** Its commands are the ones the
-  gate and the sweep already run under CI, but the tag trigger, the bash evidence regeneration and
-  the release upload have not fired.
 - **Tier 2/3 rule paths** are armed but still match no file in this repository until `src/` exists.
   Arming is not production evidence, and it should not be read as such.
