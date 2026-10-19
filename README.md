@@ -73,7 +73,7 @@ deliberately live in the checkout rather than in the tarball, so there is no sta
 extra artefact to trust:
 
 ```bash
-npm run gate                                 # all five stages, offline
+npm run gate                                 # all seven commands (eight tools), offline
 node scripts/verify-delegation-ledger.cjs    # the ledger audit alone
 node scripts/redteam-probe.cjs               # ten attack classes; restores the ledger afterwards
 ```
@@ -214,26 +214,38 @@ One command runs every check that stands between a change and a record of it:
 npm run gate
 ```
 
-It runs five steps in order, and a failure in any one of them stops the rest:
+It runs **seven commands, executing eight tools**, in order. A failure in any one stops the rest:
 
-1. **File hygiene** — `scripts/check-file-hygiene.cjs`. Refuses source under `tools/` and `plugin/src/`
-   that is missing a trailing newline, is stored with CRLF, or carries a UTF-8 BOM. CRLF is not cosmetic
-   here: the signer hashes the bytes on disk while the auditor reads the blob from the commit, so a CRLF
-   checkout produces a note the audit then rejects.
-2. **Negative discrimination** — `scripts/check-contract-fixtures.cjs`. Refuses a contract that passes its
+1. **File hygiene** — `scripts/check-file-hygiene.cjs`. Refuses files under `tools/`, `plugin/src/` and
+   `scripts/` that are missing a trailing newline, are stored with CRLF, or carry a UTF-8 BOM. CRLF is not
+   cosmetic here: the signer hashes the bytes on disk while the auditor reads the blob from the commit, so a
+   CRLF checkout produces a note the audit then rejects.
+2. **Architecture and complexity** — `npm run gate:arch`, two tools in one step. `dependency-cruiser`
+   (`.dependency-cruiser.cjs`) refuses a Tier 1 module that imports anything at all, a Tier 1 or Tier 2
+   module that imports Tier 3, and `plugin/src` reaching outside its own package. `eslint`
+   (`eslint.config.mjs`) enforces a cyclomatic ceiling of 10 and 40 lines per function on Tier 3 paths,
+   against a named file baseline that may only shrink. Both read their numbers from
+   `scripts/policy-config.cjs`, so the enforced ceiling is the documented one.
+3. **Negative discrimination** — `scripts/check-contract-fixtures.cjs`. Refuses a contract that passes its
    real module but *also* passes `tests/contracts/fixtures/<name>.negative.ts`, a contract with no fixture
    at all, or a fixture that fails every case — which is a malfunction rather than discrimination.
-3. **Module ↔ contract parity** — `scripts/check-contracts.cjs`. Refuses a contract with no
+4. **Module ↔ contract parity** — `scripts/check-contracts.cjs`. Refuses a contract with no
    `tools/<name>.ts`, a `tools/*.ts` with no contract, or a contract that is not well-formed against its
    module.
-4. **Ledger attestation audit** — `scripts/verify-delegation-ledger.cjs`. Refuses a note whose Ed25519
+5. **Ledger attestation audit** — `scripts/verify-delegation-ledger.cjs`. Refuses a note whose Ed25519
    signature does not verify under the pinned operator key, that is attached to a different commit than the
    one its payload names, whose `baseCommit` is not an ancestor of `main`, whose artifact or contract
-   digests do not match the anchored commit's tree, or whose contract is not covered by step 2. It also
+   digests do not match the anchored commit's tree, or whose contract is not covered by step 3. It also
    refuses a record that declares spec 1.2 without both blocks and a valid reviewer signature under the
    resolved trust root, that names a reviewer fingerprint the root does not verify, or whose reviewer key
    is the worker's own key.
-5. **Signer lifecycle** — `tests/attest-unit-lifecycle.test.cjs`, also `npm run test:lifecycle`. Creates a
+6. **Tree coverage** — `scripts/verify-tree-attestations.cjs`. Walks `HEAD` and requires that every
+   contract-governed `tools/*.ts` is covered by a signed note recording that path with the **SHA-256 of the
+   bytes at HEAD**. This closes the gap the audit structurally cannot: an audit of the notes it finds cannot
+   detect a primitive that has none, so a commit made with `--no-verify`, or on a clone without
+   `core.hooksPath`, used to pass CI. Coverage is content-addressed, not commit-addressed, so it survives
+   rebase, squash and amend.
+7. **Signer lifecycle** — `tests/attest-unit-lifecycle.test.cjs`, also `npm run test:lifecycle`. Creates a
    throwaway clone, copies the working-tree scripts into it, and drives a real `--prepare` and `--approve`
    there: the worker phase must leave the ledger ref exactly where it was, exactly one note must be added,
    the audit must accept that note under an out-of-band reviewer pin, and must reject it under a pin that
@@ -241,8 +253,60 @@ It runs five steps in order, and a failure in any one of them stops the rest:
    written. On a host without the operator and reviewer private keys — always the case in a CI workflow,
    which must not hold a signing key — it reports `# SKIP` with that reason rather than passing silently.
 
-Steps 1 and 3 are also available on their own as `npm run check:hygiene` and `npm run gate:wellformed`,
-with `npm run audit` for the ledger audit alone and `npm run test:lifecycle` for the signer lifecycle.
+Steps 1 and 4 are also available on their own as `npm run check:hygiene` and `npm run gate:wellformed`,
+with `npm run audit` for the ledger audit alone, `npm run gate:arch` for the boundary and complexity tools,
+and `npm run test:lifecycle` for the signer lifecycle.
+
+### The three tiers
+
+| Tier | Paths | What is mechanically enforced |
+| :--- | :--- | :--- |
+| **1 — leaf primitives** | `tools/*.ts` | zero imports of any kind; a discrimination contract plus a targeted negative fixture; three-run flake evidence; a signed Schema 1.2 note whose digest matches the bytes at HEAD |
+| **2 — protocol engines** | `plugin/src/**` | must resolve entirely inside `plugin/`, because the package ships as `plugin/dist` and is installed on its own |
+| **3 — imperative shell** | `scripts/**`, and `src/routes/**` / `src/ui/**` once they exist | cyclomatic ceiling 10, 40 lines per function; may not be imported by tier 1 or tier 2 |
+
+The tier patterns and ceilings live in `scripts/policy-config.cjs`, and the paths the repository has not
+grown yet are armed rather than merely documented: `src/engine/**` importing `src/routes/**` already fails
+the fence, and a complexity-11 function under `src/routes/` already fails the linter.
+
+### Adding a Tier 1 primitive
+
+Tier 1 modules cannot be committed by hand: the pre-commit hook refuses a staged `tools/*.ts` unless the
+atomic harness set `AI_SDLC_ATOMIC_RUN=1` for its own commit.
+
+1. Author the contract with a self-describing `@requirements` header — `tests/contracts/<name>.contract.cjs`.
+   The harness extracts that block and sends it to the worker; the dispatcher table is only a fallback.
+2. Author the targeted negative mutant — `tests/contracts/fixtures/<name>.negative.ts`. It must be correct
+   in every respect except one, or the discrimination gate refuses it for failing everything.
+3. Have the local worker serving — `qwen/qwen3.8-27b` on `http://127.0.0.1:1234/v1` (LM Studio).
+4. Run the harness:
+
+   ```powershell
+   npm run delegate:unit -- --target tools/<name>.ts --contract tests/contracts/<name>.contract.cjs --mutant tests/contracts/fixtures/<name>.negative.ts
+   ```
+
+   It verifies the mutant through a byte-identical contract mirror, dispatches, normalises the emitted bytes
+   (BOM, CRLF, trailing newline), runs the contract three times, commits, and stages the attestation draft.
+5. Seal it — the harness deliberately stops here, and will not name a reviewer for you:
+
+   ```powershell
+   node scripts/attest-unit.cjs --approve tools/<name>.ts --reviewer-identity "Your Name <email@example.com>"
+   ```
+
+`--dry-run` prints the whole plan without unlinking, dispatching, committing or signing.
+
+### Checking a release
+
+A `v*.*.*` tag runs `.github/workflows/release.yml`. It refuses a tag that disagrees with either
+`package.json` before installing anything, materialises `main` (a tag checkout is detached, and the ledger
+audit names that ref), re-runs the gate and the 27-run flake sweep at the tagged tree, regenerates the ledger
+population at that commit, and attaches three assets to the GitHub Release:
+`ledger-audit-population.txt`, `flake-gate-sweep.txt` and `SHA256SUMS.txt`.
+
+Each digest can be checked three independent ways — the published `SHA256SUMS.txt`, a local
+`sha256sum` after download, and the digest GitHub computes on upload — and the coverage gate makes the
+ledger population meaningful: a release whose evidence named a primitive the tree no longer contains would
+fail before publishing.
 
 ### Synchronising the ledger
 
@@ -594,7 +658,7 @@ is not out-of-band immutability — a writer who can change the key can change t
 commit — it forces a trust-root change into a distinct, reviewable diff instead of a silent working-tree
 substitution. `scripts/attest-unit.cjs` signs a unit against the same pin, so a signature the audit would
 reject is refused before it is created; `scripts/verify-delegation-ledger.cjs` audits the whole ledger, and
-`npm run gate` runs the contract gates and that audit together.
+`npm run gate` runs that audit together with the contract, architecture and coverage checks.
 
 **What it establishes, and what it does not.** It binds a payload to a key: the holder signed those
 bytes and nothing in them changed. It does not establish who holds the key. The key lives in this

@@ -853,7 +853,7 @@ from the document itself and checks every contract against disk with no path con
 `keys/delegation-operator.pub` pins the operator public key at the repository root: `verifyEnvelope`
 checks the key EMBEDDED IN THE ENVELOPE, which is self-consistency, and pinning is what turns it into
 attribution. `scripts/attest-unit.cjs` signs a unit and `scripts/verify-delegation-ledger.cjs` audits the
-whole ledger; `npm run gate` runs that audit together with the contract gates.
+whole ledger; `npm run gate` runs that audit together with the contract, architecture and coverage checks.
 
 **Spec 1.2 is not produced here.** The planner emits 1.1 (`ATTESTATION_SPEC_VERSION` in
 `plugin/src/crypto-attestation.ts`), because it does not construct the `worker` and `reviewer` blocks a 1.2
