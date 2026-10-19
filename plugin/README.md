@@ -28,6 +28,42 @@ that dependency was removed, and the credential rules are now TypeScript in this
 > else — it adds no provider, no model and no API key. Provider setup is entirely yours.
 > `cordis.patch.example.yml` ships as an **unapplied** starting point you can copy from.
 
+## What is new in 0.5.10
+
+**The worker call retries transient transport failures, and nothing else.** One `fetch` used to be
+the whole story: a refused connection or a 502 returned an error verdict immediately, even when the
+local server was mid-restart. `delegateWorker` now makes up to three attempts, with delays of 500 ms
+and 1000 ms from the repository's attested backoff, bounded inside the caller's existing `timeoutMs`
+— a single `AbortController` spans every attempt, so a retry can never outlive the deadline.
+
+| class | examples | behaviour |
+| :--- | :--- | :--- |
+| transport codes | `ECONNREFUSED`, `ECONNRESET`, `ETIMEDOUT`, `UND_ERR_CONNECT_TIMEOUT` | retried |
+| gateway statuses | 502, 503, 504 | retried |
+| **500** | context exhaustion, template parse failure, engine assertion | **fails fast** |
+| 4xx | 400, 401, 404, 422 | fails fast |
+| `AbortError` | your deadline expired | fails fast |
+
+500 is excluded on purpose: a local inference server emits it for deterministic faults that reproduce
+on the next attempt, so retrying only adds 1.5 s to a failure already decided. Zero jitter keeps the
+schedule replayable.
+
+**Every tool result now carries the retry count.** `transportRetries` is a number on every return
+path — `0` when the first attempt answered, and also `0` for the paths that never reach the network
+(a refused workspace, a starved worker), because `index.ts` normalises the verdict at the boundary.
+`lastTransportError` appears **if and only if** a terminal socket or network fault occurred, so the
+key's presence is the failure indicator rather than its value.
+
+```json
+{ "success": false, "status": "ERROR", "transportRetries": 2, "lastTransportError": "ECONNREFUSED" }
+```
+
+The unreachable-worker message is unchanged for a first-attempt failure and gains an
+`(after N attempts)` suffix only when a retry happened.
+
+Nothing else about the tool surface changed: the schema, the arguments and the remaining verdict
+fields are the ones the previous release documented.
+
 ## Contents
 
 - [The policy](#the-policy) · [Requirements](#requirements) · [Install](#install)
