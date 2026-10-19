@@ -296,7 +296,38 @@ The first real release, published by the workflow the smoke test verified, at `2
   `gate:arch` (dependency-cruiser + ESLint); contract fixtures; contract parity; ledger audit; tree
   coverage; Schema 1.2 lifecycle. A reader counting steps in the log will see seven.
 
+### Attested tools bundle (Option C.3, verified on v0.5.8-rc.2)
+
+Consumers that cannot reach the package graph receive the primitives as bytes plus receipts. DSH loads
+the plugin as an MCP stdio package that contains no `tools/`; Laya runs air-gapped, where a relative
+import into someone else's checkout is a copy, not a dependency. `scripts/export-attested-tools.cjs`
+emits the ten sources, their contracts, mutants and signed notes, the pinned operator key, a manifest
+of digests, and a zero-dependency `verify-bundle.cjs`.
+
+- **Built from HEAD blobs**, not the working tree, so the artefact cannot carry uncommitted bytes and
+  generating it does not dirty the tree it was built from.
+- **Coverage by digest**: a primitive with no note recording its exact SHA-256 fails the export.
+- **Reproducible**: the manifest timestamps the commit instead of the wall clock, and the archive is
+  written with sorted entries, the commit's mtime and no host identity. Two exports of the same commit
+  produced the same `.tar.gz` digest, `d8438d45…`.
+- **Verified on a real release**: candidate `v0.5.8-rc.2` (run `39188942910`, success) published four
+  assets; the downloaded archive verified itself offline, 10/10, against
+  `keys/delegation-operator.pub` (fingerprint `afea373a`). The release and tag were then deleted.
+
+**A guard had to change to make that test possible.** The version check compared full strings, so
+`v0.5.8-rc.2` against manifests at `0.5.8` failed before any verification ran — no release candidate
+could be tagged at all. It now accepts a pre-release suffix of the same base version, proven directly:
+accepts `0.5.8` and `0.5.8-rc.2`; rejects `0.5.9`, `0.5`, `0.5.80`.
+
+**Two limits remain.** The bundle verifies the operator envelope and the artifact digests; it does not
+independently verify the *reviewer's* signature inside the payload, which needs canonical-JSON
+reconstruction before it can be checked offline. And the archive is reproducible only under GNU tar,
+which is what both this host and CI's bash provide; a bsdtar host would produce different bytes.
+
 ### Open
 
+- **Offline dual-signature verification** is not implemented in the bundle: the reviewer block is
+  authenticated by the operator's envelope, but the reviewer's own Ed25519 signature is not re-checked
+  without canonical-JSON reconstruction.
 - **Tier 2/3 rule paths** are armed but still match no file in this repository until `src/` exists.
   Arming is not production evidence, and it should not be read as such.

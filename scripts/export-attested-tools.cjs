@@ -220,13 +220,27 @@ function exportOne(file, notes, out) {
   }
 }
 
-function makeTarball(out) {
+function makeTarball(out, commitDate) {
   // Run tar from the parent directory with RELATIVE names. Passing an absolute Windows path to -f
   // makes tar read `C:` as a remote host spec and fail with "Child returned status 128" -- measured.
+  //
+  // The flags are what make the ARCHIVE BYTES reproducible, not just its contents: sorted entries,
+  // the commit's own timestamp instead of the wall clock, and no host uid/gid/user names. Two
+  // exports of the same commit then produce the same .tar.gz digest on any machine running GNU tar.
   const parent = path.dirname(out)
   const base = path.basename(out)
   const archiveName = base + '.tar.gz'
-  const result = spawnSync('tar', ['-czf', archiveName, base], { cwd: parent, encoding: 'utf8' })
+  const args = [
+    '--sort=name',
+    '--mtime=' + commitDate,
+    '--owner=0',
+    '--group=0',
+    '--numeric-owner',
+    '-czf',
+    archiveName,
+    base,
+  ]
+  const result = spawnSync('tar', args, { cwd: parent, encoding: 'utf8' })
   if (result.error || result.status !== 0) fail('TAR', 'tar failed: ' + String(result.stderr || result.error))
   console.log('  tar   ' + path.join(parent, archiveName))
 }
@@ -234,6 +248,9 @@ function makeTarball(out) {
 function main() {
   const params = parseArgs(process.argv.slice(2))
   const commit = gitText(['rev-parse', 'HEAD']).trim()
+  // The COMMIT's date, not the wall clock: a manifest timestamp is part of what a consumer hashes,
+  // and `new Date().toISOString()` made two exports of the same commit differ forever.
+  const commitDate = gitText(['log', '-1', '--format=%cI', 'HEAD']).trim()
   const notes = readNotes()
   const files = tier1Files()
 
@@ -252,7 +269,7 @@ function main() {
   const manifest = {
     schemaVersion: 1,
     generatedFromCommit: commit,
-    generatedAt: new Date().toISOString(),
+    commitDate,
     ledgerRef: config.ledgerRef,
     operatorPublicKeyPath: OPERATOR_KEY,
     reviewerPublicKeyPath: fs.existsSync(path.join(params.out, REVIEWER_KEY)) ? REVIEWER_KEY : null,
@@ -262,7 +279,7 @@ function main() {
   write(params.out, 'manifest.json', JSON.stringify(manifest, null, 2) + '\n')
   write(params.out, 'verify-bundle.cjs', VERIFIER_SOURCE)
 
-  if (params.tar) makeTarball(params.out)
+  if (params.tar) makeTarball(params.out, commitDate)
   console.log('  done  ' + params.out)
 }
 
