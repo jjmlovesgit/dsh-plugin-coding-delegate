@@ -277,6 +277,24 @@ shipped and no release candidate remains.
 - **Teardown.** Release and tag both deleted; `gh release view` reports "release not found" and the
   remote tag list is empty.
 
+### Release v0.5.8 (2026-10-19)
+
+The first real release, published by the workflow the smoke test verified, at `28220d3`.
+
+- **Version parity guard** — a new first step, before any install: the tag must equal both the root
+  and the plugin manifest version, or the run stops. It exists because the workflow as first written
+  would have published a `v0.5.8` release from a tree whose manifests said `0.5.7`, with
+  impeccable-looking evidence naming a version the artefact did not carry.
+- **Run `39185487685`, success**, 84 s, 13 steps: guard (1 s), gate, 27-run flake sweep, evidence
+  regenerated at the tag, checksums, release published.
+- **Assets** agree across three independent sources — the published `SHA256SUMS.txt`, the digests
+  recomputed after download, and GitHub's server-side upload digests:
+  `ledger-audit-population.txt` `5dfc4da3…` (13,199 B) and `flake-gate-sweep.txt` `bc2fa1d7…`
+  (1,124 B).
+- **Gate accounting, stated precisely**: seven CLI command stages executing eight tools — hygiene;
+  `gate:arch` (dependency-cruiser + ESLint); contract fixtures; contract parity; ledger audit; tree
+  coverage; Schema 1.2 lifecycle. A reader counting steps in the log will see seven.
+
 ### Open
 
 - **Tier 2/3 rule paths** are armed but still match no file in this repository until `src/` exists.
