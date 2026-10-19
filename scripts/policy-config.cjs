@@ -59,16 +59,19 @@ const SENSIBLE_DEFAULTS = Object.freeze({
        */
       contractGoverned: '^tools/[^/]+\\.ts$',
       futurePaths: Object.freeze(['^src/core/primitives/']),
+      futureGlobs: Object.freeze(['src/core/primitives/**']),
       globs: Object.freeze(['tools/**']),
     }),
     protocolEngines: Object.freeze({
       pattern: '^plugin/src/',
       futurePaths: Object.freeze(['^src/core/protocol/', '^src/engine/']),
+      futureGlobs: Object.freeze(['src/core/protocol/**', 'src/engine/**']),
       globs: Object.freeze(['plugin/src/**']),
     }),
     imperativeShell: Object.freeze({
       pattern: '^scripts/',
       futurePaths: Object.freeze(['^src/routes/', '^src/ui/']),
+      futureGlobs: Object.freeze(['src/routes/**', 'src/ui/**']),
       globs: Object.freeze(['scripts/**']),
     }),
   }),
@@ -125,7 +128,7 @@ const SENSIBLE_DEFAULTS = Object.freeze({
 })
 
 const TOP_LEVEL_KEYS = new Set(['schemaVersion', 'ledgerRef', 'workerModel', 'tiers', 'delegation', 'complexity'])
-const TIER_KEYS = new Set(['pattern', 'contractGoverned', 'futurePaths', 'globs'])
+const TIER_KEYS = new Set(['pattern', 'contractGoverned', 'futurePaths', 'futureGlobs', 'globs'])
 const COMPLEXITY_KEYS = new Set(['max', 'maxLinesPerFunction', 'baseline'])
 const DELEGATION_KEYS = new Set(['flakeIterations'])
 

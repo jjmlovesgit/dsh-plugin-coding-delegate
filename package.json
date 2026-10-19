@@ -47,12 +47,13 @@
     "gate:wellformed": "node scripts/check-contracts.cjs",
     "test:lifecycle": "node --test tests/attest-unit-lifecycle.test.cjs",
     "lint": "npm run lint:code",
-    "lint:arch": "depcruise --config .dependency-cruiser.cjs tools plugin/src scripts tests",
-    "lint:code": "eslint scripts",
+    "lint:arch": "depcruise --config .dependency-cruiser.cjs .",
+    "lint:code": "eslint .",
     "gate:arch": "npm run lint:arch && npm run lint:code",
     "delegate:unit": "node scripts/delegate-unit.cjs",
     "hooks:install": "git config core.hooksPath scripts/git-hooks",
-    "gate": "node scripts/check-file-hygiene.cjs && npm run gate:arch && node scripts/check-contract-fixtures.cjs && node scripts/check-contracts.cjs && node scripts/verify-delegation-ledger.cjs && node --test tests/attest-unit-lifecycle.test.cjs"
+    "gate": "node scripts/check-file-hygiene.cjs && npm run gate:arch && node scripts/check-contract-fixtures.cjs && node scripts/check-contracts.cjs && node scripts/verify-delegation-ledger.cjs && node scripts/verify-tree-attestations.cjs && node --test tests/attest-unit-lifecycle.test.cjs",
+    "gate:flake": "node scripts/flake-gate-sweep.cjs"
   },
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "^8.10.0",

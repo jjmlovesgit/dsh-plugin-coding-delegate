@@ -30,6 +30,17 @@ const { loadPolicyConfig } = require('./scripts/policy-config.cjs')
 const { config, source } = loadPolicyConfig(__dirname)
 const { tiers } = config
 
+/**
+ * A tier's full path set: the patterns that exist today plus the ones the policy names for
+ * directories this repository has not grown yet.
+ *
+ * WITHOUT THIS, THE DORMANT RULES WERE NOT ARMED. `futurePaths` was declared beside every tier and
+ * never read by any rule, so `src/routes/**` would have matched nothing the day it appeared -- a
+ * fence around an empty field, reported as a passing fence. Verified with a probe: a `src/engine`
+ * module importing `src/routes` is now a violation, and was not before.
+ */
+const tierPath = (tier) => [tier.pattern, ...(tier.futurePaths || [])].join('|')
+
 module.exports = {
   forbidden: [
     {
@@ -47,8 +58,8 @@ module.exports = {
       comment:
         'Tier 1 and Tier 2 may not import Tier 3. Glue code is not an attestable substitute for a ' +
         'primitive. See POL-SEC-AISDLC-001 §6.1.',
-      from: { path: tiers.corePrimitives.pattern + '|' + tiers.protocolEngines.pattern },
-      to: { path: tiers.imperativeShell.pattern },
+      from: { path: tierPath(tiers.corePrimitives) + '|' + tierPath(tiers.protocolEngines) },
+      to: { path: tierPath(tiers.imperativeShell) },
     },
     {
       name: 'tier2-owns-its-package',
@@ -58,8 +69,8 @@ module.exports = {
         'on its own, so a path that climbs out of the package works here and nowhere else. Stated ' +
         'as the trees it may not reach rather than as "everything except plugin/src", because Node ' +
         'builtins and npm packages resolve outside plugin/src by design and are not the hazard.',
-      from: { path: tiers.protocolEngines.pattern },
-      to: { path: '^(tools|scripts|tests|experiments)/' },
+      from: { path: tierPath(tiers.protocolEngines) },
+      to: { path: '^(tools|scripts|tests|experiments|src)/' },
     },
   ],
 
