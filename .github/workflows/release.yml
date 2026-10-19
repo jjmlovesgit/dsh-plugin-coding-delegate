@@ -39,6 +39,26 @@ jobs:
             plugin/package-lock.json
             package-lock.json
 
+      - name: Verify the tag matches the manifests
+        # BEFORE ANY INSTALL, because this is the cheapest possible failure and the most expensive
+        # one to discover late. A tag that disagrees with the codebase publishes a release whose
+        # evidence names a version the artefact does not carry -- and the evidence would look
+        # impeccable while doing it. Both manifests are checked: the published package is plugin/,
+        # while the gate and its tooling live at the root.
+        working-directory: .
+        shell: bash
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          ROOT_VERSION="$(node -p "require('./package.json').version")"
+          PLUGIN_VERSION="$(node -p "require('./plugin/package.json').version")"
+          echo "tag:    ${TAG_VERSION}"
+          echo "root:   ${ROOT_VERSION}"
+          echo "plugin: ${PLUGIN_VERSION}"
+          if [ "${TAG_VERSION}" != "${ROOT_VERSION}" ] || [ "${TAG_VERSION}" != "${PLUGIN_VERSION}" ]; then
+            echo "FATAL: tag ${TAG_VERSION} disagrees with root ${ROOT_VERSION} / plugin ${PLUGIN_VERSION}"
+            exit 1
+          fi
+
       - name: Install plugin dependencies
         working-directory: plugin
         run: npm ci
