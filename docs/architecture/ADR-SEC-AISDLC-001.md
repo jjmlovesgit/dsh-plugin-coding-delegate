@@ -322,10 +322,18 @@ of digests, and a zero-dependency `verify-bundle.cjs`.
 could be tagged at all. It now accepts a pre-release suffix of the same base version, proven directly:
 accepts `0.5.8` and `0.5.8-rc.2`; rejects `0.5.9`, `0.5`, `0.5.80`.
 
-**Two limits remain.** The bundle verifies the operator envelope and the artifact digests; it does not
-independently verify the *reviewer's* signature inside the payload, which needs canonical-JSON
-reconstruction before it can be checked offline. And the archive is reproducible only under GNU tar,
-which is what both this host and CI's bash provide; a bsdtar host would produce different bytes.
+**Dual-signature verification is now offline.** The verifier carries a port of
+`plugin/src/canonical-json.ts` (RFC 8785) and checks the reviewer's own signature over the canonical
+payload with `reviewer.signature` removed, plus `reviewer.keyFingerprint` against the bundled
+`keys/delegation-reviewer.pub`. All ten bundled notes verify. The fixtures that prove the check is
+load-bearing simulate a **compromised operator key**: a reviewer identity altered and the envelope
+re-signed with the real operator private key. That fixture passes the envelope check and fails only at
+the reviewer signature, which is exactly the separation the second signature exists to provide; a
+mutated `keyFingerprint` fails both the fingerprint and the signature check, and the nine untouched
+notes still verify.
+
+**One limit remains**: the archive is reproducible only under GNU tar, which is what both this host
+and CI's bash provide; a bsdtar host would produce different bytes.
 
 ### Tier 3 activated
 
@@ -350,9 +358,6 @@ clean.
 
 ### Open
 
-- **Offline dual-signature verification** is not implemented in the bundle: the reviewer block is
-  authenticated by the operator's envelope, but the reviewer's own Ed25519 signature is not re-checked
-  without canonical-JSON reconstruction.
 - **Reserved paths not yet realised**: `src/ui/**`, `src/core/primitives/**` and
   `src/core/protocol/**` match no file. The fences and ceilings are armed for them and were exercised
   on `src/engine/**` and `src/routes/**`, but arming is not evidence for directories nothing has been

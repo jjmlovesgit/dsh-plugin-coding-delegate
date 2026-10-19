@@ -45,15 +45,123 @@ const fs = require('node:fs')
 const path = require('node:path')
 
 const here = (p) => path.join(__dirname, p)
-const normalize = (pem) => pem.replace(/\\r\\n/g, '\\n').trim()
+const cleanKey = (pem) => String(pem).replace(/\\r\\n?/g, '\\n').trim()
 const sha256 = (buffer) => crypto.createHash('sha256').update(buffer).digest('hex')
+const keyFingerprint = (pem) => crypto.createHash('sha256').update(cleanKey(pem), 'utf8').digest('hex')
+
+// RFC 8785 canonicalization, PORTED from plugin/src/canonical-json.ts. It must be a port rather
+// than a reimplementation: the reviewer signature covers these exact bytes, and any divergence in
+// key ordering, number formatting or string escaping rejects every historical note. The seventeen
+// notes in the ledger are the fixture set that proves the port.
+function canonicalizeJson(value) {
+  const out = []
+  writeValue(value, out)
+  return out.join('')
+}
+
+function writeValue(value, out) {
+  if (value === null) { out.push('null'); return }
+  const type = typeof value
+  if (type === 'boolean') { out.push(value ? 'true' : 'false'); return }
+  if (type === 'number') { out.push(writeNumber(value)); return }
+  if (type === 'string') { out.push(quoteString(value)); return }
+  if (type === 'object') { Array.isArray(value) ? writeArray(value, out) : writeObject(value, out); return }
+  throw new Error(type + ' has no JSON representation')
+}
+
+function writeNumber(value) {
+  if (!Number.isFinite(value)) throw new Error(String(value) + ' is not representable in JSON')
+  return String(value)
+}
+
+function compareCodeUnits(a, b) { return a < b ? -1 : a > b ? 1 : 0 }
+
+function writeObject(value, out) {
+  const keys = Object.keys(value).sort(compareCodeUnits)
+  out.push('{')
+  let first = true
+  for (const key of keys) {
+    const member = value[key]
+    if (member === undefined || typeof member === 'function' || typeof member === 'symbol') continue
+    if (!first) out.push(',')
+    first = false
+    out.push(quoteString(key), ':')
+    writeValue(member, out)
+  }
+  out.push('}')
+}
+
+function writeArray(value, out) {
+  out.push('[')
+  for (let i = 0; i < value.length; i++) {
+    if (i > 0) out.push(',')
+    const element = value[i]
+    if (element === undefined || typeof element === 'function' || typeof element === 'symbol') {
+      throw new Error('array element ' + i + ' has no JSON representation')
+    }
+    writeValue(element, out)
+  }
+  out.push(']')
+}
+
+function quoteString(value) {
+  assertNoLoneSurrogate(value)
+  return JSON.stringify(value)
+}
+
+function assertNoLoneSurrogate(value) {
+  for (let i = 0; i < value.length; i++) {
+    const unit = value.charCodeAt(i)
+    if (unit >= 0xd800 && unit <= 0xdbff) {
+      const next = i + 1 < value.length ? value.charCodeAt(i + 1) : -1
+      if (next < 0xdc00 || next > 0xdfff) throw new Error('lone high surrogate at ' + i)
+      i += 1
+    } else if (unit >= 0xdc00 && unit <= 0xdfff) {
+      throw new Error('lone low surrogate at ' + i)
+    }
+  }
+}
 
 function fail(message) {
   console.error('  FAIL  ' + message)
   return false
 }
 
-function verifyEntry(entry, pinnedPem, operatorPath) {
+/**
+ * The reviewer's own signature: canonical payload with the reviewer.signature field removed, verified
+ * the reviewer key. A note that predates spec 1.2 has no reviewer block, and there is nothing to check.
+ *
+ * THIS IS WHAT THE OPERATOR ENVELOPE CANNOT PROVE. The envelope authenticates the payload that
+ * CONTAINS the reviewer block, so a forged reviewer is caught only if the operator key is honest.
+ * The reviewer's separate signature is the check that survives a compromised operator key, which is
+ * why the bundle carries the reviewer public key rather than trusting the identity string.
+ */
+function verifyReviewer(entry, payload, reviewerPem) {
+  const reviewer = payload.reviewer
+  if (!reviewer || typeof reviewer !== 'object') return true
+  if (!reviewerPem) return fail(entry.name + ': the note carries a reviewer block but the bundle has no reviewer key')
+  let ok = true
+  if (typeof reviewer.keyFingerprint !== 'string' || keyFingerprint(reviewerPem).slice(0, 8) !== reviewer.keyFingerprint) {
+    ok = fail(entry.name + ': reviewer keyFingerprint does not match the bundled reviewer key')
+  }
+  const unsigned = JSON.parse(JSON.stringify(payload))
+  delete unsigned.reviewer.signature
+  let valid = false
+  try {
+    valid = crypto.verify(
+      null,
+      Buffer.from(canonicalizeJson(unsigned), 'utf8'),
+      reviewerPem,
+      Buffer.from(String(reviewer.signature || ''), 'base64')
+    )
+  } catch (error) {
+    valid = false
+  }
+  if (!valid) ok = fail(entry.name + ': reviewer signature does not verify over the canonical payload')
+  return ok
+}
+
+function verifyEntry(entry, pinnedPem, reviewerPem) {
   let ok = true
   const primitive = fs.readFileSync(here(entry.primitiveFile))
   const contract = fs.readFileSync(here(entry.contractFile))
@@ -67,7 +175,7 @@ function verifyEntry(entry, pinnedPem, operatorPath) {
   if (typeof envelope.payload !== 'string' || typeof envelope.signature !== 'string') {
     return fail(entry.name + ': note envelope is not a signed payload')
   }
-  if (normalize(envelope.publicKeyPem) !== normalize(pinnedPem)) {
+  if (cleanKey(envelope.publicKeyPem) !== cleanKey(pinnedPem)) {
     ok = fail(entry.name + ': the note is signed by a key that is not the pinned operator key')
   }
 
@@ -88,6 +196,8 @@ function verifyEntry(entry, pinnedPem, operatorPath) {
     ok = fail(entry.name + ': the note records a different digest than the bundled bytes')
   }
 
+  if (!verifyReviewer(entry, payload, reviewerPem)) ok = false
+
   if (ok) {
     const reviewer = entry.reviewerIdentity ? ' [' + entry.reviewerIdentity + ']' : ' [no reviewer block]'
     console.log('  ok    ' + entry.name + ' <- ' + String(entry.anchorCommit).slice(0, 7) + reviewer)
@@ -98,12 +208,16 @@ function verifyEntry(entry, pinnedPem, operatorPath) {
 function main() {
   const manifest = JSON.parse(fs.readFileSync(here('manifest.json'), 'utf8'))
   const pinnedPem = fs.readFileSync(here(manifest.operatorPublicKeyPath), 'utf8')
+  const reviewerPem = manifest.reviewerPublicKeyPath && fs.existsSync(here(manifest.reviewerPublicKeyPath))
+    ? fs.readFileSync(here(manifest.reviewerPublicKeyPath), 'utf8')
+    : null
   console.log('=== attested tools bundle: ' + manifest.primitives.length + ' primitive(s) from ' + String(manifest.generatedFromCommit).slice(0, 7) + ' ===')
-  console.log('    operator key: ' + manifest.operatorPublicKeyPath + ' (fingerprint ' + crypto.createHash('sha256').update(normalize(pinnedPem)).digest('hex').slice(0, 12) + ')')
+  console.log('    operator key: ' + manifest.operatorPublicKeyPath + ' (fingerprint ' + keyFingerprint(pinnedPem).slice(0, 12) + ')')
+  console.log('    reviewer key: ' + (manifest.reviewerPublicKeyPath || '(none bundled)'))
 
   let failed = 0
   for (const entry of manifest.primitives) {
-    if (!verifyEntry(entry, pinnedPem, manifest.operatorPublicKeyPath)) failed += 1
+    if (!verifyEntry(entry, pinnedPem, reviewerPem)) failed += 1
   }
 
   if (failed > 0) {
