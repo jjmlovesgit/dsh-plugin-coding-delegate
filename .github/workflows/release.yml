@@ -118,6 +118,19 @@ jobs:
           sha256sum ledger-audit-population.txt flake-gate-sweep.txt > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
+      - name: Build and checksum the attested tools bundle
+        # The fourth asset, and the only one a consumer can actually use offline: the ten primitives
+        # with their contracts, mutants and signed notes, plus a verifier that needs no network, no
+        # git and no npm. Its digest joins the same SHA256SUMS.txt as the other evidence, so one file
+        # covers all four assets.
+        working-directory: .
+        shell: bash
+        run: |
+          npm run export:tools -- --out "dist/attested-tools-${GITHUB_REF_NAME}" --tar
+          cp "dist/attested-tools-${GITHUB_REF_NAME}.tar.gz" dist/attested-tools-bundle.tar.gz
+          (cd dist && sha256sum attested-tools-bundle.tar.gz) >> docs/compliance/evidence/SHA256SUMS.txt
+          cat docs/compliance/evidence/SHA256SUMS.txt
+
       - name: Attach evidence to the release
         # `gh` is preinstalled on the runner, so this needs no third-party action. The `||` covers a
         # re-run against an existing release, where create fails and upload --clobber replaces the
@@ -133,7 +146,9 @@ jobs:
             docs/compliance/evidence/ledger-audit-population.txt \
             docs/compliance/evidence/flake-gate-sweep.txt \
             docs/compliance/evidence/SHA256SUMS.txt \
+            dist/attested-tools-bundle.tar.gz \
           || gh release upload "${GITHUB_REF_NAME}" \
             docs/compliance/evidence/ledger-audit-population.txt \
             docs/compliance/evidence/flake-gate-sweep.txt \
-            docs/compliance/evidence/SHA256SUMS.txt --clobber
+            docs/compliance/evidence/SHA256SUMS.txt \
+            dist/attested-tools-bundle.tar.gz --clobber
