@@ -482,9 +482,22 @@ common case.
 
 ### Open
 
-- **Reserved paths not yet realised**: `src/ui/**` matches no file. The fences and ceilings are armed
-  for it and have been exercised on `src/engine/**`, `src/routes/**`, `src/core/primitives/**` and
-  `src/core/protocol/**`, but arming is not evidence for a directory nothing has been written into.
+- **Reserved paths: none.** `src/core/primitives/**` and `src/core/protocol/**` were realised, and
+  `src/ui/**` was pruned rather than kept armed — see below. Every fence and ceiling now guards a
+  directory that exists.
+
+### `src/ui/**` was pruned, not realised
+
+The last reserved path is gone. It had a fence and a ceiling and no consumer: this repository is a
+headless plugin, a CLI harness and a delegation service, and nothing renders a terminal or a view. The
+two options were to write a formatter nobody calls — speculative surface of exactly the kind rejected
+for the MCP adapter and Option C — or to delete the reservation.
+
+Deleting is the honest move, and it is one line to reverse if a UI is ever planned. A rule aimed at a
+directory that will never exist is not protection; it is a line in the policy, a paragraph in this
+record, and two config comments that all have to stay consistent with a directory nothing writes into.
+The `imperativeShell` tier now names `scripts/**` and `src/routes/**` only, and the eslint Tier 3 block
+follows from the same policy object.
 
 ### Tier 2 protocol realised: the unit verdict lifecycle
 
@@ -529,5 +542,5 @@ both layouts, so it never has to parse a contract to learn where its module live
 a contract whose mutant is caught by exactly one case — `unwrapOr` returning the fallback on a success —
 which is the discrimination evidence that distinguishes a contract from a smoke test.
 
-The count is **11** and the ledger **20**. The two remaining reserved paths are `src/ui/**` and
-`src/core/protocol/**`.
+The count is **11** and the ledger **20**. `src/core/protocol/**` was subsequently realised as a Tier 2
+module, and `src/ui/**` was pruned; no reserved paths remain.

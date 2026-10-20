@@ -71,8 +71,12 @@ const SENSIBLE_DEFAULTS = Object.freeze({
     }),
     imperativeShell: Object.freeze({
       pattern: '^scripts/',
-      futurePaths: Object.freeze(['^src/routes/', '^src/ui/']),
-      futureGlobs: Object.freeze(['src/routes/**', 'src/ui/**']),
+      // `src/ui/**` was here as a second reserved Tier 3 path and has been REMOVED: this repository is a
+      // headless plugin, a CLI harness and a delegation service, and nothing renders a UI. A fence and a
+      // ceiling aimed at a directory no consumer will ever create is debt -- it has to be documented,
+      // explained and kept consistent for no benefit. Re-arming it is one line if a UI is ever planned.
+      futurePaths: Object.freeze(['^src/routes/']),
+      futureGlobs: Object.freeze(['src/routes/**']),
       globs: Object.freeze(['scripts/**']),
     }),
   }),

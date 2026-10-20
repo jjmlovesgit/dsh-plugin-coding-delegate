@@ -64,7 +64,7 @@ export default [
     languageOptions: { ecmaVersion: 2023, sourceType: 'module' },
   },
   {
-    // The reserved Tier 3 paths are TypeScript (`src/routes/**`, `src/ui/**`), and the flat config's
+    // The Tier 3 paths are TypeScript (`src/routes/**`; `src/ui/**` was pruned), and the flat config's
     // default parser is espree, which cannot read a type annotation. Without this block the ceiling
     // would be armed on those files and then fail on the first `:` as a parse error -- a red build
     // that says nothing about complexity. `scripts/**` stays on espree because it is CommonJS.
