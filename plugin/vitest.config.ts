@@ -22,6 +22,13 @@ export default defineConfig({
     // failed with "No test suite found in file". Scoping the include to `.ts` keeps the two
     // runners out of each other's way.
     include: ['tests/**/*.test.ts'],
+    // THE BUDGET IS NOT A PERFORMANCE TARGET. Several suites shell out to real `git` -- `makeRepo`
+    // initialises a repository, runs commits and reads back refs -- and a shared CI runner can take
+    // longer than five seconds to do that under load. Measured: `attestation-drift.test.ts >
+    // refuses to attest when the verification command commits` timed out at 5000 ms on one run and
+    // passed on the rerun with no code change, which is the definition of a flake. A timeout that
+    // reports a slow machine as a defect teaches people to rerun instead of read.
+    testTimeout: 20000,
     env: {
       DSH_HOME: TEST_DSH_HOME,
     },
