@@ -493,10 +493,12 @@ a fence-extraction step; `verification-golden.cjs`, a characterisation harness f
 finished). `measure-skeleton-ratio.cjs` was refactored — its 64-line `main` split into
 `resolveOptions` / `measure` / `summarise` / `report` — and left the baseline as well.
 
-**Five remain**, each a real violation today: `attest-unit.cjs`, `check-promotion.cjs`,
-`measure-reading-cost.cjs`, `redteam-probe.cjs`, `verify-delegation-ledger.cjs`. Four are gate-critical
-and are refactored only when they are already being changed for a functional reason; the fifth is the
-reading-cost measurement, whose `main` is 146 lines.
+**Four remain**, each a real violation today: `attest-unit.cjs`, `check-promotion.cjs`,
+`redteam-probe.cjs`, `verify-delegation-ledger.cjs`. All four are gate-critical and are refactored only
+when they are already being changed for a functional reason. `measure-reading-cost.cjs` left the list
+first: its 146-line `main` was split into `parseOptions` / `aggregate` / `buildSummary` / four report
+functions, and the refactor was checked against a synthetic trace rather than reviewed — JSON and
+human output are byte-identical before and after.
 
 ### Open
 

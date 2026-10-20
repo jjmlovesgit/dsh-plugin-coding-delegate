@@ -108,10 +108,9 @@ const SENSIBLE_DEFAULTS = Object.freeze({
       // RE-MEASURED, not remembered. Running the three rules against all 23 entries showed that 17 of
       // them already satisfied the ceilings: they had been rewritten since the list was drawn and the
       // list was never re-tested, so they were exempt from rules they passed. Removing an exemption is
-      // always safe; the five that remain are the ones that actually fail today.
+      // always safe; the four that remain are the ones that actually fail today.
       'scripts/attest-unit.cjs',
       'scripts/check-promotion.cjs',
-      'scripts/measure-reading-cost.cjs',
       'scripts/redteam-probe.cjs',
       'scripts/verify-delegation-ledger.cjs',
     ]),

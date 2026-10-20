@@ -95,20 +95,17 @@ function sizeCache() {
   }
 }
 
-function main() {
-  const argv = process.argv.slice(2)
-  const logPath = argValue('log', argv) || path.join(dataDir(), 'router-debug.log')
-  const top = Number(argValue('top', argv) || 12)
-  const asJson = argv.includes('--json')
-
-  if (!fs.existsSync(logPath)) {
-    console.error('no trace at ' + logPath)
-    process.exit(2)
+/** Options, so the rest of the program never reads `process.argv`. */
+function parseOptions(argv) {
+  return {
+    logPath: argValue('log', argv) || path.join(dataDir(), 'router-debug.log'),
+    top: Number(argValue('top', argv) || 12),
+    asJson: argv.includes('--json'),
   }
+}
 
-  const { records, malformed } = readTrace(logPath)
-  const sizeOf = sizeCache()
-
+/** Fold the records into per-role, per-tool and per-path buckets. The only pass over the trace. */
+function aggregate(records, sizeOf) {
   const byRole = {}
   const byTool = {}
   const byPath = new Map()
@@ -133,16 +130,41 @@ function main() {
     byPath.set(target, entry)
   }
 
+  return { byRole, byTool, byPath, unreadable }
+}
+
+/** The architect's two byte figures: per read, and once per distinct file. */
+function architectFootprint(byRole, sizeOf) {
   const architect = byRole.architect || { reads: 0, distinct: new Set(), bytes: 0 }
-  const distinctBytes = [...architect.distinct].reduce((sum, p) => {
-    const size = sizeOf(p)
+  const distinctBytes = [...architect.distinct].reduce((sum, target) => {
+    const size = sizeOf(target)
     return sum + (size === null ? 0 : size)
   }, 0)
+  return { architect, distinctBytes }
+}
 
-  const hottest = [...byPath.entries()].sort((a, b) => b[1].reads - a[1].reads).slice(0, top)
+function roleRows(byRole) {
+  return Object.fromEntries(
+    Object.entries(byRole).map(([role, v]) => [
+      role,
+      { reads: v.reads, distinctFiles: v.distinct.size, bytes: v.bytes },
+    ])
+  )
+}
 
-  const summary = {
-    log: logPath,
+function hottestPaths(byPath, top) {
+  return [...byPath.entries()]
+    .sort((a, b) => b[1].reads - a[1].reads)
+    .slice(0, top)
+    .map(([target, v]) => ({ path: target, reads: v.reads, bytes: v.size }))
+}
+
+/** The JSON shape, built once so `--json` and the human report cannot disagree. */
+function buildSummary(context) {
+  const { options, records, malformed, unreadable, footprint, byPath, byTool, byRole } = context
+  const { architect, distinctBytes } = footprint
+  return {
+    log: options.logPath,
     sourceReadRecords: records.length,
     malformedBlocks: malformed,
     pathsNotFound: unreadable,
@@ -160,33 +182,25 @@ function main() {
         ? Number((architect.reads / architect.distinct.size).toFixed(2))
         : 0,
     },
-    byRole: Object.fromEntries(
-      Object.entries(byRole).map(([role, v]) => [
-        role,
-        { reads: v.reads, distinctFiles: v.distinct.size, bytes: v.bytes },
-      ])
-    ),
+    byRole: roleRows(byRole),
     byTool,
-    hottestPaths: hottest.map(([p, v]) => ({ path: p, reads: v.reads, bytes: v.size })),
+    hottestPaths: hottestPaths(byPath, options.top),
   }
+}
 
-  if (asJson) {
-    console.log(JSON.stringify(summary, null, 2))
-    return
-  }
-
+function reportFootprint(summary, extras) {
   const n = (value) => Number(value).toLocaleString('en-US')
-  console.log('trace            ' + logPath)
+  console.log('trace            ' + summary.log)
   console.log(
     'source reads     ' +
-      n(records.length) +
+      n(summary.sourceReadRecords) +
       ' records' +
-      (malformed ? '  (' + malformed + ' unparseable, counted not skipped)' : '')
+      (extras.malformed ? '  (' + extras.malformed + ' unparseable, counted not skipped)' : '')
   )
   console.log('')
   console.log('ARCHITECT READING FOOTPRINT')
-  console.log('  read events          ' + n(architect.reads))
-  console.log('  distinct files       ' + n(architect.distinct.size))
+  console.log('  read events          ' + n(summary.architect.reads))
+  console.log('  distinct files       ' + n(summary.architect.distinctFiles))
   console.log('  reads per file       ' + summary.architect.readAmplification + '   (re-reading across turns)')
   console.log(
     '  bytes, per read      ' +
@@ -202,10 +216,14 @@ function main() {
       n(summary.architect.tokensDistinct) +
       ' tokens'
   )
-  if (unreadable) {
-    console.log('  paths not on disk    ' + n(unreadable) + '  (size unknown, excluded from byte totals)')
+  if (extras.unreadable) {
+    console.log('  paths not on disk    ' + n(extras.unreadable) + '  (size unknown, excluded from byte totals)')
   }
   console.log('')
+}
+
+function reportRoles(summary) {
+  const n = (value) => Number(value).toLocaleString('en-US')
   console.log('BY ROLE')
   for (const [role, v] of Object.entries(summary.byRole)) {
     console.log(
@@ -220,8 +238,11 @@ function main() {
     )
   }
   console.log('')
-  console.log('BY TOOL      ' + JSON.stringify(byTool))
+  console.log('BY TOOL      ' + JSON.stringify(summary.byTool))
   console.log('')
+}
+
+function reportHottest(summary) {
   console.log('HOTTEST PATHS')
   for (const row of summary.hottestPaths) {
     console.log(
@@ -234,12 +255,47 @@ function main() {
     )
   }
   console.log('')
+}
+
+function reportCaveats() {
   console.log('CAVEATS, because they change what this number means:')
   console.log('  * byte sizes come from the file on disk NOW, not from the read; a file edited since is mis-sized')
   console.log('  * the trace fires only for CODE_EXTENSIONS, so markdown, JSON and config reads are invisible')
   console.log('  * ~' + BYTES_PER_TOKEN + ' bytes per token is a rough constant for source, not a tokeniser')
   console.log('  * "per read" is not "metered": a file read once is re-sent on every later turn, which this')
   console.log('    instrument cannot see. That figure is in the session transcript, not here.')
+}
+
+function main() {
+  const options = parseOptions(process.argv.slice(2))
+  if (!fs.existsSync(options.logPath)) {
+    console.error('no trace at ' + options.logPath)
+    process.exit(2)
+  }
+
+  const { records, malformed } = readTrace(options.logPath)
+  const sizeOf = sizeCache()
+  const aggregated = aggregate(records, sizeOf)
+  const summary = buildSummary({
+    options,
+    records,
+    malformed,
+    unreadable: aggregated.unreadable,
+    footprint: architectFootprint(aggregated.byRole, sizeOf),
+    byPath: aggregated.byPath,
+    byTool: aggregated.byTool,
+    byRole: aggregated.byRole,
+  })
+
+  if (options.asJson) {
+    console.log(JSON.stringify(summary, null, 2))
+    return
+  }
+
+  reportFootprint(summary, { malformed, unreadable: aggregated.unreadable })
+  reportRoles(summary)
+  reportHottest(summary)
+  reportCaveats()
 }
 
 main()
