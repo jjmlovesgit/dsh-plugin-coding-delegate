@@ -58,7 +58,8 @@
     "export:tools": "node scripts/export-attested-tools.cjs",
     "test:routes": "node --test tests/routes/*.test.cjs",
     "test:parity": "node --test tests/canonical-json-parity.test.cjs tests/exponential-backoff-parity.test.cjs",
-    "test:primitives": "node --test tests/primitives/*.test.cjs"
+    "test:primitives": "node --test tests/primitives/*.test.cjs",
+    "test:protocol": "node --test tests/protocol/*.test.cjs"
   },
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "^8.10.0",

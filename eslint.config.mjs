@@ -104,6 +104,24 @@ export default [
     },
   },
   {
+    // TIER 2 PROTOCOL CEILINGS. `src/core/protocol/**` is Tier 2 in the policy, and until this block
+    // existed it matched NO ceiling rule at all -- the file would have been linted for import
+    // extensions and nothing else, so "passes the Tier 2 ceilings" was a claim with nothing behind it.
+    //
+    // `plugin/src/**` is the other Tier 2 surface and is deliberately NOT included here: its files
+    // predate the ceilings and adding them would fail a build for code nobody is changing. That gap is
+    // recorded rather than papered over; it needs a baseline of its own, not a silent exemption.
+    files: ['src/core/protocol/**/*.ts'],
+    rules: {
+      complexity: ['error', max],
+      'max-lines-per-function': [
+        'error',
+        { max: maxLinesPerFunction, skipBlankLines: true, skipComments: true },
+      ],
+      'no-nested-ternary': 'error',
+    },
+  },
+  {
     // The ratchet. Later config objects override earlier ones for the files they name, so these
     // files keep every other rule while the two ceilings are switched off for them.
     files: baseline,

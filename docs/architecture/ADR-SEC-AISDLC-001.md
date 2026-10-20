@@ -207,9 +207,9 @@ written rather than ticked, so the deviations stay visible.
   the first primitive outside `tools/`, which required the contract, fixture and coverage gates to
   learn a second directory before it could be governed at all.
 - Ledger: **20 notes**, all verified against the pinned operator key (`afea373a`).
-- Tier 2: **1** protocol engine, `src/engine/task-state-machine.ts`, with a 9-test loopback suite
-  (`npm run test:engine`). Tier 3: **1** route adapter, `src/routes/task-routes.ts`, with 8 tests
-  (`npm run test:routes`).
+- Tier 2: **2** — the dispatch engine `src/engine/task-state-machine.ts` (9 tests, attempts and
+  backoff) and the unit-verdict lifecycle `src/core/protocol/task-lifecycle.ts` (8 tests, no I/O).
+  Tier 3: **1** route adapter, `src/routes/task-routes.ts`, with 8 tests.
 - Gate: **seven stages, eight tools** — hygiene; architecture + lint; contract fixtures; contract
   parity; ledger audit; tree coverage; Schema 1.2 lifecycle. `npm run gate` exits 0.
 - Coverage baseline: **none**. Seven primitives had drifted by one newline byte in `9595ccf`; they
@@ -482,10 +482,37 @@ common case.
 
 ### Open
 
-- **Reserved paths not yet realised**: `src/ui/**` and `src/core/protocol/**` match no file. The
-  fences and ceilings are armed for them and have been exercised on `src/engine/**`,
-  `src/routes/**` and `src/core/primitives/**`, but arming is not evidence for directories nothing
-  has been written into.
+- **Reserved paths not yet realised**: `src/ui/**` matches no file. The fences and ceilings are armed
+  for it and have been exercised on `src/engine/**`, `src/routes/**`, `src/core/primitives/**` and
+  `src/core/protocol/**`, but arming is not evidence for a directory nothing has been written into.
+
+### Tier 2 protocol realised: the unit verdict lifecycle
+
+`src/core/protocol/task-lifecycle.ts` is the first file under the reserved Tier 2 path. It models what
+happened to a **unit** of delegated work — `DRAFT → DISPATCHED → VERIFIED → ATTESTED`, with refusals,
+verification failures, flakes and starvation as terminals — and deliberately does not model an attempt:
+retries, backoff and timeouts stay with `src/engine/task-state-machine.ts`. Two machines describing one
+process is how two meanings for "dispatched" get created, so the split is stated in the module header.
+
+**The state names are the shipped status strings.** `VERIFICATION_FAILED`, `UNIT_FLAKY`,
+`CONTEXT_REFUSED`, `WORKER_OUTPUT_STARVED` and `ERROR` are what the tool already returns, so the module
+is a model of the product rather than a parallel vocabulary needing a mapping table. The single rename
+is `UNIT_PASSED` → `VERIFIED`, because the shipped string conflated "the contract passed" with "a note
+was signed" — `ATTESTED` is the latter.
+
+**Illegal transitions are values.** `transition(state, event)` returns
+`Result<TaskState, ProtocolError>`, which makes this the first production consumer of the attested
+`Result` primitive: a caller cannot ignore a refusal without the type system noticing.
+
+**The ceilings had to exist first.** `src/core/protocol/**` matched no eslint rule block before this
+change, so "passes the Tier 2 ceilings" would have been unbacked. A block now applies the same
+complexity-10, 40-line and no-nested-ternary rules. `plugin/src/**` — the other Tier 2 surface — remains
+ungoverned by ceilings, deliberately and visibly: its files predate the rules and would need a baseline,
+not a silent exemption.
+
+The fence was proven rather than assumed: a probe importing `src/routes/task-routes.ts` from
+`src/core/protocol/` fails `no-tier3-behind-the-fence`, and removing it leaves 207 modules with zero
+violations. Reserved-path debt drops from **2 to 1**.
 
 ### Tier 1 unification, and the gap it closed
 

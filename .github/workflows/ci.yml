@@ -87,6 +87,12 @@ jobs:
         working-directory: .
         run: npm run test:primitives
 
+      - name: Tier 2 protocol lifecycle suite
+        # The unit-verdict transition table. Its ceilings and the Tier 2 -> Tier 3 fence are enforced
+        # by `npm run gate:arch`; this step proves the transitions themselves.
+        working-directory: .
+        run: npm run test:protocol
+
       - name: Regression oracles
         # Exercises the guard, DLP gate, redaction, containment and verification paths against
         # the built artefact.

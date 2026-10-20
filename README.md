@@ -262,7 +262,7 @@ and `npm run test:lifecycle` for the signer lifecycle.
 | Tier | Paths | What is mechanically enforced |
 | :--- | :--- | :--- |
 | **1 — leaf primitives** | `tools/*.ts`, `src/core/primitives/*.ts` | zero imports of any kind; a discrimination contract plus a targeted negative fixture; three-run flake evidence; a signed Schema 1.2 note whose digest matches the bytes at HEAD; the same complexity (10) and length (40 lines) ceilings as tier 3, plus no nested ternaries |
-| **2 — protocol engines** | `plugin/src/**` | must resolve entirely inside `plugin/`, because the package ships as `plugin/dist` and is installed on its own |
+| **2 — protocol engines** | `plugin/src/**`, `src/core/protocol/**` | `plugin/src` must resolve entirely inside `plugin/`, because the package ships as `plugin/dist` and is installed on its own; `src/core/protocol` is pure specification — no I/O, no `fetch`, no subprocess — under the same complexity 10 / 40-line / no-nested-ternary ceilings as tiers 1 and 3 |
 | **3 — imperative shell** | `scripts/**`, `src/routes/**` | cyclomatic ceiling 10, 40 lines per function, no nested ternaries; may not be imported by tier 1 or tier 2 |
 
 The tier patterns and ceilings live in `scripts/policy-config.cjs`, and the paths the repository has not
