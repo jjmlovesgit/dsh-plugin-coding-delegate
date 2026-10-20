@@ -480,6 +480,24 @@ The established unreachable-worker message is unchanged for a first-attempt fail
 `(after N attempts)` suffix only when a retry happened, so existing consumers see no new text in the
 common case.
 
+### Linter baseline re-measured: 23 → 5
+
+The complexity baseline had never been re-tested since it was drawn. Running the three rules
+(complexity 10, 40 lines per function, no nested ternaries) against all 23 entries showed **17 already
+complied**: they had been rewritten in the meantime, and the list went on exempting them from rules they
+passed. Exemptions are supposed to be debt with a list, and this list had stopped describing reality.
+
+Seventeen entries were removed with no code change, and the two dead scripts in the sampled group were
+deleted (`apply-patch.cjs`, superseded by the documented `apply-staged-patch.cjs` and differing only by
+a fence-extraction step; `verification-golden.cjs`, a characterisation harness for a refactor that
+finished). `measure-skeleton-ratio.cjs` was refactored — its 64-line `main` split into
+`resolveOptions` / `measure` / `summarise` / `report` — and left the baseline as well.
+
+**Five remain**, each a real violation today: `attest-unit.cjs`, `check-promotion.cjs`,
+`measure-reading-cost.cjs`, `redteam-probe.cjs`, `verify-delegation-ledger.cjs`. Four are gate-critical
+and are refactored only when they are already being changed for a functional reason; the fifth is the
+reading-cost measurement, whose `main` is 146 lines.
+
 ### Open
 
 - **Reserved paths: none.** `src/core/primitives/**` and `src/core/protocol/**` were realised, and

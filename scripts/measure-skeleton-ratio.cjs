@@ -93,69 +93,82 @@ function generateDeclarations(pluginDir, outDir, removeComments) {
   return { status: result.status, stderr: String(result.stderr || '') }
 }
 
-function main() {
-  const argv = process.argv.slice(2)
-  const pluginDir = path.join(REPO, 'plugin')
+function resolveOptions(argv) {
   const sourceDir = path.resolve(REPO, argValue('source', argv) || path.join('plugin', 'src'))
-  const scratch =
-    argValue('emit', argv) || fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-skeleton-'))
-
+  const scratch = argValue('emit', argv) || fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-skeleton-'))
   if (!fs.existsSync(sourceDir)) {
     console.error('no source directory at ' + sourceDir)
     process.exit(2)
   }
+  return { sourceDir, scratch }
+}
 
+/** Emit declarations into `dir`, exiting with the compiler's own message when it fails. */
+function emitDeclarations(pluginDir, dir, stripped) {
+  const result = generateDeclarations(pluginDir, dir, stripped)
+  if (result.status !== 0) {
+    console.error((stripped ? 'stripped ' : '') + 'declaration emit failed: ' + result.stderr.trim())
+    process.exit(2)
+  }
+}
+
+/** Gather the four byte counts the ratio needs. This is the only part that touches the filesystem. */
+function measure(sourceDir, pluginDir, scratch) {
   const sourceFiles = walk(sourceDir, (f) => f.endsWith('.ts') && !f.endsWith('.d.ts'))
-  const sourceBytes = totalBytes(sourceFiles)
-
   const plainDir = path.join(scratch, 'with-comments')
   const strippedDir = path.join(scratch, 'stripped')
-  const plain = generateDeclarations(pluginDir, plainDir, false)
-  if (plain.status !== 0) {
-    console.error('declaration emit failed: ' + plain.stderr.trim())
-    process.exit(2)
+  emitDeclarations(pluginDir, plainDir, false)
+  emitDeclarations(pluginDir, strippedDir, true)
+  return {
+    sourceFiles,
+    sourceBytes: totalBytes(sourceFiles),
+    plainBytes: totalBytes(walk(plainDir, (f) => f.endsWith('.d.ts'))),
+    strippedBytes: totalBytes(walk(strippedDir, (f) => f.endsWith('.d.ts'))),
   }
-  const stripped = generateDeclarations(pluginDir, strippedDir, true)
-  if (stripped.status !== 0) {
-    console.error('stripped declaration emit failed: ' + stripped.stderr.trim())
-    process.exit(2)
-  }
+}
 
-  const plainBytes = totalBytes(walk(plainDir, (f) => f.endsWith('.d.ts')))
-  const strippedBytes = totalBytes(walk(strippedDir, (f) => f.endsWith('.d.ts')))
-
+/** Build the JSON shape once, so `--json` and the human report cannot disagree. */
+function summarise(measured) {
   const pct = (ratio) => ((1 - ratio) * 100).toFixed(1) + '%'
-  const summary = {
-    source: { files: sourceFiles.length, bytes: sourceBytes, approxTokens: Math.round(sourceBytes / BYTES_PER_TOKEN) },
-    declarations: {
-      bytes: plainBytes,
-      ratio: Number((plainBytes / sourceBytes).toFixed(3)),
-      reduction: pct(plainBytes / sourceBytes),
-      approxTokens: Math.round(plainBytes / BYTES_PER_TOKEN),
+  const block = (bytes) => ({
+    bytes,
+    ratio: Number((bytes / measured.sourceBytes).toFixed(3)),
+    reduction: pct(bytes / measured.sourceBytes),
+    approxTokens: Math.round(bytes / BYTES_PER_TOKEN),
+  })
+  return {
+    source: {
+      files: measured.sourceFiles.length,
+      bytes: measured.sourceBytes,
+      approxTokens: Math.round(measured.sourceBytes / BYTES_PER_TOKEN),
     },
-    declarationsStripped: {
-      bytes: strippedBytes,
-      ratio: Number((strippedBytes / sourceBytes).toFixed(3)),
-      reduction: pct(strippedBytes / sourceBytes),
-      approxTokens: Math.round(strippedBytes / BYTES_PER_TOKEN),
-    },
+    declarations: block(measured.plainBytes),
+    declarationsStripped: block(measured.strippedBytes),
     bytesPerToken: BYTES_PER_TOKEN,
   }
+}
 
+function report(summary, sourceDir) {
+  const n = (v) => Number(v).toLocaleString('en-US')
+  console.log('source directory   ' + sourceDir)
+  console.log('')
+  console.log('  source          ' + n(summary.source.bytes).padStart(10) + ' bytes   ~' + n(summary.source.approxTokens).padStart(8) + ' tokens   ' + summary.source.files + ' files')
+  console.log('  declarations    ' + n(summary.declarations.bytes).padStart(10) + ' bytes   ~' + n(summary.declarations.approxTokens).padStart(8) + ' tokens   ratio ' + summary.declarations.ratio + '  (' + summary.declarations.reduction + ' smaller)')
+  console.log('  stripped        ' + n(summary.declarationsStripped.bytes).padStart(10) + ' bytes   ~' + n(summary.declarationsStripped.approxTokens).padStart(8) + ' tokens   ratio ' + summary.declarationsStripped.ratio + '  (' + summary.declarationsStripped.reduction + ' smaller)')
+  console.log('')
+  console.log('token figures use ~' + BYTES_PER_TOKEN + ' bytes per token, a rough constant, not a tokeniser.')
+  console.log('The ratio is what this measures; the absolute token counts are indicative.')
+}
+
+function main() {
+  const argv = process.argv.slice(2)
+  const { sourceDir, scratch } = resolveOptions(argv)
+  const summary = summarise(measure(sourceDir, path.join(REPO, 'plugin'), scratch))
   if (argv.includes('--json')) {
     console.log(JSON.stringify(summary, null, 2))
     return
   }
-
-  const n = (v) => Number(v).toLocaleString('en-US')
-  console.log('source directory   ' + sourceDir)
-  console.log('')
-  console.log('  source          ' + n(sourceBytes).padStart(10) + ' bytes   ~' + n(summary.source.approxTokens).padStart(8) + ' tokens   ' + sourceFiles.length + ' files')
-  console.log('  declarations    ' + n(plainBytes).padStart(10) + ' bytes   ~' + n(summary.declarations.approxTokens).padStart(8) + ' tokens   ratio ' + summary.declarations.ratio + '  (' + summary.declarations.reduction + ' smaller)')
-  console.log('  stripped        ' + n(strippedBytes).padStart(10) + ' bytes   ~' + n(summary.declarationsStripped.approxTokens).padStart(8) + ' tokens   ratio ' + summary.declarationsStripped.ratio + '  (' + summary.declarationsStripped.reduction + ' smaller)')
-  console.log('')
-  console.log('token figures use ~' + BYTES_PER_TOKEN + ' bytes per token, a rough constant, not a tokeniser.')
-  console.log('The ratio is what this measures; the absolute token counts are indicative.')
+  report(summary, sourceDir)
 }
 
 main()

@@ -105,28 +105,14 @@ const SENSIBLE_DEFAULTS = Object.freeze({
      * This list is a ratchet -- files leave it as they are rewritten, none are added.
      */
     baseline: Object.freeze([
-      'scripts/apply-patch.cjs',
-      'scripts/apply-staged-patch.cjs',
+      // RE-MEASURED, not remembered. Running the three rules against all 23 entries showed that 17 of
+      // them already satisfied the ceilings: they had been rewritten since the list was drawn and the
+      // list was never re-tested, so they were exempt from rules they passed. Removing an exemption is
+      // always safe; the five that remain are the ones that actually fail today.
       'scripts/attest-unit.cjs',
-      'scripts/capture-worker-request.cjs',
-      'scripts/check-contract-fixtures.cjs',
-      'scripts/check-contract.cjs',
-      'scripts/check-contracts.cjs',
-      'scripts/check-dist-in-sync.cjs',
-      'scripts/check-file-hygiene.cjs',
-      'scripts/check-host-types-pin.cjs',
-      'scripts/check-oracle-isolation.cjs',
       'scripts/check-promotion.cjs',
-      'scripts/check-readme-consistency.cjs',
-      'scripts/generate-reviewer-key.cjs',
       'scripts/measure-reading-cost.cjs',
-      'scripts/measure-skeleton-ratio.cjs',
-      'scripts/operator-key.cjs',
-      'scripts/probe-worker.cjs',
-      'scripts/proxy-worker.cjs',
       'scripts/redteam-probe.cjs',
-      'scripts/simulate-worker.cjs',
-      'scripts/verification-golden.cjs',
       'scripts/verify-delegation-ledger.cjs',
     ]),
   }),

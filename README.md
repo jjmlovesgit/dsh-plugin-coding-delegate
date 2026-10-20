@@ -899,6 +899,10 @@ worker** wrote; one written by the architect or by hand has no record and report
 | [`scripts/check-promotion.cjs`](scripts/check-promotion.cjs) | the promotion socket: gate a commit on whether delegated work is verified |
 | [`scripts/verify-release-tarball.ps1`](scripts/verify-release-tarball.ps1) | checks a published tarball against its release tag blob-for-blob, in both directions |
 | [`scripts/measure-reading-cost.cjs`](scripts/measure-reading-cost.cjs) | what the architect actually reads, from the plugin's own audit trace |
+| [`scripts/probe-worker.cjs`](scripts/probe-worker.cjs) | ask the local worker exactly what `delegate_worker` asks it, and print the raw reply the plugin never returns |
+| [`scripts/proxy-worker.cjs`](scripts/proxy-worker.cjs) | OpenAI-compatible pass-through proxy that tees every request and reply to disk, to tell a parse refusal from a bad generation |
+| [`scripts/simulate-worker.cjs`](scripts/simulate-worker.cjs) | drive `delegateWorker` against the real worker with both directions teed, for inspecting one flaky parse |
+| [`scripts/capture-worker-request.cjs`](scripts/capture-worker-request.cjs) | serve a canned reply file and dump the request body, so a delegation can be replayed with no model running |
 
 ## Development
 
