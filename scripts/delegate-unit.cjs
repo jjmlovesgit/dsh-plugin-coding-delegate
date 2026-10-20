@@ -239,17 +239,63 @@ function normalizeEmission(unit) {
   ok('normalized the emission: line endings and trailing newline')
 }
 
-function dispatch(unit) {
-  heading('dispatching to ' + config.workerModel + ' via tools/worker-build.mjs')
-  const requirements = extractRequirements(unit.contract)
+/**
+ * Verify an existing target before dispatch, and unlink it when it fails.
+ *
+ * WHY THIS DOES NOT ABORT. A stale target that failed its contract used to stop the run here, so the
+ * only way to retry was to delete the file by hand -- measured: the harness exits in 0.3 s having
+ * dispatched nothing, which reads as a hang rather than a refusal. The failure output is worth more
+ * than the file, so it is captured, the file is removed, and the next dispatch carries it into the
+ * prompt. A target that PASSES is left alone until dispatch unlinks it, because regenerating a passing
+ * unit is this harness's documented behaviour.
+ */
+function preflight(unit) {
+  if (!fs.existsSync(unit.target)) {
+    console.log('  skip  no target on disk yet, so there is nothing to verify')
+    return null
+  }
+  const observed = run(process.execPath, ['--test', unit.contract], { cwd: REPO_ROOT })
+  if (observed.status === 0) {
+    ok('the existing target passes its contract; it will still be regenerated')
+    return null
+  }
+  console.error('  the stale target FAILED its contract, so it is removed before dispatch:')
+  const lines = observed.output.split('\n').filter((line) => /not ok|error:/.test(line))
+  console.error(lines.slice(0, 4).map((line) => '    ' + line.trim()).join('\n'))
+  fs.rmSync(unit.target, { force: true })
+  ok('unlinked ' + unit.targetRel + ' and kept ' + observed.output.length + ' bytes of failure output')
+  return observed.output
+}
+
+/**
+ * The environment handed to the worker: its requirements, and — when the previous generation failed —
+ * that failure. Both travel as temp files so a long contract never becomes a command-line limit, and
+ * both are pushed onto `cleanup` so the caller removes them whichever way the dispatch ends.
+ */
+function workerEnv(unit, failureContext, cleanup) {
   const env = { ...process.env }
-  let requirementsFile = null
+  const requirements = extractRequirements(unit.contract)
   if (requirements) {
-    requirementsFile = path.join(os.tmpdir(), 'dsh-requirements-' + process.pid + '.txt')
-    fs.writeFileSync(requirementsFile, requirements.join('\n') + '\n')
-    env.AI_SDLC_REQUIREMENTS_FILE = requirementsFile
+    const file = path.join(os.tmpdir(), 'dsh-requirements-' + process.pid + '.txt')
+    fs.writeFileSync(file, requirements.join('\n') + '\n')
+    env.AI_SDLC_REQUIREMENTS_FILE = file
+    cleanup.push(file)
     ok('using ' + requirements.length + ' requirement(s) from the contract header')
   }
+  if (failureContext) {
+    const file = path.join(os.tmpdir(), 'dsh-failure-' + process.pid + '.txt')
+    fs.writeFileSync(file, failureContext)
+    env.AI_SDLC_FAILURE_CONTEXT_FILE = file
+    cleanup.push(file)
+    ok('carrying the previous failure into the prompt (' + failureContext.length + ' bytes)')
+  }
+  return env
+}
+
+function dispatch(unit, failureContext) {
+  heading('dispatching to ' + config.workerModel + ' via tools/worker-build.mjs')
+  const cleanup = []
+  const env = workerEnv(unit, failureContext, cleanup)
   try {
     if (fs.existsSync(unit.target)) {
       fs.rmSync(unit.target)
@@ -273,7 +319,7 @@ function dispatch(unit) {
     ok('emitted ' + unit.targetRel)
     normalizeEmission(unit)
   } finally {
-    if (requirementsFile) fs.rmSync(requirementsFile, { force: true })
+    for (const file of cleanup) fs.rmSync(file, { force: true })
   }
 }
 
@@ -314,7 +360,7 @@ function audit() {
   ok('ledger audit passed')
 }
 
-function printPlan(unit) {
+function printPlan(unit, failureContext) {
   heading('dry run: nothing is unlinked, committed, or signed')
   const requirements = extractRequirements(unit.contract)
   const present = fs.existsSync(unit.target) ? ' (present)' : ' (absent)'
@@ -322,6 +368,9 @@ function printPlan(unit) {
     ? requirements.length + ' from the contract @requirements block'
     : 'from the tools/worker-build.mjs table (no @requirements block)'))
   console.log('  would unlink   : ' + unit.targetRel + present)
+  if (failureContext) {
+    console.log('  would feed     : the previous failure output (' + failureContext.length + ' bytes)')
+  }
   console.log('  would dispatch : tools/worker-build.mjs ' + unit.targetRel + ' ' + unit.contractRel)
   console.log('  would verify   : ' + config.delegation.flakeIterations + ' x node --test ' + unit.contractRel)
   console.log('  would commit   : ' + unit.targetRel + ', ' + unit.contractRel + ', ' + unit.mutantRel)
@@ -329,8 +378,8 @@ function printPlan(unit) {
   console.log('  would await    : a human `--approve --reviewer-identity` signature')
 }
 
-function execute(unit) {
-  dispatch(unit)
+function execute(unit, failureContext) {
+  dispatch(unit, failureContext)
   heading('flake gate: ' + config.delegation.flakeIterations + ' consecutive passes')
   runContract(unit, config.delegation.flakeIterations)
   commitUnit(unit)
@@ -355,11 +404,10 @@ function main() {
   assertMutantDiscriminates(unit)
 
   heading('contract against the current target')
-  if (fs.existsSync(unit.target)) runContract(unit, config.delegation.flakeIterations)
-  else console.log('  skip  no target on disk yet, so there is nothing to verify')
+  const failureContext = preflight(unit)
 
-  if (params.dryRun) printPlan(unit)
-  else execute(unit)
+  if (params.dryRun) printPlan(unit, failureContext)
+  else execute(unit, failureContext)
 }
 
 if (require.main === module) main()

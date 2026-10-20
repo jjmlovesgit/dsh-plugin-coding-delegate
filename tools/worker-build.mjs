@@ -169,6 +169,13 @@ if (!fs.existsSync(contractPath)) {
 
 const contractSource = fs.readFileSync(contractPath, "utf8");
 
+// FAILURE FEEDBACK. When the harness removes a target that failed its contract, it passes the failure
+// output here rather than throwing it away. Two independent generations of the same unit produced the
+// same defect (an unsubscribe that left a hole in the listener array), and the contract text alone did
+// not change that: the model repeated the approach because nothing told it the approach had failed.
+const failureContextFile = process.env.AI_SDLC_FAILURE_CONTEXT_FILE;
+const failureContext = failureContextFile ? fs.readFileSync(failureContextFile, "utf8").trim() : "";
+
 const systemPrompt =
   "You are a senior TypeScript engineer. Output ONLY valid TypeScript code without markdown fences, comments, or explanations.";
 const userMessage =
@@ -178,7 +185,12 @@ const userMessage =
   "```javascript\n" +
   contractSource +
   "\n```\n\nStrict Requirements:\n" +
-  requirements.map((line, i) => i + 1 + ". " + line).join("\n");
+  requirements.map((line, i) => i + 1 + ". " + line).join("\n") +
+  (failureContext
+    ? "\n\nA PREVIOUS GENERATION OF THIS FILE FAILED THE CONTRACT ABOVE. Do not repeat the " +
+      "approach that produced it; the failure output follows, trimmed to its last 4000 characters:\n" +
+      "```\n" + failureContext.slice(-4000) + "\n```"
+    : "");
 
 const payload = JSON.stringify({
   model: "qwen/qwen3.8-27b",
