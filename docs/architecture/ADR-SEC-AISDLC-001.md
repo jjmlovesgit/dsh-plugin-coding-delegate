@@ -575,10 +575,19 @@ delegate them.
 
 **The code already enforced this; the prompt now says so.** `contractViolations` compares the declared
 contract files before and after a unit and fails the verdict when one was created, deleted or modified
-while it ran — so a worker cannot rewrite the tests that judge it and still pass. What the mechanism
-cannot see is a test file the worker emits that the architect never declared; for that, the instruction
-is the only boundary, which is why the wording is pinned by assertions in `plugin.test.ts` rather than
-left to drift.
+while it ran — so a worker cannot rewrite the tests that judge it and still pass.
+
+**The allowlist had a blind spot, and a denylist closes it.** Declared contracts are refused by hash,
+which says nothing about a test file nobody declared: `tests/contracts/sneaky.contract.cjs` touches no
+protected path. `isTestPath` now refuses any emission whose path contains a test segment
+(`test/`, `tests/`, `__tests__/`, `spec/`) or whose filename is test-shaped
+(`*.contract.*`, `*.test.*`, `*.spec.*`), declared or not. It is a segment match rather than a
+substring, so `src/testing-utils.ts` remains ordinary implementation.
+
+The first thing the new refusal broke was an existing test fixture that emitted
+`// FILE: tests/PriorityQueue.test.ts` and asserted two files written — the forbidden behaviour,
+encoded as an expectation. It now asserts one implementation written, the test path reported, and
+nothing created under `tests/`.
 
 ### Open
 

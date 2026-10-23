@@ -61,18 +61,7 @@ export declare function evaluateUnitScope(resolvedPath: string, declaredTargets:
     allowed: boolean;
     reason?: string;
 };
-/**
- * Parse the model's final content into file emissions and write them to disk.
- *
- * The model may emit either whole files (fenced code blocks with a file path in the
- * header) or search/replace patch blocks. This function handles both, writes the
- * resulting files under the workspace root, and returns a per-file summary plus any
- * errors encountered.
- *
- * `content` is the raw model output. `workspaceRoot` is the directory all emissions
- * are anchored to. `parseSearchReplaceBlocks` and `applySearchReplaceBlocks` are the
- * delta machinery, injected so this module does not import the composition root back.
- */
+export declare function isTestPath(resolvedPath: string, baseDir: string): boolean;
 export declare function extractAndEmitFiles(content: string, targetFilesHint?: string[] | string, baseDir?: string, allowedRoots?: string[], protectedPaths?: string[], options?: {
     enforceUnitScope?: boolean;
 }): {

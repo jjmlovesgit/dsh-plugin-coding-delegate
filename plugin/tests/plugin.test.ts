@@ -164,13 +164,19 @@ import { PriorityQueue } from '../src/PriorityQueue';
 
     const res = extractAndEmitFiles(sampleContent, undefined, tmpWorkspace)
 
-    expect(res.filesWritten).toHaveLength(2)
+    // THE FIXTURE EMITS A TEST FILE, AND THAT IS NOW REFUSED. It used to assert two files written,
+    // which encoded the behaviour the role split forbids: the reply above contains
+    // `// FILE: tests/PriorityQueue.test.ts`, and a worker that writes its own test is grading itself.
+    // One implementation lands, the test path is reported, and nothing is created under tests/.
+    expect(res.filesWritten).toHaveLength(1)
+    expect(res.errors.join(' ')).toMatch(/may not author tests/i)
+
     // entries carry both the absolute path and the workspace-relative name
     const relativeNames = res.filesWritten.map((f: any) => f.relativeName)
     expect(relativeNames).toContain(path.join('src', 'PriorityQueue.ts'))
     expect(path.isAbsolute(res.filesWritten[0].path)).toBe(true)
     expect(fs.existsSync(path.join(tmpWorkspace, 'src', 'PriorityQueue.ts'))).toBe(true)
-    expect(fs.existsSync(path.join(tmpWorkspace, 'tests', 'PriorityQueue.test.ts'))).toBe(true)
+    expect(fs.existsSync(path.join(tmpWorkspace, 'tests', 'PriorityQueue.test.ts'))).toBe(false)
 
     fs.rmSync(tmpWorkspace, { recursive: true, force: true })
   })
@@ -187,6 +193,37 @@ import { PriorityQueue } from '../src/PriorityQueue';
     expect(res.filesWritten).toHaveLength(0)
     expect(res.errors.length).toBeGreaterThan(0)
     expect(fs.statSync(target).size).toBe(originalSize)
+
+    fs.rmSync(tmpWorkspace, { recursive: true, force: true })
+  })
+
+  it('File Emitter: refuses a test path even when nothing declared it', () => {
+    // The declared-contract check is an allowlist, so an UNdeclared test file used to pass. The worker
+    // has no authority to author what judges it, so the refusal is by path shape, not by declaration.
+    const tmpWorkspace = makeTempWorkspace('lr-testpaths')
+    const transcript =
+      '```typescript file="tests/contracts/sneaky.contract.cjs"\n' +
+      "const test = require('node:test')\nmodule.exports = {}\n" +
+      '```'
+
+    const res = extractAndEmitFiles(transcript, undefined, tmpWorkspace)
+
+    expect(res.filesWritten).toHaveLength(0)
+    expect(res.errors.join(' ')).toMatch(/may not author tests/i)
+    expect(fs.existsSync(path.join(tmpWorkspace, 'tests', 'contracts', 'sneaky.contract.cjs'))).toBe(false)
+
+    fs.rmSync(tmpWorkspace, { recursive: true, force: true })
+  })
+
+  it('File Emitter: a test-shaped filename is refused outside tests/ too', () => {
+    const tmpWorkspace = makeTempWorkspace('lr-testshape')
+    const transcript = '```typescript file="src/thing.spec.ts"\nexport const x = 1\n```'
+
+    const res = extractAndEmitFiles(transcript, undefined, tmpWorkspace)
+
+    expect(res.filesWritten).toHaveLength(0)
+    expect(res.errors.join(' ')).toMatch(/may not author tests/i)
+    expect(fs.existsSync(path.join(tmpWorkspace, 'src', 'thing.spec.ts'))).toBe(false)
 
     fs.rmSync(tmpWorkspace, { recursive: true, force: true })
   })

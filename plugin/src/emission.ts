@@ -153,6 +153,28 @@ export function evaluateUnitScope(
  * are anchored to. `parseSearchReplaceBlocks` and `applySearchReplaceBlocks` are the
  * delta machinery, injected so this module does not import the composition root back.
  */
+/**
+ * Test paths belong to the architect, declared or not.
+ *
+ * `protectedPaths` above is an ALLOWLIST of contracts the architect named, which leaves the obvious
+ * hole: a worker that emits `tests/contracts/sneaky.contract.cjs` never touches a protected path and
+ * passes. The worker is an implementation engine and has no legitimate authority to write anything that
+ * judges it, so this is a DENYLIST over the shape of the path rather than over a declaration.
+ *
+ * A segment match, not a substring match: `src/testing-utils.ts` is implementation, `tests/x.ts` is not.
+ */
+const TEST_DIR_SEGMENTS = new Set(['test', 'tests', '__tests__', 'spec', 'specs'])
+const TEST_FILE_PATTERN = /\.(contract|test|spec)\.[cm]?[jt]sx?$/i
+
+export function isTestPath(resolvedPath: string, baseDir: string): boolean {
+  const relative = path.relative(baseDir, path.resolve(resolvedPath))
+  // Outside the workspace is containment's problem, not this check's.
+  if (relative.startsWith('..') || path.isAbsolute(relative)) return false
+  const normalised = relative.split(path.sep).join('/').toLowerCase()
+  if (normalised.split('/').some((segment) => TEST_DIR_SEGMENTS.has(segment))) return true
+  return TEST_FILE_PATTERN.test(normalised)
+}
+
 export function extractAndEmitFiles(
   content: string,
   targetFilesHint?: string[] | string,
@@ -203,6 +225,18 @@ export function extractAndEmitFiles(
           `executor may not modify the test that judges it.`
       )
       console.warn(`[EMIT_FILE_BLOCKED] contract file: ${resolvedPath}`)
+      return
+    }
+
+    // And the shape of the path, whether or not anything was declared. The prompt tells the architect
+    // not to delegate test writing; this is the part that does not depend on the model reading it.
+    if (isTestPath(resolvedPath, baseDir)) {
+      emissionErrors.push(
+        `Refused to write ${resolvedPath}: the executor may not author tests. Contract files are ` +
+          `written by the architect, and a worker that writes its own acceptance criteria is grading ` +
+          `itself.`
+      )
+      console.warn(`[EMIT_FILE_BLOCKED] test path: ${resolvedPath}`)
       return
     }
 
