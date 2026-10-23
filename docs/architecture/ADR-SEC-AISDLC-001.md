@@ -565,6 +565,21 @@ the next prompt and the model produced a conforming implementation on its first 
 3/3 flake passes). One case, consistent with the mechanism, and recorded as one case rather than a
 rate.
 
+### Role split: the architect authors what judges a unit
+
+The architect's instruction used to list "test writing" among the things it must delegate. That
+contradicted the boundary: `contractFiles` are an INPUT to a delegation, and a worker that writes its
+own acceptance criteria is graded by the party it is meant to be graded against. The instruction now
+says the architect authors the contract tests, interfaces and boundary specifications, and must not
+delegate them.
+
+**The code already enforced this; the prompt now says so.** `contractViolations` compares the declared
+contract files before and after a unit and fails the verdict when one was created, deleted or modified
+while it ran — so a worker cannot rewrite the tests that judge it and still pass. What the mechanism
+cannot see is a test file the worker emits that the architect never declared; for that, the instruction
+is the only boundary, which is why the wording is pinned by assertions in `plugin.test.ts` rather than
+left to drift.
+
 ### Open
 
 - **Reserved paths: none.** `src/core/primitives/**` and `src/core/protocol/**` were realised, and

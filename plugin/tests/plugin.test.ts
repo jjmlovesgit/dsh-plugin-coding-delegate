@@ -50,6 +50,11 @@ describe('DSH Local Router Cordis Plugin Test Suite', () => {
     expect(using).toContain('tools')
     expect(DELEGATE_WORKER_OPENAI_SCHEMA.function.name).toBe('delegate_worker')
     expect(PROFILES.ARCHITECT.systemInstruction).toContain('delegate_worker')
+    // The role split is the boundary: the architect authors what decides a unit, the worker implements
+    // it. A prompt that also hands over test writing makes the worker its own judge, so the wording is
+    // pinned rather than left to drift back.
+    expect(PROFILES.ARCHITECT.systemInstruction).toMatch(/author the contract tests/i)
+    expect(PROFILES.ARCHITECT.systemInstruction).toMatch(/Do not delegate the tests/i)
   })
 
   it('DSH Tool Registration: Registers delegate_worker with output schema and render on ctx.tools', () => {
