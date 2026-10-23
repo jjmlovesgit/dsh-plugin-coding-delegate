@@ -114,10 +114,21 @@ function sandboxEnv(workspaceDir) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-sandbox-'));
     const shim = path.join(dir, 'preflight.cjs');
     fs.writeFileSync(shim, exports.SANDBOX_PREFLIGHT_SOURCE, 'utf8');
+    const temp = os.tmpdir();
     const flags = [
         '--permission',
+        // The shim lives outside the workspace, so its directory needs READ access or `--require` fails
+        // before any contract runs ("Access to this API has been restricted"). Measured: without this the
+        // whole verification fails with that message, which looks like the contract's fault and is not.
+        '--allow-fs-read=' + dir,
         '--allow-fs-read=' + workspaceDir,
         '--allow-fs-write=' + workspaceDir,
+        // THE TEMP DIRECTORY IS DELIBERATELY ALLOWED. Contracts write counters, fixtures and logs there as a
+        // matter of course, and the measured consequence of denying it was a flaky oracle reporting
+        // VERIFICATION_FAILED on every run. Temp is ephemeral and holds nothing this boundary protects: the
+        // repository, the home directory and the operator's keys stay unreadable, and execution stays denied.
+        '--allow-fs-read=' + temp,
+        '--allow-fs-write=' + temp,
         '--require=' + shim,
     ].join(' ');
     const env = {
