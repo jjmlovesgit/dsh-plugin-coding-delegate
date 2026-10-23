@@ -208,6 +208,11 @@ export interface DelegateWorkerParams {
     runVerification?: string;
     endpoint?: string;
     model?: string;
+    /**
+     * Completion cap for this delegation. Defaults to the worker profile's value; the benchmark pins it
+     * so latency comparisons are not measuring how long the model chose to be.
+     */
+    maxTokens?: number;
     turnId?: number;
     timeoutMs?: number;
     workspaceDir?: string;

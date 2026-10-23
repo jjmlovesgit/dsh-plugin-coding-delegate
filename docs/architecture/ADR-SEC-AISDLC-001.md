@@ -672,6 +672,49 @@ reimplementation once the two drifted; this notices the moment a branch is writt
 happens to agree today is caught too. Proven by injection: a single ternary added to the adapter fails
 the test, and removing it restores green.
 
+### End-to-end verification: boundaries and latency
+
+**Boundary probes, run against the compiled `plugin/dist`** rather than against source, because the
+compiled artefact is what ships:
+
+| probe | emitted | bytes on disk | verdict |
+| :--- | :--- | :--- | :--- |
+| `tests/contracts/sneaky.contract.cjs` | 0 | **0** | refused before the write |
+| `src/core/sneaky.contract.ts` (test-shaped, outside `tests/`) | 0 | **0** | refused before the write |
+| `src/core/primitives/valid-leaf.ts` | 1 | 1 | written, no errors |
+
+The `onDisk` column is the point: it checks the filesystem rather than trusting `filesWritten`, so a
+refusal that reported an error and wrote anyway would fail the probe.
+
+**Latency, post-refactor against baseline `8828483`.** Five distinct prompts per tier, medians, with the
+completion length NOT pinned in the first pass:
+
+| tier | prompt tok | comp tok | baseline | post-refactor | delta |
+| :--- | ---: | ---: | ---: | ---: | ---: |
+| small | 446 | 31 | 684 ms | 685 ms | +1 ms |
+| medium | 2,197 | 41 (baseline 28) | 1,215 ms | 1,291 ms | **+76 ms — inconclusive** |
+| large | 8,198 | 33 | 3,053 ms | 3,098 ms | +45 ms (+1.5 %) |
+
+Medium is flagged rather than reported as a regression: its completions averaged **41 tokens against the
+baseline's 28**, and at the measured decode rate eleven extra tokens cost 150–250 ms. A ±60 ms tolerance
+cannot resolve a difference that the model's phrasing creates on its own.
+
+**The pinned run removes the ambiguity.** `tools/bench-worker-latency.mjs` fixes `max_tokens: 30`, warms
+up before measuring, and uses a unique nonce per request:
+
+| tier | prompt tok | comp tok | median | min–max |
+| :--- | ---: | ---: | ---: | :--- |
+| small | 445 | 28 | **591 ms** | 546–627 |
+| medium | 2,196 | 25 | **1,133 ms** | 1,061–1,319 |
+| large | 8,197 | 30 | **2,967 ms** | 2,949–3,084 |
+
+All three sit inside the tolerance, and the medium delta that exceeded it disappears (−82 ms). The
+comparison supports the claim it was run to test: the vendored lattice, the emission denylist and the
+adapter add no measurable per-request overhead — differences are run-to-run variance, not code.
+
+The harness is operator tooling and is not in CI: it needs a live model, and a test that silently skips
+when one is absent is worse than no test.
+
 ### Open
 
 - **Reserved paths: none.** `src/core/primitives/**` and `src/core/protocol/**` were realised, and

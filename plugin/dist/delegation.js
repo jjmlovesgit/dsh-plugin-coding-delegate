@@ -709,7 +709,7 @@ async function delegateWorker(params = {}, tracker) {
                     { role: 'user', content: combinedPrompt },
                 ],
                 temperature: profiles_1.PROFILES.WORKER.temperature ?? 0.2,
-                max_tokens: profiles_1.PROFILES.WORKER.max_tokens ?? 2048,
+                max_tokens: params.maxTokens ?? profiles_1.PROFILES.WORKER.max_tokens ?? 2048,
                 stop: profiles_1.PROFILES.WORKER.stop ?? ['<|im_' + 'end|>', '<|endof' + 'text|>'],
                 enable_thinking: profiles_1.PROFILES.WORKER.enable_thinking ?? false,
                 reasoning_effort: profiles_1.PROFILES.WORKER.reasoning_effort ?? 'none',

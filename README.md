@@ -903,6 +903,7 @@ worker** wrote; one written by the architect or by hand has no record and report
 | [`scripts/proxy-worker.cjs`](scripts/proxy-worker.cjs) | OpenAI-compatible pass-through proxy that tees every request and reply to disk, to tell a parse refusal from a bad generation |
 | [`scripts/simulate-worker.cjs`](scripts/simulate-worker.cjs) | drive `delegateWorker` against the real worker with both directions teed, for inspecting one flaky parse |
 | [`scripts/capture-worker-request.cjs`](scripts/capture-worker-request.cjs) | serve a canned reply file and dump the request body, so a delegation can be replayed with no model running |
+| [`tools/bench-worker-latency.mjs`](tools/bench-worker-latency.mjs) | latency and prefill benchmark with the completion length pinned, so a comparison between commits measures the code rather than the model's phrasing |
 
 ## Development
 
