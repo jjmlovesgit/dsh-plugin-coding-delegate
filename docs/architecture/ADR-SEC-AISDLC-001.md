@@ -597,6 +597,36 @@ a refusal it cannot explain is a refusal an operator learns to route around. The
 worker complying with "write the test", not one evading the check, and the path rule catches the former
 deterministically.
 
+### Verdict precedence is a lattice, and now a test
+
+`resolveDelegateStatus` decides a unit's verdict from six inputs, and its ORDER is the semantic
+contract: boundary breach > nothing-ran > flaky oracle > project coherence > unverified > success. An
+extraction probe ran all **64** combinations through the shipped function: the implementation already
+matches that lattice exactly — seven distinct verdicts, no collision resolved the wrong way, and no
+legacy quirk to preserve or correct.
+
+What was missing was a mechanical pin. The existing tests assert one combination at a time, so a
+reordering that still produced a plausible verdict would have stayed green.
+`plugin/tests/verdict-precedence.test.ts` now derives the expected verdict from the lattice rather than
+from the implementation and checks every combination, including the case that matters most: a unit that
+failed its tests AND mutated a contract reports `CONTRACT_MODIFIED`, not `VERIFICATION_FAILED`.
+
+**The probe exposed a vocabulary problem, which is the real blocker for wiring.** Three status
+vocabularies already exist:
+
+| owner | vocabulary |
+| :--- | :--- |
+| `resolveDelegateStatus` | `CONTRACT_MODIFIED`, `VERIFICATION_NOT_APPROVED`, `FLAKY`, `INCOHERENT`, `VERIFICATION_FAILED`, `UNVERIFIED`, `SUCCESS` |
+| `DelegatedOutcome` (registry) | `UNIT_PASSED`, `UNIT_FAILED`, `UNIT_UNVERIFIED`, `UNIT_FLAKY`, `OPERATOR_ATTESTED` |
+| the tool result | `CONTEXT_REFUSED`, `WORKER_OUTPUT_STARVED`, `ERROR` |
+
+`src/core/protocol/task-lifecycle.ts` is a fourth, sharing exactly one name with the first
+(`VERIFICATION_FAILED`) and one with the second (`UNIT_FLAKY`). Wiring it into the verdict path
+therefore needs a mapping decision before it needs code: the machine either adopts one existing
+vocabulary outright, or it is defined as the layer that maps between them. Until that is decided the
+machine remains a specification with no consumer — which the record already said, now with the reason
+attached.
+
 ### Open
 
 - **Reserved paths: none.** `src/core/primitives/**` and `src/core/protocol/**` were realised, and
