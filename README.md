@@ -915,6 +915,10 @@ npm run test:oracles   # node --test, contract oracles
 npm run test:all
 ```
 
+`npm run test:fast` at the repository root runs the sandbox and precedence suites plus the lattice parity
+oracle in about seven seconds. It exists because the full local matrix is ~90 s and the CI round-trip is
+~100 s: the fast gate is for the inner loop, and the full matrix is for a commit.
+
 At the repository root:
 
 ```powershell
