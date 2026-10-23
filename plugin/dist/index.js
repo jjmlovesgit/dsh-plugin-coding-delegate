@@ -1192,6 +1192,12 @@ function apply(ctx, options = {}) {
         // re-sends the conversation on every request, so a clean latest message is not
         // evidence that the outbound payload is clean.
         const corpusKey = corpusKeyFor(payload);
+        // TOOL RESULTS ARE EGRESS TOO. The prompt is the routing input; the conversation the host
+        // re-sends includes tool output, and a tool that printed a token is exactly the case this scan
+        // is for. Accumulated into the same corpus so the gate decision covers both.
+        const egressText = (0, delegation_1.extractEgressText)(agent?.session);
+        if (egressText)
+            accumulateCorpus(corpusKey, egressText);
         const corpus = sessionPromptCorpus.get(corpusKey) || '';
         const dlpSubject = corpus.length > prompt.length ? corpus : prompt;
         const dlpResult = scanDLP(dlpSubject, {

@@ -46,6 +46,7 @@ exports.describeTransportError = describeTransportError;
 exports.fetchWithTransportRetry = fetchWithTransportRetry;
 exports.validateDelegationContext = validateDelegationContext;
 exports.delegateWorker = delegateWorker;
+exports.extractEgressText = extractEgressText;
 exports.extractPromptText = extractPromptText;
 exports.estimateTokenCount = estimateTokenCount;
 const child_process = __importStar(require("child_process"));
@@ -1333,6 +1334,67 @@ async function delegateWorker(params = {}, tracker) {
             tokens: { prompt: 0, completion: 0 },
         };
     }
+}
+/**
+ * Every outbound-bound text in a session, including TOOL RESULTS.
+ *
+ * `extractPromptText` returns the last user message, which is what the routing decision needs. That is
+ * not what leaves the machine: the host re-sends the whole conversation, tool results included, and a
+ * clean prompt says nothing about a tool that just dumped an environment or printed a bearer token.
+ *
+ * Roles are not filtered on purpose. The question this answers is "what bytes will be transmitted", so
+ * anything with readable content counts, whatever the host labelled it.
+ */
+const MAX_EGRESS_CHARS = 200_000;
+function collectEgressText(content, parts) {
+    if (typeof content === 'string') {
+        if (content.length > 0)
+            parts.push(content);
+        return;
+    }
+    if (Array.isArray(content)) {
+        for (const block of content)
+            collectEgressText(block, parts);
+        return;
+    }
+    if (!content || typeof content !== 'object')
+        return;
+    if (typeof content.text === 'string' && content.text.length > 0)
+        parts.push(content.text);
+    for (const key of ['output', 'result', 'content', 'stdout', 'stderr']) {
+        if (content[key] !== undefined && content[key] !== content.text)
+            collectEgressText(content[key], parts);
+    }
+    if (parts.length === 0) {
+        try {
+            const serialized = JSON.stringify(content);
+            if (serialized && serialized !== '{}')
+                parts.push(serialized);
+        }
+        catch {
+            // An unserialisable value carries no scannable text.
+        }
+    }
+}
+function extractEgressText(session) {
+    if (!session)
+        return '';
+    const messages = session.messages ||
+        session.options?.messages ||
+        session.requestOptions?.messages ||
+        session.session?.messages;
+    if (!Array.isArray(messages))
+        return '';
+    const parts = [];
+    for (const message of messages) {
+        if (!message)
+            continue;
+        if (typeof message.text === 'string' && message.text.length > 0)
+            parts.push(message.text);
+        collectEgressText(message.content, parts);
+    }
+    const text = parts.join('\n');
+    return text.length > MAX_EGRESS_CHARS ? text.slice(text.length - MAX_EGRESS_CHARS) : text;
 }
 function extractPromptText(session) {
     if (!session)

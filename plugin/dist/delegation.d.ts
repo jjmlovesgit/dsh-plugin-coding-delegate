@@ -460,6 +460,7 @@ export declare function fetchWithTransportRetry(url: string, init: RequestInit, 
  */
 export declare function validateDelegationContext(workspaceDir: string, contractFiles?: string[], contextFiles?: unknown[]): string | null;
 export declare function delegateWorker(params?: DelegateWorkerParams, tracker?: SavingsTracker): Promise<any>;
+export declare function extractEgressText(session: any): string;
 export declare function extractPromptText(session: LLMSession | any): string;
 export declare function estimateTokenCount(text: string): number;
 export {};
