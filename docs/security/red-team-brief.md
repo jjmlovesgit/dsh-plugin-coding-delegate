@@ -77,7 +77,10 @@ An external static review of `441f004` reported 9 findings (1 high, 8 medium). T
 | 1 | **Relative node path can execute a shadow binary** — a basename check accepted `./node.exe`, and with `shell: false` that path runs directly | **FIXED**: the binary must be the bare `node`/`node.exe` or exactly `process.execPath`, and the spawn always uses `process.execPath`. `REFUSED_SHADOW_RUNTIME`; five shadow spellings covered by tests |
 | 2 | Contract files can be passed as `contextFiles`, exposing the tests to the worker | **FIXED**: `validateDelegationContext` refuses the delegation before any file is read, resolving and case-folding both lists so `./tests/x` and `tests/x` collide on Windows. `REFUSED_CONTRACT_AS_CONTEXT`, status `CONTEXT_REFUSED`, worker never called |
 | 3 | Promotion gate reads the working tree rather than the staged index; `git diff` errors can pass silently | **FIXED**: `--changed` diffs the index (`--cached --diff-filter=ACMR`) and hashes staged blobs with `git show :<path>`, so a file staged compliant and edited afterwards cannot pass. A git failure is fatal rather than a fallback |
-| 4–7 | Opaque patch writes; `.d.ts` suffix bypass; wildcard shell reads; non-TS source reads | open |
+| 4 | Opaque patch writes (`patch -p1`, `git apply`) evade the approval gate | open |
+| 5 | `.d.ts` suffix bypass — a command whose last characters are `.d.ts` was treated as a declaration read | **FIXED**: the declaration allowance requires a single path (no whitespace, shell operator or quoting), so the suffix means what it appears to |
+| 6 | Wildcard shell reads — globs expand after the gate reads the string | **FIXED**: `REFUSED_WILDCARD_READ` when a content-reading shell command names `*`, `?`, `[` or `{` |
+| 7 | Non-TS source reads bypass the declaration generator | open |
 | 8 | DLP scans prompts but not credential-bearing tool results | **FIXED**: `extractEgressText` walks every message role (including tool results and nested `output`/`stdout` blocks) and accumulates it into the same corpus the gate scans. NOT redaction: a hit pins the request local or refuses it, because a silently rewritten conversation is a different task |
 | 9 | *(see report)* | open |
 

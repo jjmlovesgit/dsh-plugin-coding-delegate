@@ -177,6 +177,19 @@ export function handleDeclarationPostExecute(
   const commandScopeUnparseable = (cmd: string): boolean =>
     commandReadsContent(String(cmd || '')) === true && shellTokens(String(cmd || '')).unterminated
 
+  /**
+   * Does the command name a glob? The shell expands it later, so a per-file verdict would be about the
+   * pattern rather than about the files that end up being read (SECURITY-REVIEW-6 [6]).
+   */
+  const commandHasWildcard = (cmd: string): boolean => {
+    if (commandReadsContent(String(cmd || '')) !== true) return false
+    const { tokens, unterminated } = shellTokens(String(cmd || ''))
+    // An unclosed quote is the other predicate's case; answering here would give two verdicts for one
+    // unreadable command.
+    if (unterminated) return false
+    return tokens.some((token) => !token.startsWith('-') && /[*?[\]{}]/.test(token))
+  }
+
   const commandReadsDirectoryScope = (cmd: string): boolean => {
     if (commandReadsContent(String(cmd || '')) !== true) return false
     const { tokens, unterminated } = shellTokens(String(cmd || ''))
@@ -264,6 +277,7 @@ export function handleDeclarationPostExecute(
     commandNamesSource,
     commandReadsDirectoryScope,
     commandScopeUnparseable,
+    commandHasWildcard,
     directoryScope,
     listSourceFiles,
     readDeclaration,

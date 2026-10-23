@@ -172,8 +172,27 @@ function evaluateDeclarationEgress(input) {
     const target = String(input.target || '');
     // 2. A declaration file is already the artifact this mode exists to serve, so reading one is ordinary.
     //    Checked before the tool kind because it is true for a read and for a search scope alike.
-    if (target.toLowerCase().endsWith('.d.ts'))
+    //
+    //    ONLY WHEN THE TARGET IS ACTUALLY ONE PATH. `endsWith('.d.ts')` alone would allow a COMMAND whose
+    //    last characters happen to be `.d.ts` — `cat secret.ts; echo x.d.ts` reads the first file and looks
+    //    like the second (SECURITY-REVIEW-6 [5]). A single path has no whitespace, no shell operator and no
+    //    quoting, so requiring that is what makes the suffix mean what it appears to mean.
+    const singlePath = /^[^\s;&|<>()`"'*?[\]{}]+$/.test(target);
+    if (singlePath && /\.d\.ts$/i.test(target))
         return { action: 'allow' };
+    // 2b. A wildcard is expanded by the SHELL, after this gate has read the command string. Every per-file
+    //     decision below is about a string, not about the files the shell will actually open, so the only
+    //     honest answer is refusal (SECURITY-REVIEW-6 [6]).
+    if (input.toolKind === 'shell' &&
+        input.commandReadsContent?.(target) === true &&
+        input.commandHasWildcard?.(target) === true) {
+        return {
+            action: 'block',
+            reason: 'REFUSED_WILDCARD_READ: declarations mode refuses glob patterns in commands that read content. ' +
+                'The shell expands *, ? and [ ] after this gate inspected the command, so the files it reaches ' +
+                'are not the files that were checked. Name each file explicitly.',
+        };
+    }
     // 3. READS.
     if (input.toolKind === 'read') {
         const isCode = input.isCodeExtension ? input.isCodeExtension(target) : false;

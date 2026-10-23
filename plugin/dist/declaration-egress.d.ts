@@ -49,6 +49,11 @@ export interface DeclarationEgressInput {
      */
     commandScopeUnparseable?: (cmd: string) => boolean;
     /**
+     * Does this command name a glob rather than files? `cat src/**` is expanded by the shell AFTER this gate
+     * has looked at the command string, so a per-file answer would be about a string the shell will replace.
+     */
+    commandHasWildcard?: (cmd: string) => boolean;
+    /**
      * Is this scope a DIRECTORY rather than a file?
      *
      * WHY THE SEARCH BRANCH NEEDS IT, and what it closes. `isCodeExtension` answers with the scope's
