@@ -60,19 +60,25 @@ function sha256File(file) {
 }
 
 /**
- * Files changed relative to HEAD, as absolute paths.
+ * Files staged relative to HEAD, as absolute paths.
  *
- * `git diff --name-only HEAD` rather than a diff of the index, because a pre-commit hook runs before the
- * commit exists and HEAD is the last committed state -- which is exactly the baseline a verdict was
- * reached against.
+ * THE INDEX, NOT THE WORKING TREE. `git diff HEAD` reports working-tree bytes, which lets a file be
+ * staged compliant and edited afterwards: the gate judges one version and the commit carries another.
+ * `--cached --diff-filter=ACMR` is exactly the set the commit will contain.
+ *
+ * A git failure is FATAL here. It used to fall back to "check every registered path", which reads as
+ * fail-closed but is not: it changes the question rather than answering it, and a caller cannot tell a
+ * complete check from one that ran against a different target set.
  */
 function changedFiles(repoRoot) {
   const { spawnSync } = require('child_process')
-  const result = spawnSync('git', ['diff', '--name-only', 'HEAD'], {
+  const result = spawnSync('git', ['diff', '--name-only', '--diff-filter=ACMR', '--cached', 'HEAD'], {
     cwd: repoRoot,
     encoding: 'utf8',
   })
-  if (result.status !== 0) return { ok: false, reason: 'git diff failed: ' + String(result.stderr || '').trim() }
+  if (result.status !== 0) {
+    return { ok: false, reason: 'git diff --cached failed: ' + String(result.stderr || '').trim() }
+  }
   return {
     ok: true,
     files: String(result.stdout || '')
@@ -81,6 +87,23 @@ function changedFiles(repoRoot) {
       .filter(Boolean)
       .map((line) => path.resolve(repoRoot, line)),
   }
+}
+
+/**
+ * The hash of a path's STAGED bytes, or null when it is not in the index.
+ *
+ * `git show :<path>` reads the blob the commit will contain, so the verdict is about the artifact
+ * rather than about whatever sits in the working tree at the moment the hook runs.
+ */
+function stagedHash(repoRoot, target) {
+  const { spawnSync } = require('child_process')
+  const relative = path.relative(repoRoot, target).split(path.sep).join('/')
+  const result = spawnSync('git', ['show', ':' + relative], {
+    cwd: repoRoot,
+    maxBuffer: 16 * 1024 * 1024,
+  })
+  if (result.status !== 0) return null
+  return crypto.createHash('sha256').update(result.stdout).digest('hex')
 }
 
 function loadRegistry(registryPath) {
@@ -105,7 +128,7 @@ function recordFor(records, target) {
 }
 
 /** Is this one file settled? Mirrors `evaluateSettledFile` rather than importing it, so a pipeline needs no build. */
-function judge(target, records) {
+function judge(target, records, hashOf = sha256File) {
   const record = recordFor(records, target)
   if (!record) return { ok: false, reason: 'no verdict: no delegated unit is recorded as writing it' }
   if (record.outcome === 'UNIT_FLAKY') {
@@ -118,7 +141,7 @@ function judge(target, records) {
     return { ok: false, reason: 'the unit that wrote it was never verified' }
   }
   if (record.outcome === 'OPERATOR_ATTESTED') {
-    const current = sha256File(target)
+    const current = hashOf(target)
     if (current === null) return { ok: false, reason: 'its content could not be read' }
     if (String(record.sha256) !== current) {
       return { ok: false, reason: 'its content changed after the operator attested it' }
@@ -128,7 +151,7 @@ function judge(target, records) {
   }  if (record.outcome !== 'UNIT_PASSED' || record.succeeded !== true) {
     return { ok: false, reason: 'the registry holds no verdict for it' }
   }
-  const current = sha256File(target)
+  const current = hashOf(target)
   if (current === null) return { ok: false, reason: 'its content could not be read' }
   if (String(record.sha256) !== current) {
     return { ok: false, reason: 'its content changed after the verdict, so it is not the version anything verified' }
@@ -188,18 +211,20 @@ function main() {
   } else {
     const diff = changedFiles(repoRoot)
     if (!diff.ok) {
-      // Could not determine what changed -- git missing, not a repository, or the process denied. Treat
-      // that as "check everything" rather than as an error, because this is a GATE: failing closed means
-      // checking MORE than asked, never waving the commit through. The reason is still reported, so a
-      // caller can tell a fallback from a normal run.
-      console.error('note: could not diff against HEAD (' + diff.reason + '); checking every registered path instead')
-      targets = records.map((r) => path.resolve(String(r.path)))
-    } else {
-      targets = diff.files
+      // FATAL, not a fallback. Widening to every registered path changes the question the gate answers
+      // while still printing a result, so a caller cannot tell a complete check from a substituted one.
+      // Failing closed here means refusing to report at all.
+      console.error('FATAL: cannot determine the staged change set: ' + diff.reason)
+      process.exit(1)
     }
+    targets = diff.files
   }
 
-  const results = targets.map((target) => ({ path: target, ...judge(target, records) }))
+  // In --changed mode the judgement is about the bytes the commit will carry, so the hash comes from the
+  // index. Everywhere else the caller named a path that may not be staged, so the working tree is right.
+  const hashOf = changed ? (target) => stagedHash(repoRoot, target) : (target) => sha256File(target)
+
+  const results = targets.map((target) => ({ path: target, ...judge(target, records, hashOf) }))
   const failures = results.filter((r) => !r.ok)
 
   if (asJson) {
