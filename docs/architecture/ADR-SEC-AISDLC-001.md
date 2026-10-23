@@ -532,6 +532,39 @@ populated on the real path. The injector and probe were operator-local and are n
 that needs a live model cannot run in CI, and a test that silently skips is worse than a recorded
 measurement.
 
+### Empirical inference performance and context scaling
+
+Measured over `delegateWorker` through local HTTP inference, five prompts per scale, each carrying a
+unique nonce so no request shares a prefix, medians reported (2026-10-23):
+
+| scale | prompt tokens | completion tokens | median latency | min–max | end-to-end output rate |
+| :--- | ---: | ---: | ---: | :--- | ---: |
+| small | 446 | 31 | 684 ms | 611–1,435 ms | 45.3 tok/s |
+| medium | 2,197 | 28 | 1,215 ms | 1,082–1,361 ms | 23.0 tok/s |
+| large | 8,198 | 33 | 3,053 ms | 2,878–3,070 ms | 10.8 tok/s |
+
+**Prefill dominates, at roughly 3,272 prompt tokens/s.** That is a three-point slope across the
+medians, not a fitted regression — with three points an R² would be decoration. The support for it is
+that the large-scale spread is 6 % of its median, so the slope is stable where it matters most.
+
+**The end-to-end rate falls because prefill grows, not because decoding slows.** Completion lengths
+were 28–33 tokens at every scale, so the 45.3 → 10.8 tok/s column is prefill time divided into a
+constant decode. Whether decode itself is steady is the obvious next question and is NOT answered
+here: separating it needs a fourth axis that varies completion length, which was not measured. The
+~548 ms intercept absorbs both fixed overhead and the decode of ~31 tokens, and calling it "overhead"
+would repeat the error below in the other direction.
+
+**A benchmark that reuses its prompt measures the KV cache.** The first pass sent an identical prompt
+twice per scale and produced a flat ~520 ms at every size — the second run was a cache hit, not
+inference. Unique prompt text per run is a requirement, not a refinement.
+
+**Remediation evidence is n = 1.** Two independent generations of `cancellation-token` produced the
+same defect (unsubscribe leaving a hole in the listener array), and the contract rejected both. After
+the harness gained auto-unlink and failure feedback, one probe unit's failing output was carried into
+the next prompt and the model produced a conforming implementation on its first attempt (863 bytes,
+3/3 flake passes). One case, consistent with the mechanism, and recorded as one case rather than a
+rate.
+
 ### Open
 
 - **Reserved paths: none.** `src/core/primitives/**` and `src/core/protocol/**` were realised, and
