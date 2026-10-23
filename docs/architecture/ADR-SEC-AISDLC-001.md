@@ -589,6 +589,14 @@ The first thing the new refusal broke was an existing test fixture that emitted
 encoded as an expectation. It now asserts one implementation written, the test path reported, and
 nothing created under `tests/`.
 
+**The limit of a name-based rule, stated rather than implied.** A test written as
+`src/check-my-thing.ts` passes `isTestPath`, because nothing about that path is test-shaped. Content
+sniffing — scanning for `node:test`, `describe`, `assert` — would close it and introduce worse: a
+diagnostic module or a test harness adapter is legitimate implementation that mentions those names, and
+a refusal it cannot explain is a refusal an operator learns to route around. The realistic failure is a
+worker complying with "write the test", not one evading the check, and the path rule catches the former
+deterministically.
+
 ### Open
 
 - **Reserved paths: none.** `src/core/primitives/**` and `src/core/protocol/**` were realised, and
