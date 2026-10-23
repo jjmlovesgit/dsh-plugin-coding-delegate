@@ -712,6 +712,15 @@ All three sit inside the tolerance, and the medium delta that exceeded it disapp
 comparison supports the claim it was run to test: the vendored lattice, the emission denylist and the
 adapter add no measurable per-request overhead — differences are run-to-run variance, not code.
 
+**Re-measured after the sandbox landed** (same harness, `max_tokens: 30`, five distinct prompts, warm-up
+reported): small **617 ms** (578–672), medium **1,304 ms** (1,183–1,445), large **2,957 ms**
+(2,790–3,178). The shifts are within the run-to-run spread.
+
+**The benchmark does not exercise the sandbox, and therefore cannot show that it is free.** It sends an
+instruction and reads a verdict; no verification command runs, so the tokenizer and the permission flags
+are not on that path. The sandbox's cost was measured where it actually is: a contract run under the
+sandbox versus without it — `currency` 91 → 89 ms, `cancellation-token` 81 → 82 ms.
+
 The harness is operator tooling and is not in CI: it needs a live model, and a test that silently skips
 when one is absent is worse than no test.
 
@@ -820,6 +829,11 @@ execve receives a discrete argument vector, so `%VAR%` expansion, `^` escaping, 
 are *impossible* rather than merely rejected. The operator refusal remains as a second lock: a command
 shaped like a chain is a sign its author expected one, and running the first half silently would teach
 them the wrong lesson.
+
+The full control chain, the probe results and the known limits are packaged for external review in
+[`docs/security/red-team-brief.md`](red-team-brief.md). It is written to be falsified rather than
+believed: each claim names the file that enforces it, and the residual limits are listed where a
+reviewer will start.
 
 Two parser decisions are load-bearing, and both were found by a test failing:
 

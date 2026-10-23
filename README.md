@@ -896,6 +896,7 @@ worker** wrote; one written by the architect or by hand has no record and report
 | [`docs/control-effectiveness.md`](docs/control-effectiveness.md) | the five-point design against what is actually enforced, tested, or only documented |
 | [`docs/verification-architecture.md`](docs/verification-architecture.md) | why the loop has to put verification on-box, and the one tier where that reasoning breaks |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | what was built, measured and retired |
+| [`docs/security/red-team-brief.md`](docs/security/red-team-brief.md) | the delegation boundary packaged for external review: threat model, control chain, probe results, and the limits a reviewer should attack first |
 | [`scripts/check-promotion.cjs`](scripts/check-promotion.cjs) | the promotion socket: gate a commit on whether delegated work is verified |
 | [`scripts/verify-release-tarball.ps1`](scripts/verify-release-tarball.ps1) | checks a published tarball against its release tag blob-for-blob, in both directions |
 | [`scripts/measure-reading-cost.cjs`](scripts/measure-reading-cost.cjs) | what the architect actually reads, from the plugin's own audit trace |
