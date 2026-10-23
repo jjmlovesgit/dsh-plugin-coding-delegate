@@ -81,6 +81,14 @@ describe('attestation anchor: HEAD is frozen before the verification commands ru
 
     const before = git(dir, ['rev-parse', 'HEAD']).trim()
 
+    // A second commit, created here rather than by the command under test: the sandbox refuses
+    // non-node verification commands and forbids child_process inside them, so the command cannot run
+    // git. It does not need to — moving HEAD is the behaviour under test, and writing .git/HEAD to an
+    // existing commit moves it just as a commit would.
+    git(dir, ['commit', '-q', '--allow-empty', '-m', 'drift-target'])
+    const driftTarget = git(dir, ['rev-parse', 'HEAD']).trim()
+    git(dir, ['reset', '-q', '--hard', before])
+
     const res: any = await delegateWorker(
       {
         taskName: 'Drift',
@@ -89,8 +97,7 @@ describe('attestation anchor: HEAD is frozen before the verification commands ru
         workspaceDir: dir,
         // The command under test. It passes, it writes the file the unit was asked for, and it moves
         // HEAD -- which is exactly the shape of a test hook or a command that tidies up after itself.
-        runVerification:
-          'git -c user.email=drift@example.test -c user.name="Drift Test" commit -q --allow-empty -m drift',
+        runVerification: 'node -e "require(\'fs\').writeFileSync(\'.git/HEAD\', \'' + driftTarget + '\')"',
         verificationPolicy: ALLOW,
         attestationPrivateKeyPath: keyPath,
       },

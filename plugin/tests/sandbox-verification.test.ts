@@ -35,6 +35,16 @@ describe('verification sandbox', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
+  it('refuses a non-node runtime, which the sandbox cannot reach', () => {
+    const dir = workspace();
+    for (const command of ['python -c "print(1)"', 'bash check.sh', 'sh -c "exit 0"']) {
+      const result = runSandboxVerification(command, dir);
+      expect(result.exitCode).not.toBe(0);
+      expect(result.output).toContain('REFUSED_UNSANDBOXED_RUNTIME');
+    }
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
   it('runs a direct contract and reports its exit code', () => {
     const dir = workspace();
     write(

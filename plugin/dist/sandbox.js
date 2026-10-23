@@ -33,8 +33,10 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.RUNNER_REFUSAL_CODE = exports.SANDBOX_PREFLIGHT_SOURCE = void 0;
+exports.RUNTIME_REFUSAL_CODE = exports.RUNNER_REFUSAL_CODE = exports.SANDBOX_PREFLIGHT_SOURCE = void 0;
 exports.isRunnerStyleCommand = isRunnerStyleCommand;
+exports.isDirectNodeCommand = isDirectNodeCommand;
+exports.runtimeRefusalMessage = runtimeRefusalMessage;
 exports.runnerRefusalMessage = runnerRefusalMessage;
 exports.sandboxEnv = sandboxEnv;
 /**
@@ -94,6 +96,37 @@ function isRunnerStyleCommand(command) {
     return RUNNER_STYLE.test(command);
 }
 exports.RUNNER_REFUSAL_CODE = 'REFUSED_UNSANDBOXED_RUNNER';
+/**
+ * The runtime is allowed only if the command's first token is `node` (optionally `node.exe`, optionally
+ * preceded by a path). Anything else is refused, because none of the sandbox travels with it:
+ * `NODE_OPTIONS` is ignored by python, sh and every other interpreter, so a `python -c ...` verification
+ * would run with the operator's full rights while the attestation claimed isolation. A boundary that can
+ * be sidestepped by changing the interpreter is a recommendation, not a boundary.
+ */
+function isDirectNodeCommand(command) {
+    const trimmed = command.trim();
+    if (!trimmed)
+        return false;
+    const token = trimmed.startsWith('"')
+        ? trimmed.slice(1, trimmed.indexOf('"', 1) === -1 ? trimmed.length : trimmed.indexOf('"', 1))
+        : trimmed.split(/\s+/)[0];
+    const base = (token.split(/[\\/]/).pop() || '').toLowerCase();
+    if (base !== 'node' && base !== 'node.exe')
+        return false;
+    // `node` alone runs nothing; a script (or -e/-p) must follow.
+    return trimmed.slice(trimmed.indexOf(token) + token.length).trim().length > 0;
+}
+exports.RUNTIME_REFUSAL_CODE = 'REFUSED_UNSANDBOXED_RUNTIME';
+function runtimeRefusalMessage(command) {
+    const runtime = command.trim().split(/\s+/)[0] || '(empty)';
+    return (exports.RUNTIME_REFUSAL_CODE + ": verification runtime '" + runtime + "' is not covered by the process " +
+        'sandbox. The environment scrubbing, socket severing and permission flags reach node processes ' +
+        'only, so any other interpreter would run with the operator\'s full rights while the attestation ' +
+        'claimed isolation.\n' +
+        '\nRemediation: run the check as a direct node script that asserts and exits 0 or 1:\n' +
+        '  refused: ' + command + '\n' +
+        '  allowed: node <your-contract>.cjs');
+}
 /** The refusal text, written to be enough to fix the command without reading source. */
 function runnerRefusalMessage(command) {
     return (exports.RUNNER_REFUSAL_CODE +

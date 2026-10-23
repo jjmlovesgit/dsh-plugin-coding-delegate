@@ -801,6 +801,19 @@ remediation is the only part an operator can act on. Four tests hold it: the ref
 direct execution passing and failing with the right exit codes, `child_process` blocked, and `fetch`
 blocked — the last two asserted from inside the sandbox rather than trusted.
 
+**The runtime is part of the boundary.** `NODE_OPTIONS` reaches node processes only, so a verification
+command of `python -c …`, `sh -c …` or `bash script.sh` would run with the operator's full rights while
+the attestation claimed isolation. Those are refused with `REFUSED_UNSANDBOXED_RUNTIME` and the same
+direct-node remediation. A boundary that can be sidestepped by changing the interpreter is a
+recommendation, not a boundary.
+
+**Temp is inside the boundary, deliberately.** The permission model allows read and write under the OS
+temp directory. Without it, the flaky-detection oracles — whose toggle counter lives in temp — reported
+`VERIFICATION_FAILED` on every run, so the restriction was wrong about how contracts are written. The
+assets this boundary defends are the identity and key material in the home directory, the repository's
+integrity, and ambient credentials; none of them live in temp. Repository and home stay unreadable, and
+execution stays denied.
+
 ### Open
 
 - **Reserved paths: none.** `src/core/primitives/**` and `src/core/protocol/**` were realised, and

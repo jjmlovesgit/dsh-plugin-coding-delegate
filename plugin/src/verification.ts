@@ -3,7 +3,7 @@ import * as path from 'path'
 import * as child_process from 'child_process'
 import { resolveDataDir } from './logging'
 import { scanDLP } from './index'
-import { isRunnerStyleCommand, runnerRefusalMessage, sandboxEnv } from './sandbox'
+import { isDirectNodeCommand, isRunnerStyleCommand, runnerRefusalMessage, runtimeRefusalMessage, sandboxEnv } from './sandbox'
 
 /**
  * A failure described without source: enough to diagnose, not enough to leak code.
@@ -576,6 +576,19 @@ export function runSandboxVerification(
       output: refusal,
       exitCode: 1,
     }
+  }
+
+  // The runtime is part of the boundary, not an implementation detail: only a node process receives the
+  // permission flags, the preflight and the scrubbed environment. Anything else would be attested as
+  // isolated while running bare.
+  if (!isDirectNodeCommand(cmd)) {
+    const refusal = 'not ok 1 - ' + runtimeRefusalMessage(cmd)
+    const parsed = parseTestOutput(refusal, 1, {
+      redact: options.redact,
+      rawOutputPath: persistRaw(refusal, options.rawLogPath),
+      workspaceRoot: workspaceDir,
+    })
+    return { ...parsed, output: refusal, exitCode: 1 }
   }
 
   let output = ''

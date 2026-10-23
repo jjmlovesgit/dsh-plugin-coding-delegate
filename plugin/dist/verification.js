@@ -529,6 +529,18 @@ function runSandboxVerification(verificationCommand, workspaceDir = process.cwd(
             exitCode: 1,
         };
     }
+    // The runtime is part of the boundary, not an implementation detail: only a node process receives the
+    // permission flags, the preflight and the scrubbed environment. Anything else would be attested as
+    // isolated while running bare.
+    if (!(0, sandbox_1.isDirectNodeCommand)(cmd)) {
+        const refusal = 'not ok 1 - ' + (0, sandbox_1.runtimeRefusalMessage)(cmd);
+        const parsed = parseTestOutput(refusal, 1, {
+            redact: options.redact,
+            rawOutputPath: persistRaw(refusal, options.rawLogPath),
+            workspaceRoot: workspaceDir,
+        });
+        return { ...parsed, output: refusal, exitCode: 1 };
+    }
     let output = '';
     let spawnError = null;
     let exitCode = 0;
