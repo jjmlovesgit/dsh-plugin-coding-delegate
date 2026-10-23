@@ -75,7 +75,7 @@ An external static review of `441f004` reported 9 findings (1 high, 8 medium). T
 | # | finding | status |
 | :--- | :--- | :--- |
 | 1 | **Relative node path can execute a shadow binary** — a basename check accepted `./node.exe`, and with `shell: false` that path runs directly | **FIXED**: the binary must be the bare `node`/`node.exe` or exactly `process.execPath`, and the spawn always uses `process.execPath`. `REFUSED_SHADOW_RUNTIME`; five shadow spellings covered by tests |
-| 2 | Contract files can be passed as `contextFiles`, exposing the tests to the worker | open |
+| 2 | Contract files can be passed as `contextFiles`, exposing the tests to the worker | **FIXED**: `validateDelegationContext` refuses the delegation before any file is read, resolving and case-folding both lists so `./tests/x` and `tests/x` collide on Windows. `REFUSED_CONTRACT_AS_CONTEXT`, status `CONTEXT_REFUSED`, worker never called |
 | 3 | Promotion gate reads the working tree rather than the staged index; `git diff` errors can pass silently | open |
 | 4–7 | Opaque patch writes; `.d.ts` suffix bypass; wildcard shell reads; non-TS source reads | open |
 | 8 | DLP scans prompts but not credential-bearing tool results | open |

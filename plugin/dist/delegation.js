@@ -44,6 +44,7 @@ exports.truncateErrorBody = truncateErrorBody;
 exports.isRetryableTransportError = isRetryableTransportError;
 exports.describeTransportError = describeTransportError;
 exports.fetchWithTransportRetry = fetchWithTransportRetry;
+exports.validateDelegationContext = validateDelegationContext;
 exports.delegateWorker = delegateWorker;
 exports.extractPromptText = extractPromptText;
 exports.estimateTokenCount = estimateTokenCount;
@@ -572,6 +573,48 @@ async function fetchWithTransportRetry(url, init, options = {}) {
     }
     return { response: null, retries: maxAttempts - 1, error: lastError };
 }
+/**
+ * Contract files may not be handed to the worker as context.
+ *
+ * `contractFiles` exists so the implementer cannot see or edit what judges it. The retry path already
+ * filters contract locations out of the context it widens, but a caller can still declare the contract
+ * itself in `contextFiles`, which shows the worker the oracle: it can then write to the assertions
+ * rather than to the behaviour, and every later verdict is worth less than it claims.
+ *
+ * REFUSED, NOT FILTERED. Dropping the entry and continuing would evaluate the worker against a task
+ * specification its author did not write — the same failure the `--test` refusal exists to prevent.
+ *
+ * Paths are resolved and case-folded before comparison, so `./tests/x.contract.cjs`, `tests/x.contract.cjs`
+ * and (on Windows) `TESTS/X.CONTRACT.CJS` are one path.
+ */
+function validateDelegationContext(workspaceDir, contractFiles = [], contextFiles = []) {
+    const normalise = (candidate) => {
+        const absolute = path.isAbsolute(candidate) ? candidate : path.resolve(workspaceDir, candidate);
+        const normalised = path.normalize(absolute);
+        return process.platform === 'win32' ? normalised.toLowerCase() : normalised;
+    };
+    const pathOf = (entry) => {
+        if (typeof entry === 'string')
+            return entry;
+        const candidate = entry;
+        return candidate && typeof candidate.path === 'string' ? candidate.path : '';
+    };
+    const contracts = new Map();
+    for (const contract of contractFiles)
+        contracts.set(normalise(contract), contract);
+    const conflicting = contextFiles
+        .map(pathOf)
+        .filter((candidate) => candidate.length > 0 && contracts.has(normalise(candidate)));
+    if (conflicting.length === 0)
+        return null;
+    return ('REFUSED_CONTRACT_AS_CONTEXT: contract files cannot be provided as worker context files. ' +
+        'Showing the worker the tests that judge it lets it write to the assertions instead of the ' +
+        'behaviour, and the verdict that follows would claim more than it established.\n' +
+        'Conflicting paths: ' + conflicting.join(', ') + '\n' +
+        'Remediation: remove them from contextFiles, and declare the interface the worker needs in a ' +
+        'separate spec or header file. The delegation is refused rather than silently narrowed, because a ' +
+        'worker evaluated against a context its author did not write is answering a different question.');
+}
 async function delegateWorker(params = {}, tracker) {
     const endpoint = resolveChatCompletionsUrl(params.endpoint || profiles_1.PROFILES.WORKER.endpoint || exports.DEFAULT_LOCAL_ENDPOINT);
     const model = params.model || profiles_1.PROFILES.WORKER.model;
@@ -603,6 +646,20 @@ async function delegateWorker(params = {}, tracker) {
     if (pendingRetry.length > 0)
         pendingRetryContext.delete(workspaceBase);
     const declaredContext = Array.isArray(params.contextFiles) ? params.contextFiles : [];
+    // Refused before a single file is read: the check is about the REQUEST, not about what the files
+    // contain, so there is nothing to gain by resolving context first.
+    const contextConflict = validateDelegationContext(workspaceBase, Array.isArray(params.contractFiles) ? params.contractFiles : [], declaredContext);
+    if (contextConflict) {
+        return {
+            success: false,
+            status: 'CONTEXT_REFUSED',
+            transportRetries: 0,
+            message: contextConflict,
+            filesWritten: [],
+            testResults: { passed: 0, failed: 0, output: 'The worker was not called.' },
+            tokens: { prompt: 0, completion: 0 },
+        };
+    }
     let context = (0, context_1.resolveContextFiles)(declaredContext, workspaceBase);
     let retryInjected = [];
     if (pendingRetry.length > 0 && context.errors.length === 0) {

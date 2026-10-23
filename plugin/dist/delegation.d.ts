@@ -444,6 +444,21 @@ export declare function describeTransportError(error: unknown): string;
  * caller keeps deciding what an HTTP error means.
  */
 export declare function fetchWithTransportRetry(url: string, init: RequestInit, options?: TransportRetryOptions): Promise<TransportAttempt>;
+/**
+ * Contract files may not be handed to the worker as context.
+ *
+ * `contractFiles` exists so the implementer cannot see or edit what judges it. The retry path already
+ * filters contract locations out of the context it widens, but a caller can still declare the contract
+ * itself in `contextFiles`, which shows the worker the oracle: it can then write to the assertions
+ * rather than to the behaviour, and every later verdict is worth less than it claims.
+ *
+ * REFUSED, NOT FILTERED. Dropping the entry and continuing would evaluate the worker against a task
+ * specification its author did not write — the same failure the `--test` refusal exists to prevent.
+ *
+ * Paths are resolved and case-folded before comparison, so `./tests/x.contract.cjs`, `tests/x.contract.cjs`
+ * and (on Windows) `TESTS/X.CONTRACT.CJS` are one path.
+ */
+export declare function validateDelegationContext(workspaceDir: string, contractFiles?: string[], contextFiles?: unknown[]): string | null;
 export declare function delegateWorker(params?: DelegateWorkerParams, tracker?: SavingsTracker): Promise<any>;
 export declare function extractPromptText(session: LLMSession | any): string;
 export declare function estimateTokenCount(text: string): number;
