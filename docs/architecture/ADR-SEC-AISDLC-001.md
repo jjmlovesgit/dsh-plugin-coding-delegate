@@ -664,6 +664,14 @@ one line, and the parity oracle asserts the one thing that is both true and usef
 same number of lines, and the ONLY line that differs is that import specifier. Behaviour is held
 separately, by running all 64 combinations through the specification and through the compiled plugin.
 
+**The adapter's SHAPE is checked, not only its outputs.** `tests/verdict-adapter-structure.test.cjs`
+parses `delegation.ts` with the plugin's own TypeScript compiler and fails if `resolveDelegateStatus`
+contains any `if`, ternary, `switch`, `&&` or `||`. The behavioural oracle would only notice a
+reimplementation once the two drifted; this notices the moment a branch is written. It also asserts that
+`resolveVerdict` is imported from the vendored module, so delegating to a look-alike function that
+happens to agree today is caught too. Proven by injection: a single ternary added to the adapter fails
+the test, and removing it restores green.
+
 ### Open
 
 - **Reserved paths: none.** `src/core/primitives/**` and `src/core/protocol/**` were realised, and

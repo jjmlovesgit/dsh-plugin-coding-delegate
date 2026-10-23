@@ -57,7 +57,7 @@
     "test:engine": "node --test tests/engine/*.test.cjs",
     "export:tools": "node scripts/export-attested-tools.cjs",
     "test:routes": "node --test tests/routes/*.test.cjs",
-    "test:parity": "node --test tests/canonical-json-parity.test.cjs tests/exponential-backoff-parity.test.cjs tests/verdict-lattice-parity.test.cjs",
+    "test:parity": "node --test tests/canonical-json-parity.test.cjs tests/exponential-backoff-parity.test.cjs tests/verdict-lattice-parity.test.cjs tests/verdict-adapter-structure.test.cjs",
     "test:primitives": "node --test tests/primitives/*.test.cjs",
     "test:protocol": "node --test tests/protocol/*.test.cjs"
   },
