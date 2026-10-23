@@ -753,6 +753,32 @@ alter contracts, and must not emit test paths. **Out of scope**: a compromised h
 operator (who holds the signing keys and can author any record they like), and the model itself being
 adversarially prompted through content it reads.
 
+**A prototype sandbox closes all four, measured.** `--permission --allow-fs-read/--allow-fs-write`
+scoped to the workspace, plus a `--require` preflight (frozen `Object`/`Array`/`Function` prototypes,
+severed `net.Socket.prototype.connect` and `fetch`, scrubbed environment), applied to the same probes:
+
+| probe | result |
+| :--- | :--- |
+| prototype pollution | `TypeError: Cannot add property redteam, object is not extensible` |
+| `child_process` | `ERR_ACCESS_DENIED` |
+| network | `ERR_SANDBOX_NETWORK_DENIED` |
+| filesystem outside the workspace | `ERR_ACCESS_DENIED` |
+
+Legitimate contracts still pass at no measurable cost: `currency` 91 → 89 ms, `cancellation-token`
+81 → 82 ms.
+
+**Two constraints found by measurement, and both decide the integration.**
+
+1. **`node --test` cannot run under `--permission` without `--allow-child-process`** — the runner forks
+   per file, so the probe run reported 0 pass / 1 fail. Granting that flag reopens the execution vector
+   the sandbox exists to close. Direct execution (`node contract.cjs`) runs the tests, exits 0 on pass
+   and 1 on failure, and works sandboxed. The contract command therefore has to be the direct form, which
+   is a change to how `runVerification` is written, not a flag.
+2. **`--permission` and `--require` DO propagate through `NODE_OPTIONS`**, so a shell-invoked command can
+   be sandboxed without rewriting the command string. That also means `NODE_OPTIONS` must survive the
+   environment scrub — deleting it would let a grandchild `node` process start **unsandboxed**, which is
+   an escape rather than a scrub. The preflight keeps it for exactly that reason.
+
 ### Open
 
 - **Reserved paths: none.** `src/core/primitives/**` and `src/core/protocol/**` were realised, and
