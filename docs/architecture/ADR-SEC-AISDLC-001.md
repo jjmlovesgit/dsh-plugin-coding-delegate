@@ -627,6 +627,37 @@ vocabulary outright, or it is defined as the layer that maps between them. Until
 machine remains a specification with no consumer — which the record already said, now with the reason
 attached.
 
+### The lifecycle machine adopts the verdict vocabulary
+
+`src/core/protocol/task-lifecycle.ts` now terminates in the seven verdicts that
+`resolveDelegateStatus` already emits — `CONTRACT_MODIFIED`, `VERIFICATION_NOT_APPROVED`, `FLAKY`,
+`INCOHERENT`, `VERIFICATION_FAILED`, `UNVERIFIED`, `SUCCESS` — with `DRAFT`, `DISPATCHED` and
+`EVALUATING` as the non-terminals. The registry vocabulary (`UNIT_PASSED`, `UNIT_FAILED`, …) is NOT the
+machine's vocabulary: it collapses four distinct failures into one bucket, and it carries
+`OPERATOR_ATTESTED`, a human signing event that happens after this cycle has ended. A machine built on it
+could not tell a boundary breach from an assertion failure.
+
+**One mapping is not verbatim.** A refusal before dispatch (`CONTEXT_REFUSED` at the tool boundary) is
+not a verdict, because nothing was evaluated; it terminates as `VERIFICATION_NOT_APPROVED`, the verdict
+that already means "nothing ran, so the outcome is unknown".
+
+**The ledger projection is behaviour-preserving, and that was not free.** Projecting each verdict to a
+`DelegatedOutcome` naively — "anything not SUCCESS/FLAKY/UNVERIFIED is UNIT_FAILED" — would have changed
+two outcomes the existing code gets right:
+
+| verdict | naive projection | preserved projection | why |
+| :--- | :--- | :--- | :--- |
+| `INCOHERENT` | `UNIT_FAILED` | `UNIT_PASSED` | the unit passed; the PROJECT failed, and the registry records the unit |
+| `VERIFICATION_NOT_APPROVED` | `UNIT_FAILED` | `UNIT_UNVERIFIED` | nothing ran — absence of evidence is not evidence of failure |
+
+**The packaging boundary decides how the two copies are kept honest.** `plugin/` may not import
+`src/core/protocol/`, because the package ships standalone. So the lattice exists twice: as the
+specification here, and as `resolveDelegateStatus` in the plugin. `tests/verdict-lattice-parity.test.cjs`
+runs all 64 combinations through both and fails on any disagreement — the same pattern that holds the
+vendored backoff to its attested original. The plugin's own ledger projection still lives in
+`delegation.ts`; making it call the specification would mean vendoring the machine into the package,
+which is a packaging decision rather than a protocol one.
+
 ### Open
 
 - **Reserved paths: none.** `src/core/primitives/**` and `src/core/protocol/**` were realised, and

@@ -1,46 +1,50 @@
 /**
- * The unit verdict lifecycle, as a pure transition table.
+ * The unit's execution lifecycle, terminating in one of the seven verdicts that
+ * `resolveDelegateStatus` already emits.
  *
- * WHAT THIS MODELS, AND WHAT IT DELIBERATELY DOES NOT. It models what happened to a UNIT of delegated
- * work: drafted, dispatched, verified, attested -- or refused, failed, flaked, starved. It does NOT
- * model an attempt: retries, backoff and timeouts belong to `src/engine/task-state-machine.ts`, which
- * already owns them. Two machines describing one process is how a codebase ends up with two meanings
- * for "dispatched", so the split is stated here rather than discovered later.
+ * WHY THE VERDICT VOCABULARY AND NOT THE REGISTRY ONE. `DelegatedOutcome` (`UNIT_PASSED`,
+ * `UNIT_FAILED`, …) is a projection for ledger consumers: it collapses `CONTRACT_MODIFIED`,
+ * `VERIFICATION_NOT_APPROVED`, `INCOHERENT` and `VERIFICATION_FAILED` into one bucket, and it carries
+ * `OPERATOR_ATTESTED`, which is a human signing event that happens after this cycle has ended. A
+ * machine built on it could not tell a boundary breach from an assertion failure. The seven verdicts
+ * are how the cycle actually terminates, so they are what the machine terminates in.
  *
- * THE STATE NAMES ARE THE SHIPPED STATUS STRINGS. `UNIT_PASSED`, `VERIFICATION_FAILED`,
- * `UNIT_FLAKY` and the rest are what the tool returns to the architect today. A protocol module that
- * invented `BOUND` and `UNBOUND` would need a mapping table back to those strings, and that table
- * would be the drift surface. The one rename is `UNIT_PASSED` -> `VERIFIED`: the attestation step
- * distinguishes "the contract passed" from "a note was signed", which the shipped string conflated.
- * `ATTESTED` is the state that means the unit is finished and signed.
+ * THE ONE MAPPING THAT IS NOT VERBATIM. A refusal before dispatch (`CONTEXT_REFUSED` at the tool
+ * boundary) is not a verdict, because no worker ran and nothing was evaluated. It terminates as
+ * `VERIFICATION_NOT_APPROVED`, which is the verdict that already means "nothing ran, so the outcome is
+ * unknown" — the same claim, made by the same rule.
  *
- * ILLEGAL TRANSITIONS ARE VALUES, NOT THROWS. `transition` returns `Result`, and an illegal move is
- * an `Err` the caller must handle. This is the first real consumer of the attested `Result` primitive:
- * a caller that ignores the error gets a compile-time complaint rather than a runtime surprise.
+ * THE LATTICE IS THE SPECIFICATION, and `resolveVerdict` is its executable form. Order:
+ * boundary breach > nothing ran > flaky oracle > project coherence > absence of evidence > success.
  */
 import { Err, Ok, type Result } from '../primitives/result.ts';
 
-export type TaskState =
-  | 'DRAFT'
-  | 'DISPATCHED'
-  | 'CONTEXT_REFUSED'
-  | 'VERIFIED'
+export type TerminalState =
+  | 'CONTRACT_MODIFIED'
+  | 'VERIFICATION_NOT_APPROVED'
+  | 'FLAKY'
+  | 'INCOHERENT'
   | 'VERIFICATION_FAILED'
-  | 'UNIT_FLAKY'
-  | 'WORKER_OUTPUT_STARVED'
-  | 'ERROR'
-  | 'ATTESTED';
+  | 'UNVERIFIED'
+  | 'SUCCESS';
+
+export type TaskState = 'DRAFT' | 'DISPATCHED' | 'EVALUATING' | TerminalState;
+
+/** The six inputs the verdict is decided from — the same shape `resolveDelegateStatus` takes. */
+export interface EvaluationPayload {
+  readonly contractViolationsFound: boolean;
+  readonly verificationGatePassed: boolean;
+  readonly flaky: boolean;
+  readonly coherenceFailed: boolean;
+  readonly unverified: boolean;
+  readonly isSuccess: boolean;
+}
 
 export type TaskEvent =
-  | 'DISPATCH_SUCCESS'
-  | 'REFUSE_CONTEXT'
-  | 'VERIFY_PASS'
-  | 'VERIFY_FAIL'
-  | 'VERIFY_FLAKE'
-  | 'OUTPUT_EMPTY'
-  | 'TRANSPORT_ERROR'
-  | 'ATTEST_PASS'
-  | 'ATTEST_FAIL';
+  | { readonly type: 'DISPATCH' }
+  | { readonly type: 'REFUSE' }
+  | { readonly type: 'BEGIN_EVALUATION' }
+  | { readonly type: 'EVALUATE'; readonly payload: EvaluationPayload };
 
 export type ProtocolErrorCode = 'ILLEGAL_TRANSITION' | 'UNKNOWN_STATE' | 'UNKNOWN_EVENT';
 
@@ -52,82 +56,107 @@ export interface ProtocolError {
 }
 
 export const TERMINAL_STATES: ReadonlySet<TaskState> = new Set([
-  'CONTEXT_REFUSED',
+  'CONTRACT_MODIFIED',
+  'VERIFICATION_NOT_APPROVED',
+  'FLAKY',
+  'INCOHERENT',
   'VERIFICATION_FAILED',
-  'UNIT_FLAKY',
-  'WORKER_OUTPUT_STARVED',
-  'ERROR',
-  'ATTESTED',
+  'UNVERIFIED',
+  'SUCCESS',
 ]);
 
 const STATES: ReadonlySet<string> = new Set([
   'DRAFT',
   'DISPATCHED',
-  'CONTEXT_REFUSED',
-  'VERIFIED',
-  'VERIFICATION_FAILED',
-  'UNIT_FLAKY',
-  'WORKER_OUTPUT_STARVED',
-  'ERROR',
-  'ATTESTED',
+  'EVALUATING',
+  ...TERMINAL_STATES,
 ]);
 
-const EVENTS: ReadonlySet<string> = new Set([
-  'DISPATCH_SUCCESS',
-  'REFUSE_CONTEXT',
-  'VERIFY_PASS',
-  'VERIFY_FAIL',
-  'VERIFY_FLAKE',
-  'OUTPUT_EMPTY',
-  'TRANSPORT_ERROR',
-  'ATTEST_PASS',
-  'ATTEST_FAIL',
+const EVENT_TYPES: ReadonlySet<string> = new Set([
+  'DISPATCH',
+  'REFUSE',
+  'BEGIN_EVALUATION',
+  'EVALUATE',
 ]);
 
-/** The legal edges, as `STATE:EVENT` -> next state. A table is the specification, so it is one. */
+/** The two edges that do not depend on a payload. `EVALUATE` is computed by `resolveVerdict`. */
 const TRANSITIONS: ReadonlyMap<string, TaskState> = new Map([
-  ['DRAFT:DISPATCH_SUCCESS', 'DISPATCHED'],
-  ['DRAFT:REFUSE_CONTEXT', 'CONTEXT_REFUSED'],
-  ['DISPATCHED:VERIFY_PASS', 'VERIFIED'],
-  ['DISPATCHED:VERIFY_FAIL', 'VERIFICATION_FAILED'],
-  ['DISPATCHED:VERIFY_FLAKE', 'UNIT_FLAKY'],
-  ['DISPATCHED:OUTPUT_EMPTY', 'WORKER_OUTPUT_STARVED'],
-  ['DISPATCHED:TRANSPORT_ERROR', 'ERROR'],
-  ['VERIFIED:ATTEST_PASS', 'ATTESTED'],
-  ['VERIFIED:ATTEST_FAIL', 'VERIFICATION_FAILED'],
+  ['DRAFT:DISPATCH', 'DISPATCHED'],
+  ['DRAFT:REFUSE', 'VERIFICATION_NOT_APPROVED'],
+  ['DISPATCHED:BEGIN_EVALUATION', 'EVALUATING'],
 ]);
-
-/** The edge from `state` under `event`, or undefined when the move is not in the table. */
-export function nextState(state: TaskState, event: TaskEvent): TaskState | undefined {
-  return TRANSITIONS.get(state + ':' + event);
-}
 
 export function isTerminal(state: TaskState): boolean {
   return TERMINAL_STATES.has(state);
 }
 
+/** The lattice, as code: the first true condition wins, and the order IS the contract. */
+export function resolveVerdict(payload: EvaluationPayload): TerminalState {
+  if (payload.contractViolationsFound) return 'CONTRACT_MODIFIED';
+  if (!payload.verificationGatePassed) return 'VERIFICATION_NOT_APPROVED';
+  if (payload.flaky) return 'FLAKY';
+  if (payload.coherenceFailed) return payload.isSuccess ? 'INCOHERENT' : 'VERIFICATION_FAILED';
+  if (payload.unverified) return 'UNVERIFIED';
+  return payload.isSuccess ? 'SUCCESS' : 'VERIFICATION_FAILED';
+}
+
+/**
+ * How a verdict is projected into the ledger's coarser vocabulary.
+ *
+ * BEHAVIOUR-PRESERVING, DELIBERATELY. The naive projection — "anything that is not SUCCESS, FLAKY or
+ * UNVERIFIED is UNIT_FAILED" — would change two ledger outcomes that the existing code got right:
+ *
+ *   INCOHERENT        the UNIT passed and the PROJECT failed. The registry records the unit's own
+ *                     result, so it stays UNIT_PASSED; reporting UNIT_FAILED would say the worker's
+ *                     work failed when the tree did.
+ *   VERIFICATION_NOT_APPROVED  nothing ran. That is absence of evidence, not evidence of failure, and
+ *                     the registry already calls it UNIT_UNVERIFIED.
+ *
+ * `OPERATOR_ATTESTED` is NOT here on purpose: it is a human signing event that happens after this
+ * cycle has ended, and no execution path may reach it.
+ */
+export type DelegatedOutcomeProjection = 'UNIT_PASSED' | 'UNIT_FAILED' | 'UNIT_UNVERIFIED' | 'UNIT_FLAKY';
+
+export function projectOutcome(verdict: TerminalState): DelegatedOutcomeProjection {
+  if (verdict === 'FLAKY') return 'UNIT_FLAKY';
+  if (verdict === 'VERIFICATION_NOT_APPROVED' || verdict === 'UNVERIFIED') return 'UNIT_UNVERIFIED';
+  if (verdict === 'SUCCESS' || verdict === 'INCOHERENT') return 'UNIT_PASSED';
+  return 'UNIT_FAILED';
+}
+
 /**
  * Apply one event. Returns the next state, or an `Err` naming why the move was refused.
  *
- * Unknown states and events are rejected rather than coerced: TypeScript prevents them at compile
- * time, but this module is also callable from JavaScript (the harness, tests, a host embedding it),
- * and a protocol that silently accepts an event it has never heard of is not a protocol.
+ * A payload-free transition out of EVALUATING is refused, and so is an `EVALUATE` anywhere else: the
+ * verdict can only be reached by evaluating, and evaluation can only happen once dispatched.
  */
 export function transition(state: TaskState, event: TaskEvent): Result<TaskState, ProtocolError> {
+  const type = (event as { type?: string } | null)?.type
   if (!STATES.has(state)) {
-    return Err({ code: 'UNKNOWN_STATE', state: String(state), event: String(event), message: 'unknown state' });
+    return Err({ code: 'UNKNOWN_STATE', state: String(state), event: String(type), message: 'unknown state' })
   }
-  if (!EVENTS.has(event)) {
-    return Err({ code: 'UNKNOWN_EVENT', state: String(state), event: String(event), message: 'unknown event' });
+  if (!type || !EVENT_TYPES.has(type)) {
+    return Err({ code: 'UNKNOWN_EVENT', state: String(state), event: String(type), message: 'unknown event' })
   }
-  const next = nextState(state, event);
+  if (type === 'EVALUATE') {
+    if (state !== 'EVALUATING') {
+      return Err({
+        code: 'ILLEGAL_TRANSITION',
+        state,
+        event: type,
+        message: state + ' cannot be evaluated: evaluation happens after dispatch, once',
+      })
+    }
+    return Ok(resolveVerdict((event as { payload: EvaluationPayload }).payload))
+  }
+  const next = TRANSITIONS.get(state + ':' + type)
   if (next === undefined) {
     return Err({
       code: 'ILLEGAL_TRANSITION',
-      state: String(state),
-      event: String(event),
-      message: String(state) + ' has no transition for ' + String(event),
-    });
+      state,
+      event: type,
+      message: state + ' has no transition for ' + type,
+    })
   }
-  return Ok(next);
+  return Ok(next)
 }

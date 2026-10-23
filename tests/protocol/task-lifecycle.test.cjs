@@ -1,8 +1,7 @@
-// Loopback suite for the Tier 2 unit-verdict lifecycle.
+// Loopback suite for the Tier 2 execution lifecycle.
 //
-// The legal edges are restated here as DATA rather than imported from the module: a test that reads
-// the table it is checking proves only that the file parses. If an edge disappears from the module,
-// this list still expects it.
+// The lattice is restated here as an independent function rather than imported: a test that reads the
+// rule it is checking proves only that the file parses.
 'use strict';
 
 const test = require('node:test');
@@ -10,123 +9,134 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 
 const MODULE = path.join(__dirname, '..', '..', 'src', 'core', 'protocol', 'task-lifecycle.ts');
-const { transition, isTerminal, nextState, TERMINAL_STATES } = require(MODULE);
+const { transition, resolveVerdict, projectOutcome, isTerminal, TERMINAL_STATES } = require(MODULE);
 
-const STATES = [
-  'DRAFT',
-  'DISPATCHED',
-  'CONTEXT_REFUSED',
-  'VERIFIED',
+const TERMINALS = [
+  'CONTRACT_MODIFIED',
+  'VERIFICATION_NOT_APPROVED',
+  'FLAKY',
+  'INCOHERENT',
   'VERIFICATION_FAILED',
-  'UNIT_FLAKY',
-  'WORKER_OUTPUT_STARVED',
-  'ERROR',
-  'ATTESTED',
+  'UNVERIFIED',
+  'SUCCESS',
 ];
 
-const EVENTS = [
-  'DISPATCH_SUCCESS',
-  'REFUSE_CONTEXT',
-  'VERIFY_PASS',
-  'VERIFY_FAIL',
-  'VERIFY_FLAKE',
-  'OUTPUT_EMPTY',
-  'TRANSPORT_ERROR',
-  'ATTEST_PASS',
-  'ATTEST_FAIL',
-];
+const payloads = () => {
+  const out = [];
+  for (const contractViolationsFound of [false, true]) {
+    for (const verificationGatePassed of [false, true]) {
+      for (const flaky of [false, true]) {
+        for (const coherenceFailed of [false, true]) {
+          for (const unverified of [false, true]) {
+            for (const isSuccess of [false, true]) {
+              out.push({
+                contractViolationsFound,
+                verificationGatePassed,
+                flaky,
+                coherenceFailed,
+                unverified,
+                isSuccess,
+              });
+            }
+          }
+        }
+      }
+    }
+  }
+  return out;
+};
 
-const LEGAL = [
-  ['DRAFT', 'DISPATCH_SUCCESS', 'DISPATCHED'],
-  ['DRAFT', 'REFUSE_CONTEXT', 'CONTEXT_REFUSED'],
-  ['DISPATCHED', 'VERIFY_PASS', 'VERIFIED'],
-  ['DISPATCHED', 'VERIFY_FAIL', 'VERIFICATION_FAILED'],
-  ['DISPATCHED', 'VERIFY_FLAKE', 'UNIT_FLAKY'],
-  ['DISPATCHED', 'OUTPUT_EMPTY', 'WORKER_OUTPUT_STARVED'],
-  ['DISPATCHED', 'TRANSPORT_ERROR', 'ERROR'],
-  ['VERIFIED', 'ATTEST_PASS', 'ATTESTED'],
-  ['VERIFIED', 'ATTEST_FAIL', 'VERIFICATION_FAILED'],
-];
+/** The lattice, written from the specification. */
+function expectedVerdict(p) {
+  if (p.contractViolationsFound) return 'CONTRACT_MODIFIED';
+  if (!p.verificationGatePassed) return 'VERIFICATION_NOT_APPROVED';
+  if (p.flaky) return 'FLAKY';
+  if (p.coherenceFailed) return p.isSuccess ? 'INCOHERENT' : 'VERIFICATION_FAILED';
+  if (p.unverified) return 'UNVERIFIED';
+  return p.isSuccess ? 'SUCCESS' : 'VERIFICATION_FAILED';
+}
 
-const TERMINAL = [
-  'CONTEXT_REFUSED',
-  'VERIFICATION_FAILED',
-  'UNIT_FLAKY',
-  'WORKER_OUTPUT_STARVED',
-  'ERROR',
-  'ATTESTED',
-];
+const evaluate = (p) => transition('EVALUATING', { type: 'EVALUATE', payload: p });
 
-test('task lifecycle: the unit verdict transition table', async (t) => {
-  await t.test('every documented edge resolves to its documented state', () => {
-    for (const [from, event, to] of LEGAL) {
-      const result = transition(from, event);
-      assert.equal(result.ok, true, from + ' + ' + event + ' must be legal');
-      assert.equal(result.value, to);
-      assert.equal(nextState(from, event), to);
+test('execution lifecycle: draft, dispatch, evaluate', async (t) => {
+  await t.test('the lifecycle edges', () => {
+    assert.deepEqual(transition('DRAFT', { type: 'DISPATCH' }), { ok: true, value: 'DISPATCHED' });
+    assert.deepEqual(transition('DISPATCHED', { type: 'BEGIN_EVALUATION' }), { ok: true, value: 'EVALUATING' });
+    assert.deepEqual(transition('DRAFT', { type: 'REFUSE' }), { ok: true, value: 'VERIFICATION_NOT_APPROVED' });
+  });
+
+  await t.test('a refusal before dispatch is the verdict that means nothing ran', () => {
+    // `CONTEXT_REFUSED` at the tool boundary is not one of the seven verdicts, because nothing was
+    // evaluated. It terminates in VERIFICATION_NOT_APPROVED, which already means exactly that.
+    const refused = transition('DRAFT', { type: 'REFUSE' });
+    assert.equal(refused.ok, true);
+    assert.ok(TERMINALS.includes(refused.value));
+  });
+
+  await t.test('all 64 payloads resolve to the documented lattice', () => {
+    const all = payloads();
+    assert.equal(all.length, 64);
+    for (const payload of all) {
+      const result = evaluate(payload);
+      assert.equal(result.ok, true, JSON.stringify(payload));
+      assert.equal(result.value, expectedVerdict(payload), JSON.stringify(payload));
+      assert.equal(resolveVerdict(payload), expectedVerdict(payload));
     }
   });
 
-  await t.test('an edge outside the table fails closed with a typed error', () => {
-    // Every (state, event) pair that is not in LEGAL must be an Err, with no exceptions: a protocol
-    // that has a "default" transition is a protocol with an undocumented one.
-    for (const from of STATES) {
-      for (const event of EVENTS) {
-        const legal = LEGAL.some(([f, e]) => f === from && e === event);
-        if (legal) continue;
-        const result = transition(from, event);
-        assert.equal(result.ok, false, from + ' + ' + event + ' should have been refused');
-        assert.equal(result.error.code, 'ILLEGAL_TRANSITION');
-        assert.equal(result.error.state, from);
-        assert.equal(result.error.event, event);
-      }
+  await t.test('evaluation is only possible once dispatched', () => {
+    const payload = { contractViolationsFound: false, verificationGatePassed: true, flaky: false, coherenceFailed: false, unverified: false, isSuccess: true };
+    for (const state of ['DRAFT', 'DISPATCHED', ...TERMINALS]) {
+      const result = transition(state, { type: 'EVALUATE', payload });
+      assert.equal(result.ok, false, state + ' accepted an evaluation');
+      assert.equal(result.error.code, 'ILLEGAL_TRANSITION');
     }
   });
 
   await t.test('terminal states accept nothing at all', () => {
-    for (const state of TERMINAL) {
-      assert.equal(isTerminal(state), true, state + ' must be terminal');
-      for (const event of EVENTS) {
+    const events = [
+      { type: 'DISPATCH' },
+      { type: 'REFUSE' },
+      { type: 'BEGIN_EVALUATION' },
+      { type: 'EVALUATE', payload: { contractViolationsFound: false, verificationGatePassed: true, flaky: false, coherenceFailed: false, unverified: false, isSuccess: true } },
+    ];
+    for (const state of TERMINALS) {
+      assert.equal(isTerminal(state), true);
+      for (const event of events) {
         const result = transition(state, event);
-        assert.equal(result.ok, false, state + ' accepted ' + event);
-        assert.equal(result.error.code, 'ILLEGAL_TRANSITION');
+        assert.equal(result.ok, false, state + ' accepted ' + event.type);
       }
     }
-  });
-
-  await t.test('non-terminal states are exactly the three that can still move', () => {
-    const movable = STATES.filter((state) => !isTerminal(state));
-    assert.deepEqual(movable.sort(), ['DISPATCHED', 'DRAFT', 'VERIFIED']);
-    assert.deepEqual([...TERMINAL_STATES].sort(), TERMINAL.slice().sort());
+    assert.deepEqual([...TERMINAL_STATES].sort(), TERMINALS.slice().sort());
   });
 
   await t.test('an unknown state or event is rejected by name', () => {
-    const badState = transition('BOUND', 'DISPATCH_SUCCESS');
-    assert.equal(badState.ok, false);
-    assert.equal(badState.error.code, 'UNKNOWN_STATE');
-
-    const badEvent = transition('DRAFT', 'RESUME');
-    assert.equal(badEvent.ok, false);
-    assert.equal(badEvent.error.code, 'UNKNOWN_EVENT');
+    assert.equal(transition('BOUND', { type: 'DISPATCH' }).error.code, 'UNKNOWN_STATE');
+    assert.equal(transition('DRAFT', { type: 'RESUME' }).error.code, 'UNKNOWN_EVENT');
+    assert.equal(transition('DRAFT', {}).error.code, 'UNKNOWN_EVENT');
   });
 
-  await t.test('every state is reachable from DRAFT', () => {
-    const seen = new Set(['DRAFT']);
-    const queue = ['DRAFT'];
-    while (queue.length > 0) {
-      const state = queue.shift();
-      for (const [from, , to] of LEGAL) {
-        if (from === state && !seen.has(to)) {
-          seen.add(to);
-          queue.push(to);
-        }
-      }
-    }
-    assert.deepEqual([...seen].sort(), STATES.slice().sort(), 'an unreachable state is dead specification');
+  await t.test('every terminal is reachable', () => {
+    const seen = new Set([...TERMINALS]);
+    for (const payload of payloads()) seen.add(resolveVerdict(payload));
+    assert.deepEqual([...seen].sort(), TERMINALS.slice().sort());
   });
 
-  await t.test('the same request yields the same verdict', () => {
-    const run = () => LEGAL.map(([from, event]) => transition(from, event));
-    assert.deepEqual(run(), run());
+  await t.test('the projection preserves the ledger semantics the plugin already had', () => {
+    assert.equal(projectOutcome('FLAKY'), 'UNIT_FLAKY');
+    assert.equal(projectOutcome('VERIFICATION_NOT_APPROVED'), 'UNIT_UNVERIFIED');
+    assert.equal(projectOutcome('UNVERIFIED'), 'UNIT_UNVERIFIED');
+    assert.equal(projectOutcome('SUCCESS'), 'UNIT_PASSED');
+    // The unit passed and the project failed: the registry records the UNIT, not the tree.
+    assert.equal(projectOutcome('INCOHERENT'), 'UNIT_PASSED');
+    assert.equal(projectOutcome('CONTRACT_MODIFIED'), 'UNIT_FAILED');
+    assert.equal(projectOutcome('VERIFICATION_FAILED'), 'UNIT_FAILED');
+  });
+
+  await t.test('no execution path can reach the operator-attested outcome', () => {
+    // OPERATOR_ATTESTED is a human signing event that happens after this cycle ends; it is deliberately
+    // absent from the projection type, so this asserts the absence rather than trusting it.
+    const reached = new Set(payloads().map((p) => projectOutcome(resolveVerdict(p))));
+    assert.equal(reached.has('OPERATOR_ATTESTED'), false);
   });
 });
