@@ -715,6 +715,44 @@ adapter add no measurable per-request overhead — differences are run-to-run va
 The harness is operator tooling and is not in CI: it needs a live model, and a test that silently skips
 when one is absent is worse than no test.
 
+### Self-red-team: what the runtime actually permits
+
+Four hostile leaves, each executed the way a real delegation executes one — through the contract runner
+in a subprocess, with the operator's ambient rights. All four succeeded:
+
+| probe | what it did | result |
+| :--- | :--- | :--- |
+| prototype pollution | `(Object.prototype as any).redteam = 'polluted'` at module load | **executed**, property visible to the runner |
+| `child_process` | `execSync('whoami')` | **executed**, returned the operator's account |
+| network | `fetch('http://127.0.0.1:1234/v1/models')` | **executed**, HTTP 200 from inside verification |
+| ambient filesystem | `readFileSync('C:/Windows/win.ini')` outside the workspace | **executed**, 92 bytes read |
+
+**This is not a defect in the gates; it is the shape of the current model.** The gates are STATIC and
+run at commit time; verification is DYNAMIC and runs before any commit. `runSandboxVerification` spawns
+`spawnSync(cmd, { shell: true, cwd })` — a shell subprocess with full ambient rights. A leaf that lands
+in `tools/*.ts` would later fail `tier1-is-a-leaf` for its imports, but it has already executed by then.
+
+**What Node's permission model would close, measured rather than assumed** (`node --permission`,
+Node 22):
+
+| vector | under `--permission` | note |
+| :--- | :--- | :--- |
+| `child_process` | **blocked** (`ERR_ACCESS_DENIED`) | unless `--allow-child-process` is granted |
+| filesystem outside the allowlist | **blocked** (`ERR_ACCESS_DENIED`) | with `--allow-fs-read/write` scoped to the workspace |
+| network | **NOT blocked** (HTTP 200) | the permission model does not cover sockets on this version |
+| prototype pollution | not blocked | `--disable-proto=delete` removes the `__proto__` accessor only; a direct `Object.prototype.x =` still lands |
+
+So two of four probes are closeable with a Node flag today, one needs an OS-level control, and one needs
+a fresh process per contract rather than a long-lived runner. Until the first two are in place, an
+external red-team would spend its budget rediscovering the Windows/Node ambient surface rather than
+probing this architecture — which is why the recommendation is self-red-team now, external audit after
+the sandbox.
+
+**In scope for this record**: an untrusted local worker must not grade its own work, must not author or
+alter contracts, and must not emit test paths. **Out of scope**: a compromised host, a malicious
+operator (who holds the signing keys and can author any record they like), and the model itself being
+adversarially prompted through content it reads.
+
 ### Open
 
 - **Reserved paths: none.** `src/core/primitives/**` and `src/core/protocol/**` were realised, and

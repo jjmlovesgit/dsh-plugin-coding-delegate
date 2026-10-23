@@ -18,7 +18,7 @@
  * (`npm --prefix plugin run build`). It is operator tooling, not a CI test: it cannot run without a
  * model, and a test that silently skips is worse than no test.
  *
- * Usage: node tools/bench-worker-latency.mjs [--runs 5] [--max-tokens 30] [--json]
+ * Usage: node tools/bench-worker-latency.mjs [--runs 5] [--max-tokens 30] [--tier small,large] [--json]
  */
 import { createRequire } from 'node:module';
 import * as fs from 'node:fs';
@@ -38,11 +38,12 @@ const flag = (name, fallback) => {
 
 const RUNS = Number(flag('runs', '5'));
 const MAX_TOKENS = Number(flag('max-tokens', '30'));
+const ONLY = flag('tier', '');
 const TIERS = [
   { name: 'small', chars: 1000 },
   { name: 'medium', chars: 8000 },
   { name: 'large', chars: 32000 },
-];
+].filter((tier) => !ONLY || ONLY.split(',').includes(tier.name));
 
 let nonce = 0;
 function context(chars) {
