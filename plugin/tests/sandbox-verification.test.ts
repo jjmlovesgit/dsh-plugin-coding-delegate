@@ -3,6 +3,60 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { runSandboxVerification } from '../src/verification';
+import { validateVerificationCommand } from '../src/sandbox';
+
+describe('validateVerificationCommand', () => {
+  it('accepts direct node invocations in every path form the plugin meets', () => {
+    const valid = [
+      'node tests/contracts/foo.contract.cjs',
+      'node.exe tests/contracts/foo.contract.cjs',
+      '/usr/local/bin/node tests/contracts/foo.contract.cjs',
+      'C:\\Program Files\\nodejs\\node.exe tests/contracts/foo.contract.cjs',
+      '"C:\\Program Files\\nodejs\\node.exe" tests/contracts/foo.contract.cjs',
+      'node --max-old-space-size=512 tests/contracts/foo.contract.cjs',
+    ];
+    for (const command of valid) {
+      expect(validateVerificationCommand(command).valid, command).toBe(true);
+    }
+  });
+
+  it('refuses runner modes with the direct-execution remediation', () => {
+    for (const command of [
+      'node --test tests/contracts/foo.contract.cjs',
+      'node -t tests/contracts/foo.contract.cjs',
+      '/usr/bin/node --test file.cjs',
+    ]) {
+      const result = validateVerificationCommand(command);
+      expect(result.valid, command).toBe(false);
+      expect(result.reason).toContain('REFUSED_UNSANDBOXED_RUNNER');
+      // The remediation keeps whatever prefix the operator used, so the assertion is that a rewritten
+      // command is offered, not that it starts with the bare word `node`.
+      expect(result.reason).toMatch(/new: .*node .*\.cjs/);
+    }
+  });
+
+  it('refuses runtimes the sandbox cannot reach', () => {
+    for (const command of [
+      'python -c "import os"',
+      'python3 run_contracts.py',
+      'sh test.sh',
+      'bash test.sh',
+      'powershell -File test.ps1',
+      'deno run script.ts',
+      'bun test script.ts',
+    ]) {
+      const result = validateVerificationCommand(command);
+      expect(result.valid, command).toBe(false);
+      expect(result.reason).toContain('REFUSED_UNSANDBOXED_RUNTIME');
+    }
+  });
+
+  it('refuses an empty command rather than running nothing', () => {
+    const result = validateVerificationCommand('   ');
+    expect(result.valid).toBe(false);
+    expect(result.reason).toContain('REFUSED_EMPTY_COMMAND');
+  });
+});
 
 /**
  * The verification sandbox, asserted from the outside: what an operator's command does when it is

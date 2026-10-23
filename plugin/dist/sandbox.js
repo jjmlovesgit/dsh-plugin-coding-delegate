@@ -33,9 +33,9 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.RUNTIME_REFUSAL_CODE = exports.RUNNER_REFUSAL_CODE = exports.SANDBOX_PREFLIGHT_SOURCE = void 0;
+exports.EMPTY_REFUSAL_CODE = exports.RUNTIME_REFUSAL_CODE = exports.RUNNER_REFUSAL_CODE = exports.SANDBOX_PREFLIGHT_SOURCE = void 0;
 exports.isRunnerStyleCommand = isRunnerStyleCommand;
-exports.isDirectNodeCommand = isDirectNodeCommand;
+exports.validateVerificationCommand = validateVerificationCommand;
 exports.runtimeRefusalMessage = runtimeRefusalMessage;
 exports.runnerRefusalMessage = runnerRefusalMessage;
 exports.sandboxEnv = sandboxEnv;
@@ -96,27 +96,44 @@ function isRunnerStyleCommand(command) {
     return RUNNER_STYLE.test(command);
 }
 exports.RUNNER_REFUSAL_CODE = 'REFUSED_UNSANDBOXED_RUNNER';
-/**
- * The runtime is allowed only if the command's first token is `node` (optionally `node.exe`, optionally
- * preceded by a path). Anything else is refused, because none of the sandbox travels with it:
- * `NODE_OPTIONS` is ignored by python, sh and every other interpreter, so a `python -c ...` verification
- * would run with the operator's full rights while the attestation claimed isolation. A boundary that can
- * be sidestepped by changing the interpreter is a recommendation, not a boundary.
- */
-function isDirectNodeCommand(command) {
-    const trimmed = command.trim();
-    if (!trimmed)
-        return false;
-    const token = trimmed.startsWith('"')
-        ? trimmed.slice(1, trimmed.indexOf('"', 1) === -1 ? trimmed.length : trimmed.indexOf('"', 1))
-        : trimmed.split(/\s+/)[0];
-    const base = (token.split(/[\\/]/).pop() || '').toLowerCase();
-    if (base !== 'node' && base !== 'node.exe')
-        return false;
-    // `node` alone runs nothing; a script (or -e/-p) must follow.
-    return trimmed.slice(trimmed.indexOf(token) + token.length).trim().length > 0;
-}
 exports.RUNTIME_REFUSAL_CODE = 'REFUSED_UNSANDBOXED_RUNTIME';
+exports.EMPTY_REFUSAL_CODE = 'REFUSED_EMPTY_COMMAND';
+/**
+ * The runtime gate. Everything below is refused before a shim is written or a process spawned.
+ *
+ * THE RUNTIME IS PART OF THE BOUNDARY, not an implementation detail: `NODE_OPTIONS`, the permission
+ * flags and the preload reach node processes only. A `python -c …` or `sh -c …` verification would run
+ * with the operator's full rights while the attestation claimed isolation, so it is refused rather than
+ * run. A boundary that can be sidestepped by changing the interpreter is a recommendation.
+ *
+ * THE RUNNER IS REFUSED for a different reason: `node --test` forks one child per test file, and the
+ * permission model blocks that fork. Granting `--allow-child-process` would reopen the execution vector
+ * the sandbox closes, so the direct form is required instead.
+ *
+ * Path forms are accepted deliberately, including a quoted Windows path with spaces — the plugin runs
+ * on Windows, where the default install path is exactly that.
+ */
+function validateVerificationCommand(command) {
+    const trimmed = String(command || '').trim();
+    if (!trimmed) {
+        return { valid: false, reason: exports.EMPTY_REFUSAL_CODE + ': verification command cannot be empty.' };
+    }
+    if (/\bnode(?:\.exe)?\s+.*?(?:--test\b|-t\b)/.test(trimmed)) {
+        return { valid: false, reason: runnerRefusalMessage(trimmed) };
+    }
+    const binaryMatch = trimmed.match(/^(?:(?:"([^"]+)")|(\S+))/);
+    const binaryToken = binaryMatch ? binaryMatch[1] || binaryMatch[2] : '';
+    // A quoted path arrives as one token; an UNQUOTED Windows path with spaces arrives split, and the
+    // token comparison can only see `C:\Program`. That form is accepted explicitly, because the plugin
+    // runs on Windows where the default install path is exactly that, and a shell that cannot parse it
+    // will fail at spawn rather than run something unexpected.
+    const isNodeBinary = /(?:^|[/\\])node(?:\.exe)?$/i.test(binaryToken) ||
+        /^[A-Za-z]:\\[^"]*[\\/]node(?:\.exe)?\s/i.test(trimmed);
+    if (!isNodeBinary) {
+        return { valid: false, reason: runtimeRefusalMessage(trimmed) };
+    }
+    return { valid: true };
+}
 function runtimeRefusalMessage(command) {
     const runtime = command.trim().split(/\s+/)[0] || '(empty)';
     return (exports.RUNTIME_REFUSAL_CODE + ": verification runtime '" + runtime + "' is not covered by the process " +

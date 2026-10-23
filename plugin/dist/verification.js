@@ -511,11 +511,13 @@ function runSandboxVerification(verificationCommand, workspaceDir = process.cwd(
         return { passed: 0, failed: 0, output: 'No verification command specified.' };
     }
     const cmd = verificationCommand.trim();
-    // Fail closed BEFORE spawning. A runner command cannot be sandboxed (it forks per test file), and an
-    // unsandboxed fallback would make every attestation that cites this run misleading. The refusal is
-    // classified as "nothing ran", which is the VERIFICATION_NOT_APPROVED case in the lattice.
-    if ((0, sandbox_1.isRunnerStyleCommand)(cmd)) {
-        const refusal = 'not ok 1 - ' + (0, sandbox_1.runnerRefusalMessage)(cmd);
+    // Fail closed BEFORE a shim is written or a process spawned. Runner modes cannot be sandboxed (they
+    // fork per test file), and a non-node runtime never receives the sandbox at all, so an unsandboxed
+    // fallback for either would make every attestation that cites this run misleading. The refusal is
+    // classified as "nothing ran" — the VERIFICATION_NOT_APPROVED case in the lattice.
+    const validation = (0, sandbox_1.validateVerificationCommand)(cmd);
+    if (!validation.valid) {
+        const refusal = 'not ok 1 - ' + String(validation.reason);
         const parsed = parseTestOutput(refusal, 1, {
             redact: options.redact,
             rawOutputPath: persistRaw(refusal, options.rawLogPath),
@@ -528,18 +530,6 @@ function runSandboxVerification(verificationCommand, workspaceDir = process.cwd(
             output: refusal,
             exitCode: 1,
         };
-    }
-    // The runtime is part of the boundary, not an implementation detail: only a node process receives the
-    // permission flags, the preflight and the scrubbed environment. Anything else would be attested as
-    // isolated while running bare.
-    if (!(0, sandbox_1.isDirectNodeCommand)(cmd)) {
-        const refusal = 'not ok 1 - ' + (0, sandbox_1.runtimeRefusalMessage)(cmd);
-        const parsed = parseTestOutput(refusal, 1, {
-            redact: options.redact,
-            rawOutputPath: persistRaw(refusal, options.rawLogPath),
-            workspaceRoot: workspaceDir,
-        });
-        return { ...parsed, output: refusal, exitCode: 1 };
     }
     let output = '';
     let spawnError = null;

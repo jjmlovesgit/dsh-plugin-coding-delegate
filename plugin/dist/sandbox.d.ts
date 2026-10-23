@@ -9,15 +9,28 @@
 export declare const SANDBOX_PREFLIGHT_SOURCE = "'use strict';\nObject.freeze(Object.prototype);\nObject.freeze(Array.prototype);\nObject.freeze(Function.prototype);\nconst deny = () => {\n  const error = new Error('ERR_SANDBOX_NETWORK_DENIED: network access is forbidden during verification');\n  error.code = 'ERR_SANDBOX_NETWORK_DENIED';\n  throw error;\n};\nconst net = require('node:net');\nnet.Socket.prototype.connect = deny;\nif (typeof globalThis.fetch === 'function') {\n  globalThis.fetch = () => Promise.reject(Object.assign(\n    new Error('ERR_SANDBOX_NETWORK_DENIED: fetch disabled'),\n    { code: 'ERR_SANDBOX_NETWORK_DENIED' }\n  ));\n}\ndelete globalThis.WebSocket;\nconst ALLOWED = new Set(['PATH', 'SYSTEMROOT', 'SYSTEMDRIVE', 'NODE_ENV', 'TEMP', 'TMP', 'NODE_OPTIONS', 'PATHEXT', 'COMSPEC', 'WINDIR']);\nfor (const key of Object.keys(process.env)) {\n  if (!ALLOWED.has(key.toUpperCase())) delete process.env[key];\n}\n";
 export declare function isRunnerStyleCommand(command: string): boolean;
 export declare const RUNNER_REFUSAL_CODE = "REFUSED_UNSANDBOXED_RUNNER";
-/**
- * The runtime is allowed only if the command's first token is `node` (optionally `node.exe`, optionally
- * preceded by a path). Anything else is refused, because none of the sandbox travels with it:
- * `NODE_OPTIONS` is ignored by python, sh and every other interpreter, so a `python -c ...` verification
- * would run with the operator's full rights while the attestation claimed isolation. A boundary that can
- * be sidestepped by changing the interpreter is a recommendation, not a boundary.
- */
-export declare function isDirectNodeCommand(command: string): boolean;
 export declare const RUNTIME_REFUSAL_CODE = "REFUSED_UNSANDBOXED_RUNTIME";
+export declare const EMPTY_REFUSAL_CODE = "REFUSED_EMPTY_COMMAND";
+export interface CommandValidationResult {
+    valid: boolean;
+    reason?: string;
+}
+/**
+ * The runtime gate. Everything below is refused before a shim is written or a process spawned.
+ *
+ * THE RUNTIME IS PART OF THE BOUNDARY, not an implementation detail: `NODE_OPTIONS`, the permission
+ * flags and the preload reach node processes only. A `python -c …` or `sh -c …` verification would run
+ * with the operator's full rights while the attestation claimed isolation, so it is refused rather than
+ * run. A boundary that can be sidestepped by changing the interpreter is a recommendation.
+ *
+ * THE RUNNER IS REFUSED for a different reason: `node --test` forks one child per test file, and the
+ * permission model blocks that fork. Granting `--allow-child-process` would reopen the execution vector
+ * the sandbox closes, so the direct form is required instead.
+ *
+ * Path forms are accepted deliberately, including a quoted Windows path with spaces — the plugin runs
+ * on Windows, where the default install path is exactly that.
+ */
+export declare function validateVerificationCommand(command: string): CommandValidationResult;
 export declare function runtimeRefusalMessage(command: string): string;
 /** The refusal text, written to be enough to fix the command without reading source. */
 export declare function runnerRefusalMessage(command: string): string;

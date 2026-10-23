@@ -85,7 +85,7 @@ describe('attestation anchor: HEAD is frozen before the verification commands ru
     // non-node verification commands and forbids child_process inside them, so the command cannot run
     // git. It does not need to — moving HEAD is the behaviour under test, and writing .git/HEAD to an
     // existing commit moves it just as a commit would.
-    git(dir, ['commit', '-q', '--allow-empty', '-m', 'drift-target'])
+    git(dir, ['-c', 'user.email=drift@example.test', '-c', 'user.name=Drift Test', 'commit', '-q', '--allow-empty', '-m', 'drift-target'])
     const driftTarget = git(dir, ['rev-parse', 'HEAD']).trim()
     git(dir, ['reset', '-q', '--hard', before])
 

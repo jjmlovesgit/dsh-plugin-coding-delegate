@@ -3,7 +3,7 @@ import * as path from 'path'
 import * as child_process from 'child_process'
 import { resolveDataDir } from './logging'
 import { scanDLP } from './index'
-import { isDirectNodeCommand, isRunnerStyleCommand, runnerRefusalMessage, runtimeRefusalMessage, sandboxEnv } from './sandbox'
+import { sandboxEnv, validateVerificationCommand } from './sandbox'
 
 /**
  * A failure described without source: enough to diagnose, not enough to leak code.
@@ -559,11 +559,13 @@ export function runSandboxVerification(
 
   const cmd = verificationCommand.trim()
 
-  // Fail closed BEFORE spawning. A runner command cannot be sandboxed (it forks per test file), and an
-  // unsandboxed fallback would make every attestation that cites this run misleading. The refusal is
-  // classified as "nothing ran", which is the VERIFICATION_NOT_APPROVED case in the lattice.
-  if (isRunnerStyleCommand(cmd)) {
-    const refusal = 'not ok 1 - ' + runnerRefusalMessage(cmd)
+  // Fail closed BEFORE a shim is written or a process spawned. Runner modes cannot be sandboxed (they
+  // fork per test file), and a non-node runtime never receives the sandbox at all, so an unsandboxed
+  // fallback for either would make every attestation that cites this run misleading. The refusal is
+  // classified as "nothing ran" — the VERIFICATION_NOT_APPROVED case in the lattice.
+  const validation = validateVerificationCommand(cmd)
+  if (!validation.valid) {
+    const refusal = 'not ok 1 - ' + String(validation.reason)
     const parsed = parseTestOutput(refusal, 1, {
       redact: options.redact,
       rawOutputPath: persistRaw(refusal, options.rawLogPath),
@@ -576,19 +578,6 @@ export function runSandboxVerification(
       output: refusal,
       exitCode: 1,
     }
-  }
-
-  // The runtime is part of the boundary, not an implementation detail: only a node process receives the
-  // permission flags, the preflight and the scrubbed environment. Anything else would be attested as
-  // isolated while running bare.
-  if (!isDirectNodeCommand(cmd)) {
-    const refusal = 'not ok 1 - ' + runtimeRefusalMessage(cmd)
-    const parsed = parseTestOutput(refusal, 1, {
-      redact: options.redact,
-      rawOutputPath: persistRaw(refusal, options.rawLogPath),
-      workspaceRoot: workspaceDir,
-    })
-    return { ...parsed, output: refusal, exitCode: 1 }
   }
 
   let output = ''
