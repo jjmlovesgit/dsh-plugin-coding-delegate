@@ -779,6 +779,28 @@ Legitimate contracts still pass at no measurable cost: `currency` 91 → 89 ms, 
    environment scrub — deleting it would let a grandchild `node` process start **unsandboxed**, which is
    an escape rather than a scrub. The preflight keeps it for exactly that reason.
 
+**Implemented: the sandbox is on, and runner-style commands are refused.** `plugin/src/sandbox.ts` writes
+the preflight per call and `runSandboxVerification` injects `--permission`, workspace-scoped
+`--allow-fs-read/--allow-fs-write` and `--require` through `NODE_OPTIONS`. A command matching
+`node --test` (or `node -t`) is refused **before spawning**, with `REFUSED_UNSANDBOXED_RUNNER`, the reason,
+and the direct form of the operator's own command:
+
+```
+old: node --test tests/contracts/foo.contract.cjs
+new: node tests/contracts/foo.contract.cjs
+```
+
+**Why refuse rather than warn.** An unsandboxed fallback would make every attestation that cites the run
+misleading: the note would say the work was verified, and the reader would assume it was verified inside
+the boundary. An operator running many delegations will not read a yellow line. The refusal is classified
+as "nothing ran" — the `VERIFICATION_NOT_APPROVED` case — so it indicts the specification, not the
+worker's implementation.
+
+The refusal text is returned as the run's `output` in full, because `parseTestOutput` summarises and the
+remediation is the only part an operator can act on. Four tests hold it: the refusal and its remediation,
+direct execution passing and failing with the right exit codes, `child_process` blocked, and `fetch`
+blocked — the last two asserted from inside the sandbox rather than trusted.
+
 ### Open
 
 - **Reserved paths: none.** `src/core/primitives/**` and `src/core/protocol/**` were realised, and

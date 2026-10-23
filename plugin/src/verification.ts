@@ -3,6 +3,7 @@ import * as path from 'path'
 import * as child_process from 'child_process'
 import { resolveDataDir } from './logging'
 import { scanDLP } from './index'
+import { isRunnerStyleCommand, runnerRefusalMessage, sandboxEnv } from './sandbox'
 
 /**
  * A failure described without source: enough to diagnose, not enough to leak code.
@@ -478,7 +479,8 @@ export function evaluateVerificationPolicy(
 function captureCommandOutput(
   cmd: string,
   workspaceDir: string,
-  timeoutMs: number
+  timeoutMs: number,
+  env?: NodeJS.ProcessEnv
 ): { output: string; exitCode: number; spawnError: any } {
   const dir = resolveDataDir()
   const unique = process.pid + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8)
@@ -497,6 +499,9 @@ function captureCommandOutput(
       cwd: workspaceDir,
       timeout: timeoutMs,
       stdio: ['ignore', outFd, errFd] as any,
+      // The sandbox travels through NODE_OPTIONS so a shell-invoked command is covered without
+      // rewriting it; `undefined` keeps the previous behaviour for any caller that has no environment.
+      ...(env ? { env } : {}),
     })
   } catch (err) {
     result = { error: err, status: null }
@@ -553,15 +558,42 @@ export function runSandboxVerification(
   }
 
   const cmd = verificationCommand.trim()
+
+  // Fail closed BEFORE spawning. A runner command cannot be sandboxed (it forks per test file), and an
+  // unsandboxed fallback would make every attestation that cites this run misleading. The refusal is
+  // classified as "nothing ran", which is the VERIFICATION_NOT_APPROVED case in the lattice.
+  if (isRunnerStyleCommand(cmd)) {
+    const refusal = 'not ok 1 - ' + runnerRefusalMessage(cmd)
+    const parsed = parseTestOutput(refusal, 1, {
+      redact: options.redact,
+      rawOutputPath: persistRaw(refusal, options.rawLogPath),
+      workspaceRoot: workspaceDir,
+    })
+    return {
+      ...parsed,
+      // The parsed form is a summary; an operator needs the whole refusal, because the remediation is
+      // the only part of it they can act on.
+      output: refusal,
+      exitCode: 1,
+    }
+  }
+
   let output = ''
   let spawnError: any = null
   let exitCode = 0
 
-  const captured = captureCommandOutput(
-    cmd,
-    workspaceDir,
-    resolveVerificationTimeoutMs(options.timeoutMs)
-  )
+  const sandbox = sandboxEnv(workspaceDir)
+  let captured
+  try {
+    captured = captureCommandOutput(
+      cmd,
+      workspaceDir,
+      resolveVerificationTimeoutMs(options.timeoutMs),
+      sandbox.env
+    )
+  } finally {
+    sandbox.cleanup()
+  }
   output = captured.output
   spawnError = captured.spawnError
   exitCode = captured.exitCode
