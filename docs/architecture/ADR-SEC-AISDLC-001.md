@@ -814,17 +814,23 @@ assets this boundary defends are the identity and key material in the home direc
 integrity, and ambient credentials; none of them live in temp. Repository and home stay unreadable, and
 execution stays denied.
 
-**The command must also be a single invocation.** Validation happens on a string that is spawned with
-`shell: true`, so a prefix check alone would pass `node test.cjs && python exfiltrate.py` and hand the
-second half to the shell unsandboxed. Shell operators outside quotes (`&&`, `||`, `;`, `|`, `>`, `<`,
-backticks, `$(`) are refused with `REFUSED_SHELL_OPERATORS`, and an **unbalanced quote is refused too**:
-with the closing quote missing, what looks like quoted text is not, and guessing is how a bypass gets in.
+**The command is tokenised and executed without a shell.** `tokenizeCommand` parses the string into
+argv, and `runSandboxVerification` calls `spawnSync(binary, args, { shell: false })`. CreateProcessW /
+execve receives a discrete argument vector, so `%VAR%` expansion, `^` escaping, redirection and chaining
+are *impossible* rather than merely rejected. The operator refusal remains as a second lock: a command
+shaped like a chain is a sign its author expected one, and running the first half silently would teach
+them the wrong lesson.
 
-The scan tracks quotes because `;` inside `node -e "a;b"` is a JavaScript separator, not a shell
-operator — a flat substring match refused the repository's own flaky-detection contracts, which are
-perfectly safe. Measured: 9 oracle failures, then zero once the scan became quote-aware.
+Two parser decisions are load-bearing, and both were found by a test failing:
 
-The resulting order is: empty → shell operators → runner mode → runtime → spawn.
+- **Backslash is not a general escape.** It is consumed only before `"` or another `\`. Otherwise
+  `"C:\Program Files\nodejs\node.exe"` becomes `C:Program Filesnodejsnode.exe` — the default install
+  path on this platform — and every verification on it fails to start.
+- **Unbalanced quotes fail closed.** With a closing quote missing, what looks quoted is not, and
+  guessing where it ends is how a chained command slips through.
+
+The argv boundary is asserted rather than assumed: a contract that checks `process.argv.slice(2)`
+receives `['a b', 'c;d', 'e&f']` unchanged, where a shell would have split or interpreted all three.
 
 ### Open
 

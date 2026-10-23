@@ -444,7 +444,7 @@ function evaluateVerificationPolicy(command, policy = exports.DEFAULT_VERIFICATI
  * as an ordinary child process for everyone. The fallback has since been removed outright; see
  * the refusal in `runSandboxVerification`, which is now the only answer to a spawn denial.
  */
-function captureCommandOutput(cmd, workspaceDir, timeoutMs, env) {
+function captureCommandOutput(binary, args, workspaceDir, timeoutMs, env) {
     const dir = (0, logging_1.resolveDataDir)();
     const unique = process.pid + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
     const outPath = path.join(dir, 'verify-' + unique + '.stdout');
@@ -456,13 +456,15 @@ function captureCommandOutput(cmd, workspaceDir, timeoutMs, env) {
         fs.mkdirSync(dir, { recursive: true });
         outFd = fs.openSync(outPath, 'w');
         errFd = fs.openSync(errPath, 'w');
-        result = child_process.spawnSync(cmd, {
-            shell: true,
+        result = child_process.spawnSync(binary, args, {
+            // NO SHELL. The binary and its argv are handed to CreateProcessW/execve directly, so cmd.exe
+            // cannot expand %VAR%, interpret ^, or chain a second command that the sandbox never sees.
+            shell: false,
             cwd: workspaceDir,
             timeout: timeoutMs,
             stdio: ['ignore', outFd, errFd],
-            // The sandbox travels through NODE_OPTIONS so a shell-invoked command is covered without
-            // rewriting it; `undefined` keeps the previous behaviour for any caller that has no environment.
+            // The sandbox travels through NODE_OPTIONS, and `undefined` keeps the previous behaviour for any
+            // caller that has no environment.
             ...(env ? { env } : {}),
         });
     }
@@ -515,7 +517,7 @@ function runSandboxVerification(verificationCommand, workspaceDir = process.cwd(
     // fork per test file), and a non-node runtime never receives the sandbox at all, so an unsandboxed
     // fallback for either would make every attestation that cites this run misleading. The refusal is
     // classified as "nothing ran" — the VERIFICATION_NOT_APPROVED case in the lattice.
-    const validation = (0, sandbox_1.validateVerificationCommand)(cmd);
+    const validation = (0, sandbox_1.resolveVerificationInvocation)(cmd);
     if (!validation.valid) {
         const refusal = 'not ok 1 - ' + String(validation.reason);
         const parsed = parseTestOutput(refusal, 1, {
@@ -537,7 +539,7 @@ function runSandboxVerification(verificationCommand, workspaceDir = process.cwd(
     const sandbox = (0, sandbox_1.sandboxEnv)(workspaceDir);
     let captured;
     try {
-        captured = captureCommandOutput(cmd, workspaceDir, resolveVerificationTimeoutMs(options.timeoutMs), sandbox.env);
+        captured = captureCommandOutput(validation.binary, validation.args, workspaceDir, resolveVerificationTimeoutMs(options.timeoutMs), sandbox.env);
     }
     finally {
         sandbox.cleanup();

@@ -3,7 +3,7 @@ import * as path from 'path'
 import * as child_process from 'child_process'
 import { resolveDataDir } from './logging'
 import { scanDLP } from './index'
-import { sandboxEnv, validateVerificationCommand } from './sandbox'
+import { resolveVerificationInvocation, sandboxEnv } from './sandbox'
 
 /**
  * A failure described without source: enough to diagnose, not enough to leak code.
@@ -477,7 +477,8 @@ export function evaluateVerificationPolicy(
  * the refusal in `runSandboxVerification`, which is now the only answer to a spawn denial.
  */
 function captureCommandOutput(
-  cmd: string,
+  binary: string,
+  args: string[],
   workspaceDir: string,
   timeoutMs: number,
   env?: NodeJS.ProcessEnv
@@ -494,13 +495,15 @@ function captureCommandOutput(
     fs.mkdirSync(dir, { recursive: true })
     outFd = fs.openSync(outPath, 'w')
     errFd = fs.openSync(errPath, 'w')
-    result = child_process.spawnSync(cmd, {
-      shell: true,
+    result = child_process.spawnSync(binary, args, {
+      // NO SHELL. The binary and its argv are handed to CreateProcessW/execve directly, so cmd.exe
+      // cannot expand %VAR%, interpret ^, or chain a second command that the sandbox never sees.
+      shell: false,
       cwd: workspaceDir,
       timeout: timeoutMs,
       stdio: ['ignore', outFd, errFd] as any,
-      // The sandbox travels through NODE_OPTIONS so a shell-invoked command is covered without
-      // rewriting it; `undefined` keeps the previous behaviour for any caller that has no environment.
+      // The sandbox travels through NODE_OPTIONS, and `undefined` keeps the previous behaviour for any
+      // caller that has no environment.
       ...(env ? { env } : {}),
     })
   } catch (err) {
@@ -563,7 +566,7 @@ export function runSandboxVerification(
   // fork per test file), and a non-node runtime never receives the sandbox at all, so an unsandboxed
   // fallback for either would make every attestation that cites this run misleading. The refusal is
   // classified as "nothing ran" — the VERIFICATION_NOT_APPROVED case in the lattice.
-  const validation = validateVerificationCommand(cmd)
+  const validation = resolveVerificationInvocation(cmd)
   if (!validation.valid) {
     const refusal = 'not ok 1 - ' + String(validation.reason)
     const parsed = parseTestOutput(refusal, 1, {
@@ -588,7 +591,8 @@ export function runSandboxVerification(
   let captured
   try {
     captured = captureCommandOutput(
-      cmd,
+      validation.binary,
+      validation.args,
       workspaceDir,
       resolveVerificationTimeoutMs(options.timeoutMs),
       sandbox.env

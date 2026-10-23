@@ -12,26 +12,41 @@ export declare const RUNNER_REFUSAL_CODE = "REFUSED_UNSANDBOXED_RUNNER";
 export declare const RUNTIME_REFUSAL_CODE = "REFUSED_UNSANDBOXED_RUNTIME";
 export declare const EMPTY_REFUSAL_CODE = "REFUSED_EMPTY_COMMAND";
 export declare const SHELL_REFUSAL_CODE = "REFUSED_SHELL_OPERATORS";
-export interface CommandValidationResult {
-    valid: boolean;
-    reason?: string;
+export interface TokenizeResult {
+    tokens: string[];
+    error?: string;
 }
 /**
- * The runtime gate. Everything below is refused before a shim is written or a process spawned.
+ * Tokenize a command into argv WITHOUT a shell.
  *
- * THE RUNTIME IS PART OF THE BOUNDARY, not an implementation detail: `NODE_OPTIONS`, the permission
- * flags and the preload reach node processes only. A `python -c …` or `sh -c …` verification would run
- * with the operator's full rights while the attestation claimed isolation, so it is refused rather than
- * run. A boundary that can be sidestepped by changing the interpreter is a recommendation.
+ * BACKSLASH IS NOT A GENERAL ESCAPE HERE, and that is a Windows-first decision: `"C:\Program
+ * Files\nodejs\node.exe"` is the default install path, and treating `\P` as an escape turns it into
+ * `C:Program Filesnodejsnode.exe`. A backslash is consumed only when it precedes a double quote or
+ * another backslash, which handles `console.log(\"hi\")` while leaving every other path intact.
  *
- * THE RUNNER IS REFUSED for a different reason: `node --test` forks one child per test file, and the
- * permission model blocks that fork. Granting `--allow-child-process` would reopen the execution vector
- * the sandbox closes, so the direct form is required instead.
- *
- * Path forms are accepted deliberately, including a quoted Windows path with spaces — the plugin runs
- * on Windows, where the default install path is exactly that.
+ * Unbalanced quotes fail closed: with a closing quote missing, what looks like quoted text is not, and
+ * guessing where it ends is how a chained command slips through.
  */
-export declare function validateVerificationCommand(command: string): CommandValidationResult;
+export declare function tokenizeCommand(command: string): TokenizeResult;
+export declare const UNBALANCED_REFUSAL_CODE = "REFUSED_UNBALANCED_QUOTES";
+export interface ValidatedInvocation {
+    valid: true;
+    binary: string;
+    args: string[];
+}
+export interface RefusedInvocation {
+    valid: false;
+    reason: string;
+}
+export type InvocationPlan = ValidatedInvocation | RefusedInvocation;
+/**
+ * Decide what will be executed, from the TOKENS rather than from a regex over the raw string.
+ *
+ * `shell: false` already makes chaining impossible, so the operator refusal is a second lock on the
+ * same door: a command shaped like a chain is a sign its author expected one, and running the first
+ * half silently would teach them the wrong lesson.
+ */
+export declare function resolveVerificationInvocation(command: string): InvocationPlan;
 export declare function runtimeRefusalMessage(command: string): string;
 /** The refusal text, written to be enough to fix the command without reading source. */
 export declare function runnerRefusalMessage(command: string): string;

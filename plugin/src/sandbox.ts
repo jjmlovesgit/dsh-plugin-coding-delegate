@@ -63,95 +63,130 @@ export const RUNTIME_REFUSAL_CODE = 'REFUSED_UNSANDBOXED_RUNTIME'
 export const EMPTY_REFUSAL_CODE = 'REFUSED_EMPTY_COMMAND'
 export const SHELL_REFUSAL_CODE = 'REFUSED_SHELL_OPERATORS'
 
-/**
- * Shell operators OUTSIDE quotes, refused because the command is spawned with `shell: true`.
- *
- * A prefix check alone validates only the first command: `node test.cjs && python exfiltrate.py`
- * satisfies "starts with node" and hands the second half to the shell with no sandbox at all.
- *
- * The scan tracks quotes because `;` inside `node -e "a;b"` is a JavaScript separator, not a shell
- * operator — a flat substring match refused the repository's own flaky-detection contracts, which are
- * perfectly safe. An UNBALANCED quote is refused rather than tolerated: with the closing quote missing,
- * what looks like quoted text is not, and guessing there is how a bypass gets through.
- */
-function hasUnquotedShellMetacharacters(command: string): boolean {
-  let quote: string | null = null
-  for (let index = 0; index < command.length; index += 1) {
-    const character = command[index]
-    if (quote !== null) {
-      if (character === quote) quote = null
-      continue
-    }
-    if (character === '"' || character === "'") {
-      quote = character
-      continue
-    }
-    if (character === '&' || character === '|' || character === ';' || character === '>' || character === '<' || character === '`') {
-      return true
-    }
-    if (character === '$' && command[index + 1] === '(') return true
-  }
-  return quote !== null
-}
 
-export interface CommandValidationResult {
-  valid: boolean
-  reason?: string
+
+export interface TokenizeResult {
+  tokens: string[]
+  error?: string
 }
 
 /**
- * The runtime gate. Everything below is refused before a shim is written or a process spawned.
+ * Tokenize a command into argv WITHOUT a shell.
  *
- * THE RUNTIME IS PART OF THE BOUNDARY, not an implementation detail: `NODE_OPTIONS`, the permission
- * flags and the preload reach node processes only. A `python -c …` or `sh -c …` verification would run
- * with the operator's full rights while the attestation claimed isolation, so it is refused rather than
- * run. A boundary that can be sidestepped by changing the interpreter is a recommendation.
+ * BACKSLASH IS NOT A GENERAL ESCAPE HERE, and that is a Windows-first decision: `"C:\Program
+ * Files\nodejs\node.exe"` is the default install path, and treating `\P` as an escape turns it into
+ * `C:Program Filesnodejsnode.exe`. A backslash is consumed only when it precedes a double quote or
+ * another backslash, which handles `console.log(\"hi\")` while leaving every other path intact.
  *
- * THE RUNNER IS REFUSED for a different reason: `node --test` forks one child per test file, and the
- * permission model blocks that fork. Granting `--allow-child-process` would reopen the execution vector
- * the sandbox closes, so the direct form is required instead.
- *
- * Path forms are accepted deliberately, including a quoted Windows path with spaces — the plugin runs
- * on Windows, where the default install path is exactly that.
+ * Unbalanced quotes fail closed: with a closing quote missing, what looks like quoted text is not, and
+ * guessing where it ends is how a chained command slips through.
  */
-export function validateVerificationCommand(command: string): CommandValidationResult {
+export function tokenizeCommand(command: string): TokenizeResult {
   const trimmed = String(command || '').trim()
-  if (!trimmed) {
+  if (!trimmed) return { tokens: [] }
+
+  const tokens: string[] = []
+  let current = ''
+  let inDouble = false
+  let inSingle = false
+
+  for (let index = 0; index < trimmed.length; index += 1) {
+    const character = trimmed[index]
+
+    if (character === '\\' && !inSingle) {
+      const next = trimmed[index + 1]
+      if (next === '"' || next === '\\') {
+        current += next
+        index += 1
+        continue
+      }
+      current += character
+      continue
+    }
+
+    if (character === '"' && !inSingle) {
+      inDouble = !inDouble
+      continue
+    }
+    if (character === "'" && !inDouble) {
+      inSingle = !inSingle
+      continue
+    }
+    if (!inDouble && !inSingle && /\s/.test(character)) {
+      if (current.length > 0) {
+        tokens.push(current)
+        current = ''
+      }
+      continue
+    }
+    current += character
+  }
+
+  if (inDouble || inSingle) {
+    return { tokens: [], error: UNBALANCED_REFUSAL_CODE + ': unbalanced quotes in the verification command.' }
+  }
+  if (current.length > 0) tokens.push(current)
+  return { tokens }
+}
+
+export const UNBALANCED_REFUSAL_CODE = 'REFUSED_UNBALANCED_QUOTES'
+
+export interface ValidatedInvocation {
+  valid: true
+  binary: string
+  args: string[]
+}
+
+export interface RefusedInvocation {
+  valid: false
+  reason: string
+}
+
+export type InvocationPlan = ValidatedInvocation | RefusedInvocation
+
+const SHELL_OPERATOR_TOKENS = new Set(['&&', '||', ';', '|', '&', '>', '<', '>>', '2>', '&>', '$(', '`'])
+
+/**
+ * Decide what will be executed, from the TOKENS rather than from a regex over the raw string.
+ *
+ * `shell: false` already makes chaining impossible, so the operator refusal is a second lock on the
+ * same door: a command shaped like a chain is a sign its author expected one, and running the first
+ * half silently would teach them the wrong lesson.
+ */
+export function resolveVerificationInvocation(command: string): InvocationPlan {
+  const { tokens, error } = tokenizeCommand(command)
+  if (error) return { valid: false, reason: error }
+  if (tokens.length === 0) {
     return { valid: false, reason: EMPTY_REFUSAL_CODE + ': verification command cannot be empty.' }
   }
 
-  if (hasUnquotedShellMetacharacters(trimmed)) {
-    return {
-      valid: false,
-      reason:
-        SHELL_REFUSAL_CODE +
-        ': verification commands must be a single direct invocation. Shell operators (&&, ||, ;, |, >, ' +
-        '<, backticks, $()) are forbidden, because the command is spawned through a shell and only the ' +
-        'first command would be sandboxed.\n' +
-        '\nRemediation: put the assertions in the contract file itself and run it directly:\n' +
-        '  refused: ' + trimmed + '\n' +
-        '  allowed: node <your-contract>.cjs',
+  for (const token of tokens) {
+    if (SHELL_OPERATOR_TOKENS.has(token) || token.includes('`') || token.includes('$(')) {
+      return {
+        valid: false,
+        reason:
+          SHELL_REFUSAL_CODE + ": shell operator '" + token + "' is forbidden. Verification must be a " +
+          'single direct invocation; put the assertions in the contract file.',
+      }
     }
   }
 
-  if (/\bnode(?:\.exe)?\s+.*?(?:--test\b|-t\b)/.test(trimmed)) {
-    return { valid: false, reason: runnerRefusalMessage(trimmed) }
+  const binary = tokens[0]
+  if (!/(?:^|[/\\])node(?:\.exe)?$/i.test(binary)) {
+    return { valid: false, reason: runtimeRefusalMessage(command) }
   }
 
-  const binaryMatch = trimmed.match(/^(?:(?:"([^"]+)")|(\S+))/)
-  const binaryToken = binaryMatch ? binaryMatch[1] || binaryMatch[2] : ''
-  // A quoted path arrives as one token; an UNQUOTED Windows path with spaces arrives split, and the
-  // token comparison can only see `C:\Program`. That form is accepted explicitly, because the plugin
-  // runs on Windows where the default install path is exactly that, and a shell that cannot parse it
-  // will fail at spawn rather than run something unexpected.
-  const isNodeBinary =
-    /(?:^|[/\\])node(?:\.exe)?$/i.test(binaryToken) ||
-    /^[A-Za-z]:\\[^"]*[\\/]node(?:\.exe)?\s/i.test(trimmed)
-  if (!isNodeBinary) {
-    return { valid: false, reason: runtimeRefusalMessage(trimmed) }
+  const args = tokens.slice(1)
+  for (const argument of args) {
+    if (argument === '--test' || argument === '-t' || argument.startsWith('--test=')) {
+      return { valid: false, reason: runnerRefusalMessage(command) }
+    }
+  }
+  if (args.length === 0) {
+    return { valid: false, reason: EMPTY_REFUSAL_CODE + ': a node invocation needs a script or -e.' }
   }
 
-  return { valid: true }
+  return { valid: true, binary, args }
 }
 
 export function runtimeRefusalMessage(command: string): string {

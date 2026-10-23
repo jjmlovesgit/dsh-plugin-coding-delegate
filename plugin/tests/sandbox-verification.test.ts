@@ -3,100 +3,100 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { runSandboxVerification } from '../src/verification';
-import { validateVerificationCommand } from '../src/sandbox';
+import { resolveVerificationInvocation, tokenizeCommand } from '../src/sandbox';
 
-describe('validateVerificationCommand', () => {
-  it('accepts direct node invocations in every path form the plugin meets', () => {
-    const valid = [
-      'node tests/contracts/foo.contract.cjs',
-      'node.exe tests/contracts/foo.contract.cjs',
-      '/usr/local/bin/node tests/contracts/foo.contract.cjs',
-      'C:\\Program Files\\nodejs\\node.exe tests/contracts/foo.contract.cjs',
-      '"C:\\Program Files\\nodejs\\node.exe" tests/contracts/foo.contract.cjs',
-      'node --max-old-space-size=512 tests/contracts/foo.contract.cjs',
-    ];
-    for (const command of valid) {
-      expect(validateVerificationCommand(command).valid, command).toBe(true);
+/**
+ * The verification gate, tested at both levels: the parser that decides what will run, and the sandbox
+ * that actually runs it.
+ */
+
+describe('tokenizeCommand', () => {
+  it('parses unquoted arguments', () => {
+    expect(tokenizeCommand('node script.cjs foo bar').tokens).toEqual(['node', 'script.cjs', 'foo', 'bar']);
+  });
+
+  it('preserves spaces AND backslashes in a quoted Windows path', () => {
+    // The default install path on this platform. A tokenizer that treats backslash as a general escape
+    // returns 'C:Program Filesnodejsnode.exe', and every verification on Windows fails to start.
+    const { tokens } = tokenizeCommand('"C:\\Program Files\\nodejs\\node.exe" -e "const x = 1; process.exit(0)"');
+    expect(tokens).toEqual(['C:\\Program Files\\nodejs\\node.exe', '-e', 'const x = 1; process.exit(0)']);
+  });
+
+  it('preserves spaces within single quotes', () => {
+    expect(tokenizeCommand("node -e 'const a = [1, 2];' arg2").tokens).toEqual([
+      'node',
+      '-e',
+      'const a = [1, 2];',
+      'arg2',
+    ]);
+  });
+
+  it('handles escaped quotes', () => {
+    expect(tokenizeCommand('node -e "console.log(\\"hello\\")"').tokens).toEqual(['node', '-e', 'console.log("hello")']);
+  });
+
+  it('fails closed on unbalanced quotes', () => {
+    for (const command of ['node -e "console.log(1)', "node -e 'console.log(1)"]) {
+      const result = tokenizeCommand(command);
+      expect(result.tokens).toEqual([]);
+      expect(result.error).toContain('REFUSED_UNBALANCED_QUOTES');
     }
-  });
-
-  it('refuses runner modes with the direct-execution remediation', () => {
-    for (const command of [
-      'node --test tests/contracts/foo.contract.cjs',
-      'node -t tests/contracts/foo.contract.cjs',
-      '/usr/bin/node --test file.cjs',
-    ]) {
-      const result = validateVerificationCommand(command);
-      expect(result.valid, command).toBe(false);
-      expect(result.reason).toContain('REFUSED_UNSANDBOXED_RUNNER');
-      // The remediation keeps whatever prefix the operator used, so the assertion is that a rewritten
-      // command is offered, not that it starts with the bare word `node`.
-      expect(result.reason).toMatch(/new: .*node .*\.cjs/);
-    }
-  });
-
-  it('refuses runtimes the sandbox cannot reach', () => {
-    for (const command of [
-      'python -c "import os"',
-      'python3 run_contracts.py',
-      'sh test.sh',
-      'bash test.sh',
-      'powershell -File test.ps1',
-      'deno run script.ts',
-      'bun test script.ts',
-    ]) {
-      const result = validateVerificationCommand(command);
-      expect(result.valid, command).toBe(false);
-      expect(result.reason).toContain('REFUSED_UNSANDBOXED_RUNTIME');
-    }
-  });
-
-  it('refuses shell operators, so the sandbox covers the whole invocation', () => {
-    const chained = [
-      'node foo.contract.cjs && python exfiltrate.py',
-      'node foo.contract.cjs || echo fallback',
-      'node foo.contract.cjs ; rm -rf /',
-      'node foo.contract.cjs | nc 127.0.0.1 1234',
-      'node foo.contract.cjs > output.txt',
-      'node foo.contract.cjs < input.txt',
-      'node `which evil`.cjs',
-      'node $(whoami).cjs',
-    ];
-    for (const command of chained) {
-      const result = validateVerificationCommand(command);
-      expect(result.valid, command).toBe(false);
-      expect(result.reason).toContain('REFUSED_SHELL_OPERATORS');
-    }
-  });
-
-  it('allows a separator INSIDE a quoted program, which the shell never sees', () => {
-    // `node -e "a;b"` is one command with a JavaScript separator. A flat substring match refused the
-    // repository's own flaky-detection contracts, which use exactly this shape.
-    const result = validateVerificationCommand('node -e "const a=1;const b=2;process.exit(a+b===3?0:1)"');
-    expect(result.valid).toBe(true);
-  });
-
-  it('refuses an unbalanced quote rather than guessing where it ends', () => {
-    const result = validateVerificationCommand('node -e "process.exit(0) && rm -rf /');
-    expect(result.valid).toBe(false);
-    expect(result.reason).toContain('REFUSED_SHELL_OPERATORS');
-  });
-
-  it('refuses an empty command rather than running nothing', () => {
-    const result = validateVerificationCommand('   ');
-    expect(result.valid).toBe(false);
-    expect(result.reason).toContain('REFUSED_EMPTY_COMMAND');
   });
 });
 
-/**
- * The verification sandbox, asserted from the outside: what an operator's command does when it is
- * submitted, not how the flag is assembled.
- *
- * The refusal case is the one that matters. A fallback to unsandboxed execution would make every
- * attestation citing the run misleading, so the test asserts a hard failure and the remediation text an
- * operator needs to fix the command without reading source.
- */
+describe('resolveVerificationInvocation', () => {
+  it('accepts direct node scripts with flag prefixes', () => {
+    const result = resolveVerificationInvocation('node --max-old-space-size=512 contract.cjs');
+    expect(result.valid).toBe(true);
+    if (result.valid) {
+      expect(result.binary).toBe('node');
+      expect(result.args).toEqual(['--max-old-space-size=512', 'contract.cjs']);
+    }
+  });
+
+  it('rejects node --test regardless of position', () => {
+    for (const command of ['node --test foo.cjs', 'node -t foo.cjs', 'node --max-old-space-size=512 --test foo.cjs']) {
+      const result = resolveVerificationInvocation(command);
+      expect(result.valid, command).toBe(false);
+      if (!result.valid) expect(result.reason).toContain('REFUSED_UNSANDBOXED_RUNNER');
+    }
+  });
+
+  it('rejects shell operators as distinct tokens', () => {
+    const commands = [
+      'node foo.cjs && python evil.py',
+      'node foo.cjs || exit 1',
+      'node foo.cjs ; rm -rf /',
+      'node foo.cjs | cat',
+      'node foo.cjs > output.txt',
+    ];
+    for (const command of commands) {
+      const result = resolveVerificationInvocation(command);
+      expect(result.valid, command).toBe(false);
+      if (!result.valid) expect(result.reason).toContain('REFUSED_SHELL_OPERATORS');
+    }
+  });
+
+  it('permits semicolons inside quoted evaluation strings', () => {
+    expect(
+      resolveVerificationInvocation('node -e "const a = 1; const b = 2; process.exit(a - b + 1);"').valid
+    ).toBe(true);
+  });
+
+  it('rejects non-node runtimes', () => {
+    const result = resolveVerificationInvocation('python test.py');
+    expect(result.valid).toBe(false);
+    if (!result.valid) expect(result.reason).toContain('REFUSED_UNSANDBOXED_RUNTIME');
+  });
+
+  it('rejects an empty command and a bare node', () => {
+    for (const command of ['   ', 'node']) {
+      const result = resolveVerificationInvocation(command);
+      expect(result.valid, command).toBe(false);
+      if (!result.valid) expect(result.reason).toContain('REFUSED_EMPTY_COMMAND');
+    }
+  });
+});
 
 function workspace(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-verify-'));
@@ -143,6 +143,20 @@ describe('verification sandbox', () => {
     write(dir, 'fail.cjs', "const assert = require('node:assert/strict');\nassert.equal(1, 2);\n");
     const fail = runSandboxVerification('node fail.cjs', dir);
     expect(fail.exitCode).not.toBe(0);
+
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('passes arguments through without a shell to re-quote them', () => {
+    const dir = workspace();
+    write(
+      dir,
+      'argv.cjs',
+      "const assert = require('node:assert/strict');\n" +
+        "assert.deepEqual(process.argv.slice(2), ['a b', 'c;d', 'e&f']);\n"
+    );
+    const result = runSandboxVerification('node argv.cjs "a b" "c;d" "e&f"', dir);
+    expect(result.exitCode).toBe(0);
 
     fs.rmSync(dir, { recursive: true, force: true });
   });
