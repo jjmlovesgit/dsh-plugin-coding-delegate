@@ -500,6 +500,38 @@ first: its 146-line `main` was split into `parseOptions` / `aggregate` / `buildS
 functions, and the refactor was checked against a synthetic trace rather than reviewed — JSON and
 human output are byte-identical before and after.
 
+### Operational verification: fault injection through the real path
+
+The retry shipped with unit tests and no end-to-end evidence: `delegate:unit` calls
+`tools/worker-build.mjs` directly, so `delegateWorker` — the function that owns the retry — had never
+spoken to a faulting endpoint. Measured 2026-10-23 against LM Studio through a local injector that
+returns a synthetic status on chosen attempts and proxies the rest:
+
+| case | fault injected | status | transportRetries | lastTransportError | wall time |
+| :--- | :--- | :--- | ---: | :--- | ---: |
+| 0 | none | SUCCESS | 0 | null | 391 ms |
+| 1 | 503 on attempt 1 | SUCCESS | 1 | null | 3,161 ms |
+| 1b | 503 on attempt 1, model warm | SUCCESS | 1 | null | 886 ms |
+| 2 | 400 on every attempt | ERROR | 0 | null | 22 ms |
+
+**The backoff is observed, not assumed.** Case 1b against case 0 is a delta of **495 ms** for one
+configured delay of 500 ms. Case 1's 3,161 ms is not the retry: the model had been idle for days and
+the second attempt paid a ~2.6 s load, which the warm re-run removed. A benchmark that mixes cold and
+warm runs attributes model loading to the plumbing — the same measurement error this record has
+recorded before.
+
+**`lastTransportError` is null on the 400, and that is the contract.** A 4xx is a protocol verdict that
+arrived, not a socket or network fault, so the field stays absent: its PRESENCE means the transport
+failed, not that the request did. Case 2's `ERROR` came from the non-ok branch with the status in
+`message`, in 22 ms — no retry budget was burned on a non-retriable status.
+
+**What this does and does not cover.** The run drove `delegateWorker` from the compiled `plugin/dist`,
+one line below `withTransportTelemetry`; that boundary's normalisation (missing field → 0, present →
+passed through) is covered by the plugin unit tests, and these numbers show the field produced and
+populated on the real path. The injector and probe were operator-local and are not committed: an E2E
+that needs a live model cannot run in CI, and a test that silently skips is worse than a recorded
+measurement.
+
 ### Open
 
 - **Reserved paths: none.** `src/core/primitives/**` and `src/core/protocol/**` were realised, and
