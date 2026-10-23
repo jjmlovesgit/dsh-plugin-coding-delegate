@@ -50,6 +50,7 @@ exports.estimateTokenCount = estimateTokenCount;
 const child_process = __importStar(require("child_process"));
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
+const task_lifecycle_1 = require("./vendor/protocol/task-lifecycle");
 const exponential_backoff_1 = require("./vendor/exponential-backoff");
 const profiles_1 = require("./profiles");
 const logging_1 = require("./logging");
@@ -388,27 +389,18 @@ function applySearchReplaceBlocks(content, blocks) {
  * what passed was no longer the contract.
  */
 function resolveDelegateStatus(input) {
-    // Tampering voids the run whatever else happened: what passed was no longer the contract.
-    if (input.contractViolations.length > 0)
-        return 'CONTRACT_MODIFIED';
-    // Nothing ran, so the outcome is unknown rather than a pass.
-    if (input.verificationGate)
-        return 'VERIFICATION_NOT_APPROVED';
-    // A contract that cannot agree with itself has not established anything about the content, so it
-    // outranks both the unit's own result and the project check. This is the clause that stops a
-    // non-deterministic oracle from being read as a pass on the run where the defect did not trigger.
-    if (input.flaky)
-        return 'FLAKY';
-    // The project check is evaluated BEFORE `unverified`, and that order is the point. `unverified` is an
-    // absence of evidence -- no command was supplied for the unit. A failed project check is positive
-    // evidence: something was proven, and what was proven is that the tree is broken. Reporting
-    // "unverified" for a unit that demonstrably broke the build would understate what is known.
-    if (input.coherenceFailed) {
-        return input.isSuccess ? 'INCOHERENT' : 'VERIFICATION_FAILED';
-    }
-    if (input.unverified)
-        return 'UNVERIFIED';
-    return input.isSuccess ? 'SUCCESS' : 'VERIFICATION_FAILED';
+    // The lattice is not reimplemented here any more: it lives in the vendored specification
+    // (`src/core/protocol/task-lifecycle.ts`, copied to `plugin/src/vendor/` because the package ships
+    // standalone). This function survives as the plugin's stable API, and the parity oracle in
+    // `tests/verdict-lattice-parity.test.cjs` holds the two to the same 64-combination truth table.
+    return (0, task_lifecycle_1.resolveVerdict)({
+        contractViolationsFound: input.contractViolations.length > 0,
+        verificationGatePassed: !input.verificationGate,
+        flaky: Boolean(input.flaky),
+        coherenceFailed: Boolean(input.coherenceFailed),
+        unverified: input.unverified,
+        isSuccess: input.isSuccess,
+    });
 }
 /**
  * An empty worker response, judged from the response alone.
@@ -1069,17 +1061,17 @@ async function delegateWorker(params = {}, tracker) {
         // tests passed but which was never allowed to run them was reported to the architect as having
         // failed -- a claim about content that nothing had established either way.
         const neverRan = Boolean(verificationGate) || unverified;
-        // Four outcomes, and FLAKY is checked before PASSED for the reason it exists: a contract that
-        // disagreed with itself has not established anything about the content, and the run it agreed with
-        // itself on is exactly the run that could have passed a broken implementation. Reporting either
-        // UNIT_PASSED or UNIT_FAILED here would pick one arbitrary run and present it as the verdict.
-        const unitOutcome = flaky
-            ? 'UNIT_FLAKY'
-            : unitSuccess
-                ? 'UNIT_PASSED'
-                : neverRan
-                    ? 'UNIT_UNVERIFIED'
-                    : 'UNIT_FAILED';
+        // Resolved once, here, from the vendored specification. The status the caller reads and the outcome
+        // the ledger records are two projections of this one verdict, so they cannot disagree.
+        const verdict = (0, task_lifecycle_1.resolveVerdict)({
+            contractViolationsFound: contractViolationsFound.length > 0,
+            verificationGatePassed: !verificationGate,
+            flaky: Boolean(flaky),
+            coherenceFailed: Boolean(coherenceFailed),
+            unverified,
+            isSuccess: unitSuccess,
+        });
+        const unitOutcome = (0, task_lifecycle_1.projectOutcome)(verdict);
         // Recorded here rather than when the model answered, because the OUTCOME is the point. A unit that
         // failed is a failed attempt, and without that the ledger cannot say how much churn the architect
         // never had to see. `unitSuccess` is the unit's own verdict, matching what `resolveDelegateStatus`
@@ -1122,14 +1114,7 @@ async function delegateWorker(params = {}, tracker) {
         // that did not succeed is the one thing that must never be signed, and the status has to exist
         // before the envelope is built to be able to refuse it. One expression feeds both, so the status a
         // caller reads and the status the envelope was gated on cannot drift apart.
-        const delegateStatus = resolveDelegateStatus({
-            verificationGate,
-            unverified,
-            contractViolations: contractViolationsFound,
-            isSuccess: unitSuccess,
-            coherenceFailed,
-            flaky,
-        });
+        const delegateStatus = verdict;
         let attestation;
         let attestationSkipped;
         /** The commit the envelope anchors to, kept so the note write does not re-parse the payload. */

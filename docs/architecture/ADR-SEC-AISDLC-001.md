@@ -650,13 +650,19 @@ two outcomes the existing code gets right:
 | `INCOHERENT` | `UNIT_FAILED` | `UNIT_PASSED` | the unit passed; the PROJECT failed, and the registry records the unit |
 | `VERIFICATION_NOT_APPROVED` | `UNIT_FAILED` | `UNIT_UNVERIFIED` | nothing ran — absence of evidence is not evidence of failure |
 
-**The packaging boundary decides how the two copies are kept honest.** `plugin/` may not import
-`src/core/protocol/`, because the package ships standalone. So the lattice exists twice: as the
-specification here, and as `resolveDelegateStatus` in the plugin. `tests/verdict-lattice-parity.test.cjs`
-runs all 64 combinations through both and fails on any disagreement — the same pattern that holds the
-vendored backoff to its attested original. The plugin's own ledger projection still lives in
-`delegation.ts`; making it call the specification would mean vendoring the machine into the package,
-which is a packaging decision rather than a protocol one.
+**The machine is vendored, and the cascade is retired.** `src/core/protocol/task-lifecycle.ts` and
+`src/core/primitives/result.ts` are copied under `plugin/src/vendor/`, mirroring their source paths so
+the relative import resolves unchanged. `resolveDelegateStatus` is now a thin adapter over
+`resolveVerdict`, and the ledger's `unitOutcome` is `projectOutcome(verdict)` — the four-branch boolean
+cascade is gone, and the status a caller reads and the outcome the ledger records are two projections of
+one computed verdict.
+
+**Byte identity holds for `result.ts` and cannot hold for `task-lifecycle.ts`.** The source imports
+`../primitives/result.ts` — a `.ts` specifier, because Node strips types at run time — while the plugin
+compiles to CommonJS, where the specifier must be extensionless. The copy therefore differs by exactly
+one line, and the parity oracle asserts the one thing that is both true and useful: the files have the
+same number of lines, and the ONLY line that differs is that import specifier. Behaviour is held
+separately, by running all 64 combinations through the specification and through the compiled plugin.
 
 ### Open
 
