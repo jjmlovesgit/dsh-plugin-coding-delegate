@@ -61,6 +61,38 @@ export function isRunnerStyleCommand(command: string): boolean {
 export const RUNNER_REFUSAL_CODE = 'REFUSED_UNSANDBOXED_RUNNER'
 export const RUNTIME_REFUSAL_CODE = 'REFUSED_UNSANDBOXED_RUNTIME'
 export const EMPTY_REFUSAL_CODE = 'REFUSED_EMPTY_COMMAND'
+export const SHELL_REFUSAL_CODE = 'REFUSED_SHELL_OPERATORS'
+
+/**
+ * Shell operators OUTSIDE quotes, refused because the command is spawned with `shell: true`.
+ *
+ * A prefix check alone validates only the first command: `node test.cjs && python exfiltrate.py`
+ * satisfies "starts with node" and hands the second half to the shell with no sandbox at all.
+ *
+ * The scan tracks quotes because `;` inside `node -e "a;b"` is a JavaScript separator, not a shell
+ * operator — a flat substring match refused the repository's own flaky-detection contracts, which are
+ * perfectly safe. An UNBALANCED quote is refused rather than tolerated: with the closing quote missing,
+ * what looks like quoted text is not, and guessing there is how a bypass gets through.
+ */
+function hasUnquotedShellMetacharacters(command: string): boolean {
+  let quote: string | null = null
+  for (let index = 0; index < command.length; index += 1) {
+    const character = command[index]
+    if (quote !== null) {
+      if (character === quote) quote = null
+      continue
+    }
+    if (character === '"' || character === "'") {
+      quote = character
+      continue
+    }
+    if (character === '&' || character === '|' || character === ';' || character === '>' || character === '<' || character === '`') {
+      return true
+    }
+    if (character === '$' && command[index + 1] === '(') return true
+  }
+  return quote !== null
+}
 
 export interface CommandValidationResult {
   valid: boolean
@@ -86,6 +118,20 @@ export function validateVerificationCommand(command: string): CommandValidationR
   const trimmed = String(command || '').trim()
   if (!trimmed) {
     return { valid: false, reason: EMPTY_REFUSAL_CODE + ': verification command cannot be empty.' }
+  }
+
+  if (hasUnquotedShellMetacharacters(trimmed)) {
+    return {
+      valid: false,
+      reason:
+        SHELL_REFUSAL_CODE +
+        ': verification commands must be a single direct invocation. Shell operators (&&, ||, ;, |, >, ' +
+        '<, backticks, $()) are forbidden, because the command is spawned through a shell and only the ' +
+        'first command would be sandboxed.\n' +
+        '\nRemediation: put the assertions in the contract file itself and run it directly:\n' +
+        '  refused: ' + trimmed + '\n' +
+        '  allowed: node <your-contract>.cjs',
+    }
   }
 
   if (/\bnode(?:\.exe)?\s+.*?(?:--test\b|-t\b)/.test(trimmed)) {

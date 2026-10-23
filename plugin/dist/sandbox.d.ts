@@ -11,6 +11,7 @@ export declare function isRunnerStyleCommand(command: string): boolean;
 export declare const RUNNER_REFUSAL_CODE = "REFUSED_UNSANDBOXED_RUNNER";
 export declare const RUNTIME_REFUSAL_CODE = "REFUSED_UNSANDBOXED_RUNTIME";
 export declare const EMPTY_REFUSAL_CODE = "REFUSED_EMPTY_COMMAND";
+export declare const SHELL_REFUSAL_CODE = "REFUSED_SHELL_OPERATORS";
 export interface CommandValidationResult {
     valid: boolean;
     reason?: string;

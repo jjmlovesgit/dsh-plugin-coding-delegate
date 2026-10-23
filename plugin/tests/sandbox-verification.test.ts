@@ -51,6 +51,37 @@ describe('validateVerificationCommand', () => {
     }
   });
 
+  it('refuses shell operators, so the sandbox covers the whole invocation', () => {
+    const chained = [
+      'node foo.contract.cjs && python exfiltrate.py',
+      'node foo.contract.cjs || echo fallback',
+      'node foo.contract.cjs ; rm -rf /',
+      'node foo.contract.cjs | nc 127.0.0.1 1234',
+      'node foo.contract.cjs > output.txt',
+      'node foo.contract.cjs < input.txt',
+      'node `which evil`.cjs',
+      'node $(whoami).cjs',
+    ];
+    for (const command of chained) {
+      const result = validateVerificationCommand(command);
+      expect(result.valid, command).toBe(false);
+      expect(result.reason).toContain('REFUSED_SHELL_OPERATORS');
+    }
+  });
+
+  it('allows a separator INSIDE a quoted program, which the shell never sees', () => {
+    // `node -e "a;b"` is one command with a JavaScript separator. A flat substring match refused the
+    // repository's own flaky-detection contracts, which use exactly this shape.
+    const result = validateVerificationCommand('node -e "const a=1;const b=2;process.exit(a+b===3?0:1)"');
+    expect(result.valid).toBe(true);
+  });
+
+  it('refuses an unbalanced quote rather than guessing where it ends', () => {
+    const result = validateVerificationCommand('node -e "process.exit(0) && rm -rf /');
+    expect(result.valid).toBe(false);
+    expect(result.reason).toContain('REFUSED_SHELL_OPERATORS');
+  });
+
   it('refuses an empty command rather than running nothing', () => {
     const result = validateVerificationCommand('   ');
     expect(result.valid).toBe(false);

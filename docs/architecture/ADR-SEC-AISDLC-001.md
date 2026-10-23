@@ -814,6 +814,18 @@ assets this boundary defends are the identity and key material in the home direc
 integrity, and ambient credentials; none of them live in temp. Repository and home stay unreadable, and
 execution stays denied.
 
+**The command must also be a single invocation.** Validation happens on a string that is spawned with
+`shell: true`, so a prefix check alone would pass `node test.cjs && python exfiltrate.py` and hand the
+second half to the shell unsandboxed. Shell operators outside quotes (`&&`, `||`, `;`, `|`, `>`, `<`,
+backticks, `$(`) are refused with `REFUSED_SHELL_OPERATORS`, and an **unbalanced quote is refused too**:
+with the closing quote missing, what looks like quoted text is not, and guessing is how a bypass gets in.
+
+The scan tracks quotes because `;` inside `node -e "a;b"` is a JavaScript separator, not a shell
+operator — a flat substring match refused the repository's own flaky-detection contracts, which are
+perfectly safe. Measured: 9 oracle failures, then zero once the scan became quote-aware.
+
+The resulting order is: empty → shell operators → runner mode → runtime → spawn.
+
 ### Open
 
 - **Reserved paths: none.** `src/core/primitives/**` and `src/core/protocol/**` were realised, and

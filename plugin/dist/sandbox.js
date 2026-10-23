@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.EMPTY_REFUSAL_CODE = exports.RUNTIME_REFUSAL_CODE = exports.RUNNER_REFUSAL_CODE = exports.SANDBOX_PREFLIGHT_SOURCE = void 0;
+exports.SHELL_REFUSAL_CODE = exports.EMPTY_REFUSAL_CODE = exports.RUNTIME_REFUSAL_CODE = exports.RUNNER_REFUSAL_CODE = exports.SANDBOX_PREFLIGHT_SOURCE = void 0;
 exports.isRunnerStyleCommand = isRunnerStyleCommand;
 exports.validateVerificationCommand = validateVerificationCommand;
 exports.runtimeRefusalMessage = runtimeRefusalMessage;
@@ -98,6 +98,39 @@ function isRunnerStyleCommand(command) {
 exports.RUNNER_REFUSAL_CODE = 'REFUSED_UNSANDBOXED_RUNNER';
 exports.RUNTIME_REFUSAL_CODE = 'REFUSED_UNSANDBOXED_RUNTIME';
 exports.EMPTY_REFUSAL_CODE = 'REFUSED_EMPTY_COMMAND';
+exports.SHELL_REFUSAL_CODE = 'REFUSED_SHELL_OPERATORS';
+/**
+ * Shell operators OUTSIDE quotes, refused because the command is spawned with `shell: true`.
+ *
+ * A prefix check alone validates only the first command: `node test.cjs && python exfiltrate.py`
+ * satisfies "starts with node" and hands the second half to the shell with no sandbox at all.
+ *
+ * The scan tracks quotes because `;` inside `node -e "a;b"` is a JavaScript separator, not a shell
+ * operator — a flat substring match refused the repository's own flaky-detection contracts, which are
+ * perfectly safe. An UNBALANCED quote is refused rather than tolerated: with the closing quote missing,
+ * what looks like quoted text is not, and guessing there is how a bypass gets through.
+ */
+function hasUnquotedShellMetacharacters(command) {
+    let quote = null;
+    for (let index = 0; index < command.length; index += 1) {
+        const character = command[index];
+        if (quote !== null) {
+            if (character === quote)
+                quote = null;
+            continue;
+        }
+        if (character === '"' || character === "'") {
+            quote = character;
+            continue;
+        }
+        if (character === '&' || character === '|' || character === ';' || character === '>' || character === '<' || character === '`') {
+            return true;
+        }
+        if (character === '$' && command[index + 1] === '(')
+            return true;
+    }
+    return quote !== null;
+}
 /**
  * The runtime gate. Everything below is refused before a shim is written or a process spawned.
  *
@@ -117,6 +150,18 @@ function validateVerificationCommand(command) {
     const trimmed = String(command || '').trim();
     if (!trimmed) {
         return { valid: false, reason: exports.EMPTY_REFUSAL_CODE + ': verification command cannot be empty.' };
+    }
+    if (hasUnquotedShellMetacharacters(trimmed)) {
+        return {
+            valid: false,
+            reason: exports.SHELL_REFUSAL_CODE +
+                ': verification commands must be a single direct invocation. Shell operators (&&, ||, ;, |, >, ' +
+                '<, backticks, $()) are forbidden, because the command is spawned through a shell and only the ' +
+                'first command would be sandboxed.\n' +
+                '\nRemediation: put the assertions in the contract file itself and run it directly:\n' +
+                '  refused: ' + trimmed + '\n' +
+                '  allowed: node <your-contract>.cjs',
+        };
     }
     if (/\bnode(?:\.exe)?\s+.*?(?:--test\b|-t\b)/.test(trimmed)) {
         return { valid: false, reason: runnerRefusalMessage(trimmed) };
