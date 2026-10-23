@@ -67,6 +67,24 @@ three.
 5. **No runtime containment outside node.** The permission model reaches node processes only, which is
    why non-node runtimes are refused rather than run.
 
+## Findings from the first scan, and their status
+
+An external static review of `441f004` reported 9 findings (1 high, 8 medium). The full report is
+[`security-review-6.md`](security-review-6.md). Status at the time of writing:
+
+| # | finding | status |
+| :--- | :--- | :--- |
+| 1 | **Relative node path can execute a shadow binary** — a basename check accepted `./node.exe`, and with `shell: false` that path runs directly | **FIXED**: the binary must be the bare `node`/`node.exe` or exactly `process.execPath`, and the spawn always uses `process.execPath`. `REFUSED_SHADOW_RUNTIME`; five shadow spellings covered by tests |
+| 2 | Contract files can be passed as `contextFiles`, exposing the tests to the worker | open |
+| 3 | Promotion gate reads the working tree rather than the staged index; `git diff` errors can pass silently | open |
+| 4–7 | Opaque patch writes; `.d.ts` suffix bypass; wildcard shell reads; non-TS source reads | open |
+| 8 | DLP scans prompts but not credential-bearing tool results | open |
+| 9 | *(see report)* | open |
+
+The high finding is the one this brief's own first question anticipated — "can a command be satisfied by
+something whose binary is `node` but which is not the sandboxed node?" The answer was yes, through
+`PATH`-shaped tokens that the validator treated as trustworthy.
+
 ## How to reproduce
 
 ```powershell

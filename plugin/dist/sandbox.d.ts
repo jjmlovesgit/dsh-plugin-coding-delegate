@@ -29,6 +29,7 @@ export interface TokenizeResult {
  */
 export declare function tokenizeCommand(command: string): TokenizeResult;
 export declare const UNBALANCED_REFUSAL_CODE = "REFUSED_UNBALANCED_QUOTES";
+export declare const SHADOW_REFUSAL_CODE = "REFUSED_SHADOW_RUNTIME";
 export interface ValidatedInvocation {
     valid: true;
     binary: string;

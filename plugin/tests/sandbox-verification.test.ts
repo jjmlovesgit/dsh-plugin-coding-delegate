@@ -49,9 +49,34 @@ describe('resolveVerificationInvocation', () => {
     const result = resolveVerificationInvocation('node --max-old-space-size=512 contract.cjs');
     expect(result.valid).toBe(true);
     if (result.valid) {
-      expect(result.binary).toBe('node');
+      // PINNED, not echoed: the plan carries the host binary, so the spawn cannot resolve a different
+      // `node` between validation and execution.
+      expect(result.binary).toBe(process.execPath);
       expect(result.args).toEqual(['--max-old-space-size=512', 'contract.cjs']);
     }
+  });
+
+  it('refuses a shadow node binary, however it is spelled', () => {
+    // A basename check accepted all of these. With shell:false the path is executed directly, so a
+    // wrapper named node.exe in the workspace would run outside every sandbox guarantee.
+    const shadow = [
+      './node contract.cjs',
+      '..\\node.exe contract.cjs',
+      'C:\\temp\\node.exe contract.cjs',
+      '/tmp/node contract.cjs',
+      '.\\node_modules\\.bin\\node contract.cjs',
+    ];
+    for (const command of shadow) {
+      const result = resolveVerificationInvocation(command);
+      expect(result.valid, command).toBe(false);
+      if (!result.valid) expect(result.reason).toContain('REFUSED_SHADOW_RUNTIME');
+    }
+  });
+
+  it('accepts the host binary by absolute path', () => {
+    const result = resolveVerificationInvocation('"' + process.execPath + '" contract.cjs');
+    expect(result.valid).toBe(true);
+    if (result.valid) expect(result.binary).toBe(process.execPath);
   });
 
   it('rejects node --test regardless of position', () => {

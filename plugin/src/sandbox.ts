@@ -130,6 +130,7 @@ export function tokenizeCommand(command: string): TokenizeResult {
 }
 
 export const UNBALANCED_REFUSAL_CODE = 'REFUSED_UNBALANCED_QUOTES'
+export const SHADOW_REFUSAL_CODE = 'REFUSED_SHADOW_RUNTIME'
 
 export interface ValidatedInvocation {
   valid: true
@@ -172,8 +173,29 @@ export function resolveVerificationInvocation(command: string): InvocationPlan {
   }
 
   const binary = tokens[0]
+  // A non-node runtime is a different refusal from a shadow node: the first means the sandbox cannot
+  // reach it at all, the second means it could reach it but not trust it. Reporting the wrong code sends
+  // an operator to the wrong remediation.
   if (!/(?:^|[/\\])node(?:\.exe)?$/i.test(binary)) {
     return { valid: false, reason: runtimeRefusalMessage(command) }
+  }
+  // THE BINARY IS PINNED, NOT MERELY NAMED. A basename check accepts `./node.exe` or `C:\tmp\node.exe`,
+  // and with `shell: false` that path is executed directly — a shadow binary that ignores NODE_OPTIONS,
+  // the permission flags and the preload entirely. Only the bare command name (PATH resolution, which
+  // the worker cannot influence) or the exact host binary is accepted.
+  const isBareNode = /^(?:node|node\.exe)$/i.test(binary)
+  const isTrustedHost = path.isAbsolute(binary) && path.resolve(binary) === path.resolve(process.execPath)
+  if (!isBareNode && !isTrustedHost) {
+    return {
+      valid: false,
+      reason:
+        SHADOW_REFUSAL_CODE + ": verification runtime '" + binary + "' is not the trusted Node host (" +
+        process.execPath + '). Relative paths, temporary directories and shadow binaries are ' +
+        'prohibited: they would run outside the permission flags and the preload.\n' +
+        '\nRemediation: run the check as a direct script with the system node:\n' +
+        '  refused: ' + command.trim() + '\n' +
+        '  allowed: node <your-contract>.cjs',
+    }
   }
 
   const args = tokens.slice(1)
@@ -186,7 +208,9 @@ export function resolveVerificationInvocation(command: string): InvocationPlan {
     return { valid: false, reason: EMPTY_REFUSAL_CODE + ': a node invocation needs a script or -e.' }
   }
 
-  return { valid: true, binary, args }
+  // The spawn never receives the caller's token: it receives the host binary the plugin is already
+  // running under, so PATH resolution cannot be redirected between validation and execution.
+  return { valid: true, binary: process.execPath, args }
 }
 
 export function runtimeRefusalMessage(command: string): string {
