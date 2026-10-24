@@ -91,6 +91,111 @@ empty ledger and report success. The `v0.5.7` release commit was gated by
 `success`. A CI workflow holds no signing key, so the signer lifecycle step reports a named `# SKIP` there
 rather than passing silently.
 
+## Getting Started
+
+`dsh-plugin-coding-delegate` puts an enforcement boundary between an architect model and an untrusted
+worker: it intercepts the handoff, keeps the worker from seeing the tests that judge it, sandboxes the
+verification run, and can sign a cryptographic note per unit.
+
+### Prerequisites
+
+- **Node.js 22 or later** — the verification sandbox uses `--permission`, which older releases do not have.
+- **A DSH profile you actually boot** (`web`, `tauri`, `headless`, or your own), with an architect model
+  and a reachable worker endpoint (local LM Studio at `127.0.0.1:1234`, or a cloud worker you choose).
+- Optional: an Ed25519 private key at `attestationPrivateKeyPath` if you want the unit signed. Without one
+  the verdict is still produced and the attestation is **withheld**, not faked.
+
+### Step 1 — install into a profile, not into the repository
+
+```bash
+dsh plugin --profile web add dsh-plugin-coding-delegate
+```
+
+DSH does not read a `plugins` array from a config file. A profile is a directory at
+`$DSH_HOME/profiles/<name>` with its own `package.json` and `cordis.patch.yml`, and `dsh plugin` forwards
+to `pnpm` inside it. `npm install` in your project does **not** mount the tool.
+
+### Step 2 — confirm registration
+
+The plugin ships a patch that inserts one entry; DSH applies it when the bundle is loaded. On startup:
+
+```
+[LOCAL_ROUTER_INIT] Tool 'delegate_worker' registered successfully on ctx.tools.
+```
+
+If you do not see that line, the active profile is not loading the plugin — check which profile the
+process booted, not the project you are standing in.
+
+### Step 3 — write a verification contract
+
+A contract is the oracle for one unit. It must be a standalone script:
+
+```js
+// tests/contract-add.cjs — .cjs, because the default package type is CommonJS
+const assert = require('node:assert');
+const { add } = require('../src/add.js');
+
+try {
+  assert.strictEqual(add(2, 3), 5, '2 + 3 must equal 5');
+  assert.strictEqual(add(-1, 1), 0, '-1 + 1 must equal 0');
+  console.log('CONTRACT_VERIFIED');
+  process.exit(0);
+} catch (error) {
+  console.error('CONTRACT_FAILED: ' + error.message);
+  process.exit(1);
+}
+```
+
+Rules the sandbox enforces, each with the refusal you will see:
+
+| rule | refusal |
+| :--- | :--- |
+| direct `node <script>` only | `REFUSED_UNSANDBOXED_RUNNER` for `node --test` |
+| no shell chaining or redirection | `REFUSED_SHELL_OPERATORS` |
+| node runtime only | `REFUSED_UNSANDBOXED_RUNTIME` for `python`, `sh`, … |
+| the host binary only | `REFUSED_SHADOW_RUNTIME` for `./node` or a temp path |
+| exit `0` on pass, non-zero on fail | the verdict is `VERIFICATION_FAILED` |
+
+### Step 4 — dispatch, declaring the contract
+
+```
+Use delegate_worker to implement src/add.js, with contractFiles ["tests/contract-add.cjs"]
+and the verification command node tests/contract-add.cjs.
+```
+
+`contractFiles` is the declaration the gate trusts. Passing that same path in `contextFiles` is refused
+with `REFUSED_CONTRACT_AS_CONTEXT` — the worker may not be shown the tests it is graded by.
+
+### What the boundary does, in order
+
+```
+architect dispatches
+  ├─ contract/context segregation, before any file is read     REFUSED_CONTRACT_AS_CONTEXT
+  ├─ worker emits fenced blocks
+  │    └─ test paths refused before the write                  isTestPath
+  ├─ verification runs: node, --permission, shell:false,
+  │    prototypes frozen, sockets severed, env scrubbed
+  ├─ verdict from the lattice: boundary > gate > flaky >
+  │    coherence > unverified > success
+  └─ attestation when a key is configured: Ed25519 note on
+       refs/notes/delegations, digest-bound to the commit
+```
+
+The staged-bytes check (`git show :<path>`) belongs to the **promotion** gate that runs at commit time,
+not to the delegation itself — a distinction that matters when you are reading which control caught a
+change.
+
+### Troubleshooting
+
+- **`delegate_worker` not registered** — the booted profile does not load the plugin. Registration is per
+  profile, not per project.
+- **`spawn EPERM` on Windows** — a freshly created directory can inherit an ACL that denies subprocess
+  creation; grant your account full control over the workspace.
+- **`REFUSED_UNSANDBOXED_RUNNER`** — your contract command still uses `--test`. Rewrite it as a script
+  that exits `0`/`1`.
+- **`REFUSED_CONTRACT_AS_CONTEXT`** — remove the contract from `contextFiles`; declare the interface the
+  worker needs in a separate spec file.
+
 ## How it works: a contract out, a verdict back
 
 Coding needs two different jobs done, and they want two different contexts. The plugin gives each one its
