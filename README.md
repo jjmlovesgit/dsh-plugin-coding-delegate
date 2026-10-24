@@ -196,6 +196,9 @@ change.
 - **`REFUSED_CONTRACT_AS_CONTEXT`** — remove the contract from `contextFiles`; declare the interface the
   worker needs in a separate spec file.
 
+For profile options, custom key paths, environment flags and enterprise wiring, see
+[Install](#install) below; this section is the short path to a first verified delegation.
+
 ## How it works: a contract out, a verdict back
 
 Coding needs two different jobs done, and they want two different contexts. The plugin gives each one its
