@@ -57,6 +57,32 @@ describe('declaration file suffix [5]', () => {
   });
 });
 
+describe('non-TS source reads [7]', () => {
+  it('refuses raw source and configuration that is not mappable to a declaration', () => {
+    for (const target of ['config.py', 'pipeline.sh', 'schema.json', 'env.yaml', 'deploy.toml']) {
+      const verdict = evaluateDeclarationEgress({ ...base, toolKind: 'read', target });
+      expect(verdict.action, target).toBe('block');
+      expect(String((verdict as { reason?: string }).reason), target).toContain('REFUSED_NON_DECLARATION_READ');
+    }
+  });
+
+  it('still serves mappable source as its declaration rather than raw', () => {
+    const verdict = evaluateDeclarationEgress({
+      ...base,
+      toolKind: 'read',
+      target: 'src/a.ts',
+      declarationPathFor: () => '/ws/src/a.d.ts',
+    });
+    expect(verdict).toEqual({ action: 'serve-declaration', skeleton: '/ws/src/a.d.ts' });
+  });
+
+  it('still allows prose, which carries no implementation', () => {
+    for (const target of ['README.md', 'docs/notes.txt']) {
+      expect(evaluateDeclarationEgress({ ...base, toolKind: 'read', target }), target).toEqual({ action: 'allow' });
+    }
+  });
+});
+
 describe('wildcard reads [6]', () => {
   it('refuses a glob in a command that reads content', () => {
     const verdict = evaluateDeclarationEgress({

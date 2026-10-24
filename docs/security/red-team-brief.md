@@ -80,7 +80,7 @@ An external static review of `441f004` reported 9 findings (1 high, 8 medium). T
 | 4 | Opaque patch writes (`patch -p1`, `git apply`) evade the approval gate | open |
 | 5 | `.d.ts` suffix bypass — a command whose last characters are `.d.ts` was treated as a declaration read | **FIXED**: the declaration allowance requires a single path (no whitespace, shell operator or quoting), so the suffix means what it appears to |
 | 6 | Wildcard shell reads — globs expand after the gate reads the string | **FIXED**: `REFUSED_WILDCARD_READ` when a content-reading shell command names `*`, `?`, `[` or `{` |
-| 7 | Non-TS source reads bypass the declaration generator | open |
+| 7 | Non-TS source reads bypass the declaration generator | **FIXED**: reads are an allowlist — declarations (served as `.d.ts`), prose (no implementation), and mappable source (served as its declaration). Everything else, `.py`/`.sh`/`.json`/`.yaml` included, is refused with `REFUSED_NON_DECLARATION_READ` |
 | 8 | DLP scans prompts but not credential-bearing tool results | **FIXED**: `extractEgressText` walks every message role (including tool results and nested `output`/`stdout` blocks) and accumulates it into the same corpus the gate scans. NOT redaction: a hit pins the request local or refuses it, because a silently rewritten conversation is a different task |
 | 9 | *(see report)* | open |
 

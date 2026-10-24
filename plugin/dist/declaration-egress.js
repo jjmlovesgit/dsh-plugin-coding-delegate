@@ -195,22 +195,23 @@ function evaluateDeclarationEgress(input) {
     }
     // 3. READS.
     if (input.toolKind === 'read') {
-        const isCode = input.isCodeExtension ? input.isCodeExtension(target) : false;
-        if (!isCode)
+        // THE RULE IS AN ALLOWLIST, NOT A CODE-FILE DENYLIST. "Not a TypeScript extension" was never a safe
+        // proxy for "not implementation": `.py`, `.sh`, `.json` and `.yaml` carry business logic, credentials
+        // and configuration. Three things may pass, and nothing else:
+        //   - declaration files (step 2 above)
+        //   - prose, which carries no implementation (the committed control oracle pins this)
+        //   - mappable source, SERVED AS ITS DECLARATION rather than raw
+        // (SECURITY-REVIEW-6 [7])
+        const lowerTarget = target.toLowerCase();
+        if (/\.(md|markdown|txt|rst)$/.test(lowerTarget))
             return { action: 'allow' };
-        // Only a mappable extension may be redirected. Anything else that is still code -- Python, Go, Rust,
-        // a shell script, SQL -- cannot be served as a skeleton by any build, so it is refused rather than
-        // leaked. See MAPPABLE_SOURCE_EXTENSIONS for why this is not delegated to `declarationPathFor`.
         if (!mappableSourceFile(target)) {
             return {
                 action: 'block',
-                reason: "Reading '" +
-                    target +
-                    "' was refused: sourceReadEgress is 'declarations' and no type skeleton can be produced for " +
-                    path.extname(target).toLowerCase() +
-                    '. Serving the body would be the implementation leak this setting exists to prevent. Read the ' +
-                    'declaration path directly, or turn sourceReadEgress off in the profile patch (which needs a ' +
-                    'DSH restart).',
+                reason: 'REFUSED_NON_DECLARATION_READ: declarations mode permits reading only .d.ts declarations, ' +
+                    "prose, and mappable source served as its declaration. Target '" + target + "' is raw source " +
+                    "or configuration and requires operator approval. Switch sourceReadEgress to 'source' to read " +
+                    'implementations deliberately.',
             };
         }
         const skeleton = input.declarationPathFor
