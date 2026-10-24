@@ -158,9 +158,25 @@ jobs:
           case "${GITHUB_REF_NAME}" in
             *-*) PRERELEASE_FLAG="--prerelease" ;;
           esac
+          # A RELEASE BODY IS WRITTEN, NOT GENERATED. `--generate-notes` alone lists commits, and the one
+          # thing an operator must read -- that every `node --test` verification command now fails -- is
+          # not a commit title. When a notes file exists for this tag it is prepended to the generated
+          # changelog, so the breaking change leads and the commit list follows.
+          NOTES_FILE="docs/releases/${GITHUB_REF_NAME}-notes.md"
+          # A candidate tag uses the notes of the release it precedes: v0.5.11-rc.1 reads
+          # v0.5.11-notes.md, so the breaking change is announced on the candidate too, not only on the
+          # final cut.
+          if [ ! -f "$NOTES_FILE" ]; then
+            NOTES_FILE="docs/releases/${GITHUB_REF_NAME%-*}-notes.md"
+          fi
+          NOTES_ARGS=()
+          if [ -f "$NOTES_FILE" ]; then
+            NOTES_ARGS=(--notes "$(cat "$NOTES_FILE")")
+          fi
           gh release create "${GITHUB_REF_NAME}" \
             --title "${GITHUB_REF_NAME}" \
             --generate-notes \
+            "${NOTES_ARGS[@]}" \
             ${PRERELEASE_FLAG} \
             docs/compliance/evidence/ledger-audit-population.txt \
             docs/compliance/evidence/flake-gate-sweep.txt \

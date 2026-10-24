@@ -846,6 +846,13 @@ Two parser decisions are load-bearing, and both were found by a test failing:
 The argv boundary is asserted rather than assumed: a contract that checks `process.argv.slice(2)`
 receives `['a b', 'c;d', 'e&f']` unchanged, where a shell would have split or interpreted all three.
 
+**`evaluateShellCommandApproval` is DORMANT, and its tests describe intent rather than observed
+behaviour.** It lives in `plugin/src/guard.ts` with `READ_ONLY_TOOL_ALLOWLIST`, unit-verified, and nothing
+calls it: the worker has no tool loop, so there is no worker shell to police. It is kept because the rule
+it encodes — read-only by default, everything else needs human sign-off — is the one a future worker tool
+loop must inherit, and because deleting it would make the next person re-derive the decision from a
+closed finding. It must not be read as an active control.
+
 ### Open
 
 - **Reserved paths: none.** `src/core/primitives/**` and `src/core/protocol/**` were realised, and
