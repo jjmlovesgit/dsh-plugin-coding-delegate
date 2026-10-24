@@ -111,10 +111,27 @@ needs — nothing else — writes the code, and is discarded. A fresh context pe
 | architect → worker | the contract: instruction, permitted paths, the verification command | the design conversation, the other units |
 | worker → architect | the verdict: pass/fail counts, a redacted failure structure, the names of files written | the code |
 
-The verification command runs as an ordinary subprocess, with the operator's approval. Its raw output
-stays on the local machine; what travels back is the failure *structure*, with source stripped out.
+**The verification command is sandboxed, and that is a breaking change in 0.5.11.** It runs as a node
+process under `--permission`, with filesystem access scoped to the workspace and the OS temp directory,
+core prototypes frozen, sockets and `fetch` severed, and the environment scrubbed. What that means for a
+contract command:
 
-> **Status: 0.5.7**, published to npm and gated in CI. The mechanisms work and are tested, and their
+- **Direct scripts only.** `node <script>`. The runner form `node --test` is refused
+  (`REFUSED_UNSANDBOXED_RUNNER`) because the runner forks a child process per test file, the permission
+  model blocks that fork, and granting it would reopen the execution vector the sandbox closes.
+- **Exit codes decide.** A contract asserts its invariants and exits `0` on pass, non-zero on failure.
+- **Node only.** `python`, `sh`, `bash`, `pwsh` and other runtimes are refused
+  (`REFUSED_UNSANDBOXED_RUNTIME`): the sandbox reaches node processes only, so anything else would run
+  bare while the record claimed isolation.
+- **No shadow binaries.** `./node`, `temp/node.exe` and other path-shaped binaries are refused
+  (`REFUSED_SHADOW_RUNTIME`); the spawn uses the host binary the plugin is already running under.
+- **One command.** Shell operators and redirection are refused, and the command is tokenised and spawned
+  with `shell: false`, so there is no intermediate shell to expand or chain anything.
+
+Its raw output stays on the local machine; what travels back is the failure *structure*, with source
+stripped out.
+
+> **Status: 0.5.11**, published to npm and gated in CI. The mechanisms work and are tested, and their
 > **limits are documented rather than glossed**, including several that cannot be closed from inside the
 > process — see [What this control does not cover](#what-this-control-does-not-cover) and the consolidated
 > residual table in [docs/enterprise-governance.md](docs/enterprise-governance.md). Read those before
@@ -743,7 +760,7 @@ dsh plugin --profile <name> add ./plugin
 ### From a pinned tag, for a restricted or air-gapped host
 
 ```bash
-dsh plugin --profile web add github:jjmlovesgit/dsh-plugin-coding-delegate#v0.5.5
+dsh plugin --profile web add github:jjmlovesgit/dsh-plugin-coding-delegate#v0.5.11
 ```
 
 Pin the tag whose controls you have audited rather than tracking `main`. How a release is verified against
@@ -897,6 +914,7 @@ worker** wrote; one written by the architect or by hand has no record and report
 | [`docs/verification-architecture.md`](docs/verification-architecture.md) | why the loop has to put verification on-box, and the one tier where that reasoning breaks |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | what was built, measured and retired |
 | [`docs/security/red-team-brief.md`](docs/security/red-team-brief.md) | the delegation boundary packaged for external review: threat model, control chain, probe results, and the limits a reviewer should attack first |
+| [`docs/architecture/ADR-SEC-AISDLC-001.md`](docs/architecture/ADR-SEC-AISDLC-001.md) | the architecture record: the tier model, the verdict lattice, the sandbox (`shell: false`, tokenised argv, Node `--permission`), and the measured evidence behind each |
 | [`scripts/check-promotion.cjs`](scripts/check-promotion.cjs) | the promotion socket: gate a commit on whether delegated work is verified |
 | [`scripts/verify-release-tarball.ps1`](scripts/verify-release-tarball.ps1) | checks a published tarball against its release tag blob-for-blob, in both directions |
 | [`scripts/measure-reading-cost.cjs`](scripts/measure-reading-cost.cjs) | what the architect actually reads, from the plugin's own audit trace |
