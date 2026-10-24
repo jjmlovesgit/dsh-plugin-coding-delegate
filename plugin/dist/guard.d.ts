@@ -140,6 +140,22 @@ export declare function staleDeclarationReason(sourcePath: string, declarationPa
  * Pure and exported so it can be unit-tested without a running server.
  * Returns null when the call has nothing to do with code authoring.
  */
+/**
+ * Shell commands that are provably read-only, matched as a prefix on the normalised command.
+ *
+ * F4 INVERTED THE RULE. Detecting mutation by scanning for `sed -i`, `tee`, `patch` and `python -c
+ * "open(...,'w')"` is an endless game, and every miss is an unmonitored write path that bypasses
+ * `isTestPath`. The worker's only authorised mutation channel is emission; therefore a shell command is
+ * read-only by DEFAULT only if it is on this list, and everything else asks the operator.
+ */
+export declare const READ_ONLY_TOOL_ALLOWLIST: Set<string>;
+export interface ShellGuardDecision {
+    allowed: boolean;
+    requiresApproval: boolean;
+    reason?: string;
+}
+/** Is this shell command provably read-only? Anything that is not, asks. */
+export declare function evaluateShellCommandApproval(command: string): ShellGuardDecision;
 export declare function evaluateCodeWriteGuard(exec: any, config?: {
     askPaths?: string[];
     /** Injectable reader, so the script scan is testable without touching disk. */

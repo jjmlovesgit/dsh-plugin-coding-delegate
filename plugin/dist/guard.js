@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.DELETE_PRIMITIVES = exports.SEARCH_TOOLS = exports.READ_TOOLS = exports.SHELL_TOOLS = void 0;
+exports.READ_ONLY_TOOL_ALLOWLIST = exports.DELETE_PRIMITIVES = exports.SEARCH_TOOLS = exports.READ_TOOLS = exports.SHELL_TOOLS = void 0;
 exports.extractWriteTarget = extractWriteTarget;
 exports.hasCommandWriteSignal = hasCommandWriteSignal;
 exports.hasCommandDeleteSignal = hasCommandDeleteSignal;
@@ -44,6 +44,7 @@ exports.evaluateDelegatedReadPolicy = evaluateDelegatedReadPolicy;
 exports.evaluateSettledFile = evaluateSettledFile;
 exports.declarationPathFor = declarationPathFor;
 exports.staleDeclarationReason = staleDeclarationReason;
+exports.evaluateShellCommandApproval = evaluateShellCommandApproval;
 exports.evaluateCodeWriteGuard = evaluateCodeWriteGuard;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
@@ -650,6 +651,57 @@ function evaluateMatchedReads(matched, config) {
  * Pure and exported so it can be unit-tested without a running server.
  * Returns null when the call has nothing to do with code authoring.
  */
+/**
+ * Shell commands that are provably read-only, matched as a prefix on the normalised command.
+ *
+ * F4 INVERTED THE RULE. Detecting mutation by scanning for `sed -i`, `tee`, `patch` and `python -c
+ * "open(...,'w')"` is an endless game, and every miss is an unmonitored write path that bypasses
+ * `isTestPath`. The worker's only authorised mutation channel is emission; therefore a shell command is
+ * read-only by DEFAULT only if it is on this list, and everything else asks the operator.
+ */
+exports.READ_ONLY_TOOL_ALLOWLIST = new Set([
+    'cat',
+    'head',
+    'tail',
+    'grep',
+    'rg',
+    'find',
+    'ls',
+    'dir',
+    'git status',
+    'git diff',
+    'git log',
+    'git show',
+]);
+/** Is this shell command provably read-only? Anything that is not, asks. */
+function evaluateShellCommandApproval(command) {
+    const trimmed = String(command || '').trim();
+    if (!trimmed) {
+        return { allowed: false, requiresApproval: false, reason: 'REFUSED_EMPTY_COMMAND: shell command cannot be empty.' };
+    }
+    const normalised = trimmed.replace(/\s+/g, ' ');
+    for (const allowed of exports.READ_ONLY_TOOL_ALLOWLIST) {
+        if (normalised === allowed || normalised.startsWith(allowed + ' ')) {
+            // A redirection smuggles a write onto a read: `git diff > patch.diff`, `cat a > b`.
+            if (/[><]/.test(normalised)) {
+                return {
+                    allowed: false,
+                    requiresApproval: true,
+                    reason: "APPROVAL_REQUIRED_SHELL_MUTATION: command '" + trimmed + "' uses redirection, which can " +
+                        'write a file even when the command itself only reads.',
+                };
+            }
+            return { allowed: true, requiresApproval: false };
+        }
+    }
+    return {
+        allowed: false,
+        requiresApproval: true,
+        reason: "APPROVAL_REQUIRED_SHELL_MUTATION: shell command '" + trimmed + "' is not on the provably " +
+            'read-only allowlist. Opaque mutations (patch, git apply, sed -i, tee, scripted writes) bypass ' +
+            'the emission pipeline that guards test paths, so they need explicit operator sign-off.',
+    };
+}
 function evaluateCodeWriteGuard(exec, config = {}) {
     const name = String(exec?.name || '');
     const args = exec?.arguments;

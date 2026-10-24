@@ -653,6 +653,69 @@ function evaluateMatchedReads(
  * Pure and exported so it can be unit-tested without a running server.
  * Returns null when the call has nothing to do with code authoring.
  */
+/**
+ * Shell commands that are provably read-only, matched as a prefix on the normalised command.
+ *
+ * F4 INVERTED THE RULE. Detecting mutation by scanning for `sed -i`, `tee`, `patch` and `python -c
+ * "open(...,'w')"` is an endless game, and every miss is an unmonitored write path that bypasses
+ * `isTestPath`. The worker's only authorised mutation channel is emission; therefore a shell command is
+ * read-only by DEFAULT only if it is on this list, and everything else asks the operator.
+ */
+export const READ_ONLY_TOOL_ALLOWLIST = new Set([
+  'cat',
+  'head',
+  'tail',
+  'grep',
+  'rg',
+  'find',
+  'ls',
+  'dir',
+  'git status',
+  'git diff',
+  'git log',
+  'git show',
+])
+
+export interface ShellGuardDecision {
+  allowed: boolean
+  requiresApproval: boolean
+  reason?: string
+}
+
+/** Is this shell command provably read-only? Anything that is not, asks. */
+export function evaluateShellCommandApproval(command: string): ShellGuardDecision {
+  const trimmed = String(command || '').trim()
+  if (!trimmed) {
+    return { allowed: false, requiresApproval: false, reason: 'REFUSED_EMPTY_COMMAND: shell command cannot be empty.' }
+  }
+  const normalised = trimmed.replace(/\s+/g, ' ')
+
+  for (const allowed of READ_ONLY_TOOL_ALLOWLIST) {
+    if (normalised === allowed || normalised.startsWith(allowed + ' ')) {
+      // A redirection smuggles a write onto a read: `git diff > patch.diff`, `cat a > b`.
+      if (/[><]/.test(normalised)) {
+        return {
+          allowed: false,
+          requiresApproval: true,
+          reason:
+            "APPROVAL_REQUIRED_SHELL_MUTATION: command '" + trimmed + "' uses redirection, which can " +
+            'write a file even when the command itself only reads.',
+        }
+      }
+      return { allowed: true, requiresApproval: false }
+    }
+  }
+
+  return {
+    allowed: false,
+    requiresApproval: true,
+    reason:
+      "APPROVAL_REQUIRED_SHELL_MUTATION: shell command '" + trimmed + "' is not on the provably " +
+      'read-only allowlist. Opaque mutations (patch, git apply, sed -i, tee, scripted writes) bypass ' +
+      'the emission pipeline that guards test paths, so they need explicit operator sign-off.',
+  }
+}
+
 export function evaluateCodeWriteGuard(
   exec: any,
   config: {
