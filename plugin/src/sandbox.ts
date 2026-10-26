@@ -132,6 +132,58 @@ export function tokenizeCommand(command: string): TokenizeResult {
 export const UNBALANCED_REFUSAL_CODE = 'REFUSED_UNBALANCED_QUOTES'
 export const SHADOW_REFUSAL_CODE = 'REFUSED_SHADOW_RUNTIME'
 
+/**
+ * The oldest Node the verification sandbox is willing to be trusted on.
+ *
+ * THE SANDBOX IS A CONSUMER OF THE RUNTIME'S PERMISSION MODEL, so it inherits that model's bugs. Three
+ * advisories matter here, all filesystem-allowlist flaws: a wildcard-rule bypass (CVE-2026-106071), a
+ * radix-tree split letting sibling paths that share a prefix reach each other (CVE-2026-58043), and an
+ * unchecked `fs.realpathSync.native` that resolves symlinks outside the allowlist (CVE-2026-21715). Each
+ * turns `--allow-fs-read` into advice rather than a boundary.
+ *
+ * v22.23.4 is the first line carrying those fixes alongside the Brotli RCE (CVE-2026-111497), the DNS
+ * truncation and the TLS hostname bypasses. Below it the plugin still runs — refusing to start would
+ * strand operators mid-upgrade — but it says so once, plainly.
+ */
+export const MINIMUM_SANDBOX_NODE = '22.23.4'
+
+function versionParts(version: string): number[] {
+  return String(version)
+    .replace(/^v/, '')
+    .split(/[.-]/)
+    .slice(0, 3)
+    .map((part) => Number(part) || 0)
+}
+
+/** Is `version` at least `minimum`? Missing parts count as zero, so `22.23` is below `22.23.4`. */
+export function versionAtLeast(version: string, minimum: string): boolean {
+  const have = versionParts(version)
+  const need = versionParts(minimum)
+  for (let index = 0; index < 3; index += 1) {
+    if (have[index] > need[index]) return true
+    if (have[index] < need[index]) return false
+  }
+  return true
+}
+
+/**
+ * The warning printed once when verification runs below the patched line, or null.
+ *
+ * NOT A REFUSAL, and the reason is stated rather than hidden: the host that produced this record runs
+ * 22.19.0, and a hard refusal there would block every delegation, including this repository's own
+ * oracles. What it must not do is stay silent, because the sandbox's own claim is what is at stake.
+ */
+export function sandboxRuntimeWarning(version: string): string | null {
+  if (versionAtLeast(version, MINIMUM_SANDBOX_NODE)) return null
+  return (
+    'SANDBOX_RUNTIME_UNPATCHED: verification is running on node ' + String(version) + ', below ' +
+    MINIMUM_SANDBOX_NODE + '. The permission model on this runtime has known filesystem-allowlist ' +
+    'bypasses (CVE-2026-106071 wildcard rules, CVE-2026-58043 prefix-splitting, CVE-2026-21715 ' +
+    'realpathSync.native), so --allow-fs-read is defence-in-depth rather than a boundary here. Upgrade ' +
+    'the runtime, or run verification inside OS-level isolation (container, job object, AppArmor).'
+  )
+}
+
 export interface ValidatedInvocation {
   valid: true
   binary: string

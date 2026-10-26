@@ -64,7 +64,7 @@
     "url": "https://github.com/jjmlovesgit/dsh-plugin-coding-delegate/issues"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=22.23.4"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.4",

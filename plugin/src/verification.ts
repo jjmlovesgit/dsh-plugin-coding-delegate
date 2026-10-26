@@ -3,7 +3,7 @@ import * as path from 'path'
 import * as child_process from 'child_process'
 import { resolveDataDir } from './logging'
 import { scanDLP } from './index'
-import { resolveVerificationInvocation, sandboxEnv } from './sandbox'
+import { resolveVerificationInvocation, sandboxEnv, sandboxRuntimeWarning } from './sandbox'
 
 /**
  * A failure described without source: enough to diagnose, not enough to leak code.
@@ -546,6 +546,8 @@ function captureCommandOutput(
   }
 }
 
+let unpatchedRuntimeWarned = false
+
 export function runSandboxVerification(
   verificationCommand: string,
   workspaceDir: string = process.cwd(),
@@ -586,6 +588,18 @@ export function runSandboxVerification(
   let output = ''
   let spawnError: any = null
   let exitCode = 0
+
+  // WARN ONCE, DO NOT REFUSE. The sandbox delegates its filesystem guarantee to the runtime's
+  // permission model, and that model has had allowlist bypasses; below the patched line the guarantee is
+  // defence-in-depth rather than a boundary. A refusal would strand every operator on an older runtime,
+  // including this repository's own oracles, so the honest move is to say it once and keep the check.
+  if (!unpatchedRuntimeWarned) {
+    const warning = sandboxRuntimeWarning(process.version)
+    if (warning) {
+      unpatchedRuntimeWarned = true
+      console.warn('[SANDBOX] ' + warning)
+    }
+  }
 
   const sandbox = sandboxEnv(workspaceDir)
   let captured

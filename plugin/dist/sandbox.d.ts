@@ -30,6 +30,30 @@ export interface TokenizeResult {
 export declare function tokenizeCommand(command: string): TokenizeResult;
 export declare const UNBALANCED_REFUSAL_CODE = "REFUSED_UNBALANCED_QUOTES";
 export declare const SHADOW_REFUSAL_CODE = "REFUSED_SHADOW_RUNTIME";
+/**
+ * The oldest Node the verification sandbox is willing to be trusted on.
+ *
+ * THE SANDBOX IS A CONSUMER OF THE RUNTIME'S PERMISSION MODEL, so it inherits that model's bugs. Three
+ * advisories matter here, all filesystem-allowlist flaws: a wildcard-rule bypass (CVE-2026-106071), a
+ * radix-tree split letting sibling paths that share a prefix reach each other (CVE-2026-58043), and an
+ * unchecked `fs.realpathSync.native` that resolves symlinks outside the allowlist (CVE-2026-21715). Each
+ * turns `--allow-fs-read` into advice rather than a boundary.
+ *
+ * v22.23.4 is the first line carrying those fixes alongside the Brotli RCE (CVE-2026-111497), the DNS
+ * truncation and the TLS hostname bypasses. Below it the plugin still runs — refusing to start would
+ * strand operators mid-upgrade — but it says so once, plainly.
+ */
+export declare const MINIMUM_SANDBOX_NODE = "22.23.4";
+/** Is `version` at least `minimum`? Missing parts count as zero, so `22.23` is below `22.23.4`. */
+export declare function versionAtLeast(version: string, minimum: string): boolean;
+/**
+ * The warning printed once when verification runs below the patched line, or null.
+ *
+ * NOT A REFUSAL, and the reason is stated rather than hidden: the host that produced this record runs
+ * 22.19.0, and a hard refusal there would block every delegation, including this repository's own
+ * oracles. What it must not do is stay silent, because the sandbox's own claim is what is at stake.
+ */
+export declare function sandboxRuntimeWarning(version: string): string | null;
 export interface ValidatedInvocation {
     valid: true;
     binary: string;

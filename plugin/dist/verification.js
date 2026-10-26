@@ -508,6 +508,7 @@ function captureCommandOutput(binary, args, workspaceDir, timeoutMs, env) {
         spawnError,
     };
 }
+let unpatchedRuntimeWarned = false;
 function runSandboxVerification(verificationCommand, workspaceDir = process.cwd(), options = {}) {
     if (!verificationCommand || !verificationCommand.trim()) {
         return { passed: 0, failed: 0, output: 'No verification command specified.' };
@@ -536,6 +537,17 @@ function runSandboxVerification(verificationCommand, workspaceDir = process.cwd(
     let output = '';
     let spawnError = null;
     let exitCode = 0;
+    // WARN ONCE, DO NOT REFUSE. The sandbox delegates its filesystem guarantee to the runtime's
+    // permission model, and that model has had allowlist bypasses; below the patched line the guarantee is
+    // defence-in-depth rather than a boundary. A refusal would strand every operator on an older runtime,
+    // including this repository's own oracles, so the honest move is to say it once and keep the check.
+    if (!unpatchedRuntimeWarned) {
+        const warning = (0, sandbox_1.sandboxRuntimeWarning)(process.version);
+        if (warning) {
+            unpatchedRuntimeWarned = true;
+            console.warn('[SANDBOX] ' + warning);
+        }
+    }
     const sandbox = (0, sandbox_1.sandboxEnv)(workspaceDir);
     let captured;
     try {
