@@ -407,6 +407,22 @@ export declare const MAX_ERROR_BODY_CHARS = 2000;
 /** Bound a diagnostic body before appending it to a message. Never throws, and never grows it. */
 export declare function truncateErrorBody(text: unknown): string;
 /**
+ * A worker-derived string rendered for the architect in one line, bounded.
+ *
+ * Paths come from fence headers the worker wrote, and the verdict summary is the one place worker text
+ * reaches the architect's context. A path is a path: it has no business carrying newlines, control
+ * characters or paragraphs, so they are collapsed rather than trusted.
+ */
+export declare function sanitizeReportedText(value: unknown, maxLength?: number): string;
+/**
+ * The rule that makes the context boundary explicit to the worker.
+ *
+ * Kept as a named export so the text is testable and cannot drift from the markers that `context.ts`
+ * emits: the markers without the rule are decoration, and the rule without the markers has nothing to
+ * point at.
+ */
+export declare const DATA_BOUNDARY_RULE: string;
+/**
  * Transport retry policy for the worker call, and the reasons for its shape.
  *
  * THE PLUGIN'S ONLY RETRY, AND IT IS NARROW. The call this wraps used to be a single fetch: a refused
