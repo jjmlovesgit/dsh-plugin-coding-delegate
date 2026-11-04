@@ -69,5 +69,8 @@
     "eslint": "^9.13.0",
     "eslint-plugin-import": "^2.31.0",
     "typescript": "^5.5.4"
+  },
+  "dependencies": {
+    "install": "^0.13.0"
   }
 }
