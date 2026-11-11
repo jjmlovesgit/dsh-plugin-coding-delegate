@@ -49,10 +49,10 @@
     "lint": "npm run lint:code",
     "lint:arch": "depcruise --config .dependency-cruiser.cjs .",
     "lint:code": "eslint .",
-    "gate:arch": "npm run lint:arch && npm run lint:code",
+    "gate:arch": "depcruise --config .dependency-cruiser.cjs . && eslint .",
     "delegate:unit": "node scripts/delegate-unit.cjs",
     "hooks:install": "git config core.hooksPath scripts/git-hooks",
-    "gate": "node scripts/check-file-hygiene.cjs && npm run gate:arch && node scripts/check-contract-fixtures.cjs && node scripts/check-contracts.cjs && node scripts/verify-delegation-ledger.cjs && node scripts/verify-tree-attestations.cjs && node --test tests/attest-unit-lifecycle.test.cjs",
+    "gate": "node scripts/check-file-hygiene.cjs && depcruise --config .dependency-cruiser.cjs . && eslint . && node scripts/check-contract-fixtures.cjs && node scripts/check-contracts.cjs && node scripts/verify-delegation-ledger.cjs && node scripts/verify-tree-attestations.cjs && node --test tests/attest-unit-lifecycle.test.cjs",
     "gate:flake": "node scripts/flake-gate-sweep.cjs",
     "test:engine": "node --test tests/engine/*.test.cjs",
     "export:tools": "node scripts/export-attested-tools.cjs",
@@ -60,7 +60,8 @@
     "test:parity": "node --test tests/canonical-json-parity.test.cjs tests/exponential-backoff-parity.test.cjs tests/verdict-lattice-parity.test.cjs tests/verdict-adapter-structure.test.cjs tests/promotion-index.test.cjs",
     "test:primitives": "node --test tests/primitives/*.test.cjs",
     "test:protocol": "node --test tests/protocol/*.test.cjs",
-    "test:fast": "npm --prefix plugin exec -- vitest run tests/sandbox-verification.test.ts tests/verdict-precedence.test.ts && node --test tests/verdict-lattice-parity.test.cjs"
+    "test:fast": "npm --prefix plugin exec -- vitest run tests/sandbox-verification.test.ts tests/verdict-precedence.test.ts && node --test tests/verdict-lattice-parity.test.cjs",
+    "gate:invariants": "node scripts/check-invariants.cjs"
   },
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "^8.10.0",

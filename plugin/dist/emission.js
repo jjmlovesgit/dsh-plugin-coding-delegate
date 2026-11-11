@@ -41,6 +41,7 @@ exports.extractAndEmitFiles = extractAndEmitFiles;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const paths_1 = require("./paths");
+const write_policy_1 = require("./write-policy");
 /**
  * The delta machinery lives in `delegation.ts`, which imports this module rather than the other way
  * round, so this module cannot import it. It is configured from the composition root instead.
@@ -211,6 +212,15 @@ function extractAndEmitFiles(content, targetFilesHint, baseDir = process.cwd(), 
             emissionErrors.push(`Refused to write ${resolvedPath}: it is a contract file declared by the architect, and the ` +
                 `executor may not modify the test that judges it.`);
             console.warn(`[EMIT_FILE_BLOCKED] contract file: ${resolvedPath}`);
+            return;
+        }
+        // And the CONTROL SURFACE, which no declaration can authorise. Test paths are refused because a
+        // worker may not grade itself; these are refused because it may not edit the machinery that grades or
+        // signs anything — CI, keys, hooks, the gate scripts, the sandbox, the manifests.
+        const protectedWrite = (0, write_policy_1.evaluateProtectedWrite)(resolvedPath, baseDir);
+        if (protectedWrite) {
+            emissionErrors.push(protectedWrite);
+            console.warn(`[EMIT_FILE_BLOCKED] protected path: ${resolvedPath}`);
             return;
         }
         // And the shape of the path, whether or not anything was declared. The prompt tells the architect

@@ -135,6 +135,13 @@ jobs:
         working-directory: .
         run: node scripts/check-readme-consistency.cjs
 
+      - name: Refusal vocabulary invariant
+        # Every refusal code the plugin can emit must be documented where a reader looks. The check is
+        # textual and mechanical on purpose: a code exists or it does not, it is documented or it is not.
+        # It caught REFUSED_PROTECTED_PATH on the day that fence was added.
+        working-directory: .
+        run: node scripts/check-invariants.cjs
+
       - name: Fetch the delegation ledger
         # `actions/checkout` fetches refs/heads and tags, and never notes. Without this step the ledger
         # is empty in CI, and the audit now treats an empty ledger as a FAILURE rather than a warning,

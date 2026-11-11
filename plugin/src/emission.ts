@@ -1,6 +1,7 @@
 import * as fs from 'fs'
 import * as path from 'path'
 import { canonicalisePath, describeSymlinkInPath, isPathWithin } from './paths'
+import { evaluateProtectedWrite } from './write-policy'
 
 export interface FileEmissionResult {
   path: string
@@ -225,6 +226,16 @@ export function extractAndEmitFiles(
           `executor may not modify the test that judges it.`
       )
       console.warn(`[EMIT_FILE_BLOCKED] contract file: ${resolvedPath}`)
+      return
+    }
+
+    // And the CONTROL SURFACE, which no declaration can authorise. Test paths are refused because a
+    // worker may not grade itself; these are refused because it may not edit the machinery that grades or
+    // signs anything — CI, keys, hooks, the gate scripts, the sandbox, the manifests.
+    const protectedWrite = evaluateProtectedWrite(resolvedPath, baseDir)
+    if (protectedWrite) {
+      emissionErrors.push(protectedWrite)
+      console.warn(`[EMIT_FILE_BLOCKED] protected path: ${resolvedPath}`)
       return
     }
 

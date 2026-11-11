@@ -79,14 +79,33 @@ An external static review of `441f004` reported 9 findings (1 high, 8 medium). T
 | 3 | Promotion gate reads the working tree rather than the staged index; `git diff` errors can pass silently | **FIXED**: `--changed` diffs the index (`--cached --diff-filter=ACMR`) and hashes staged blobs with `git show :<path>`, so a file staged compliant and edited afterwards cannot pass. A git failure is fatal rather than a fallback |
 | 4 | Opaque patch writes (`patch -p1`, `git apply`) evade the approval gate | **not applicable as scoped, residual documented**. The finding assumes a worker with a bash/exec tool. This plugin's worker has none: `delegateWorker` sends `messages`/`temperature`/`max_tokens` and nothing else, returns text, and the plugin applies emissions through `isTestPath`. The worker's only write channel IS `emission.ts`. The residual is the OPERATOR running `patch`/`git apply` in the architect's own shell, which the guard passes because no source file is named. `evaluateShellCommandApproval` ships tested and unwired, ready for a worker tool loop that does not exist yet |
 | 5 | `.d.ts` suffix bypass — a command whose last characters are `.d.ts` was treated as a declaration read | **FIXED**: the declaration allowance requires a single path (no whitespace, shell operator or quoting), so the suffix means what it appears to |
-| 6 | Wildcard shell reads — globs expand after the gate reads the string | **FIXED**: `REFUSED_WILDCARD_READ` when a content-reading shell command names `*`, `?`, `[` or `{` |
-| 7 | Non-TS source reads bypass the declaration generator | **FIXED**: reads are an allowlist — declarations (served as `.d.ts`), prose (no implementation), and mappable source (served as its declaration). Everything else, `.py`/`.sh`/`.json`/`.yaml` included, is refused with `REFUSED_NON_DECLARATION_READ` |
+| 6 | Wildcard shell reads — globs expand after the gate reads the string | **FIXED**: `REFUSED_WILDCARD_READ` when a content-reading shell command names `*`, `?`, `[` or `{` || 7 | Non-TS source reads bypass the declaration generator | **FIXED**: reads are an allowlist — declarations (served as `.d.ts`), prose (no implementation), and mappable source (served as its declaration). Everything else, `.py`/`.sh`/`.json`/`.yaml` included, is refused with `REFUSED_NON_DECLARATION_READ` |
 | 8 | DLP scans prompts but not credential-bearing tool results | **FIXED**: `extractEgressText` walks every message role (including tool results and nested `output`/`stdout` blocks) and accumulates it into the same corpus the gate scans. NOT redaction: a hit pins the request local or refuses it, because a silently rewritten conversation is a different task |
 | 9 | *(see report)* | open |
 
 The high finding is the one this brief's own first question anticipated — "can a command be satisfied by
 something whose binary is `node` but which is not the sandboxed node?" The answer was yes, through
 `PATH`-shaped tokens that the validator treated as trustworthy.
+
+## Refusal vocabulary
+
+Every refusal the plugin can emit, and what an operator should understand it to mean. This list is
+checked mechanically against the source by `scripts/check-invariants.cjs`: a code that can be emitted and
+is not named here (or in the README or the ADR) fails the check, so a new fence cannot ship undocumented.
+
+| code | meaning |
+| :--- | :--- |
+| `REFUSED_EMPTY_COMMAND` | an empty or whitespace-only verification command |
+| `REFUSED_UNSANDBOXED_RUNNER` | `node --test` / `-t`: the runner forks per file and the sandbox forbids forks |
+| `REFUSED_UNSANDBOXED_RUNTIME` | a non-node interpreter, which the sandbox cannot reach at all |
+| `REFUSED_SHADOW_RUNTIME` | a path-shaped binary (`./node`, `temp/node.exe`) instead of the host node |
+| `REFUSED_SHELL_OPERATORS` | chaining or redirection; the command is tokenised and spawned without a shell |
+| `REFUSED_UNBALANCED_QUOTES` | the tokenizer cannot determine the arguments, so it does not guess |
+| `REFUSED_NON_DECLARATION_READ` | declarations mode asked for raw source or configuration |
+| `REFUSED_WILDCARD_READ` | a glob the shell would expand after the gate inspected the command |
+| `REFUSED_CONTRACT_AS_CONTEXT` | the delegation offered its own contract files as worker context |
+| `REFUSED_PROTECTED_PATH` | a worker write to control surface: CI, keys, hooks, gate scripts, sandbox, manifests |
+| `APPROVAL_REQUIRED_SHELL_MUTATION` | **dormant**: not a refusal but a request for operator sign-off, and only if a worker shell loop ever exists |
 
 ## How to reproduce
 
